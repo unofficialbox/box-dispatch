@@ -1,0 +1,27 @@
+{
+  "generatedAt": "",
+  "scenario": "",
+  "items": [
+    {
+      "step": "setup",
+      "status": "pending",
+      "notes": "replace with real run artifacts"
+    },
+    {
+      "step": "doctor",
+      "status": "pending",
+      "notes": "replace with real run artifacts"
+    },
+    {
+      "step": "bootstrap",
+      "status": "pending",
+      "notes": "replace with real run artifacts"
+    },
+    {
+      "step": "smoke",
+      "status": "pending",
+      "notes": "replace with real run artifacts"
+    }
+  ]
+}
+

@@ -1,0 +1,23 @@
+[project]
+name = "box-windlass-cli"
+version = "0.1.0"
+description = "CLI for building and deploying Box, Salesforce Agentforce, Databricks, and AWS Bedrock AgentCore solution blocks"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12.0",
+  "typing-extensions>=4.10.0"
+]
+
+[project.scripts]
+windlass = "democtl.cli:main"
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

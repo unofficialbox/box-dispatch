@@ -1,0 +1,8 @@
+# Windlass workspace state
+.windlass/
+config/runtime/demo-environment.json
+config/runtime/bootstrap-state.json
+config/runtime/generated/
+*.swp
+*.tmp
+cover.out
