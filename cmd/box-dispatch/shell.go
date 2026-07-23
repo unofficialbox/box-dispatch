@@ -1432,7 +1432,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 		lipgloss.NewStyle().Foreground(coral).Render("  🚀"),
 	)
 	description := dimStyle.Copy().Width(58).Render("Open tools for the builders extending Box, from composable building blocks to industry solution accelerators.")
-	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  AGENTFORCE  /  DATABRICKS  /  AGENTCORE")
+	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  AGENTFORCE  /  DATABRICKS  /  AWS BEDROCK AGENTCORE")
 	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", tags)
 	options := []string{"Start new deployment", "Show deployment history"}
 	optionRows := make([]string, len(options))
