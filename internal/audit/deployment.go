@@ -85,7 +85,7 @@ func ExportDeployment(root string, before, after []lifecycle.Item, startedAt, co
 		Artifacts:           map[string]string{},
 		Providers:           providerRecords(before, after),
 	}
-	for _, relative := range []string{"windlass.json", manifest.DeploymentConfig, ".windlass/package.json"} {
+	for _, relative := range []string{"dispatch.json", manifest.DeploymentConfig, ".dispatch/package.json"} {
 		if digest, digestErr := fileDigest(filepath.Join(root, filepath.FromSlash(relative))); digestErr == nil {
 			record.Artifacts[relative] = digest
 		}
@@ -153,7 +153,7 @@ func globalAuditDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "windlass", "audit"), nil
+	return filepath.Join(root, "dispatch", "audit"), nil
 }
 
 func providerRecords(before, after []lifecycle.Item) []ProviderRecord {

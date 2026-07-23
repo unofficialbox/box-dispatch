@@ -1809,7 +1809,7 @@ func (m rootShellModel) viewPackage(width int) string {
 	detail := "Cloning the selected quickstart and filtering provider-specific components."
 	if m.packageDone {
 		status, color = "● PACKAGE COMPLETE", green
-		detail = "Created " + m.packagePath + "\nDetached upstream Git metadata and wrote .windlass/package.json."
+		detail = "Created " + m.packagePath + "\nDetached upstream Git metadata and wrote .dispatch/package.json."
 	} else if !m.packageStarted {
 		status, color = "○ PACKAGE NOT CREATED", muted
 		detail = "Press Enter to retry packaging with the configured destination."

@@ -56,7 +56,7 @@ func Build(req PackageRequest) (PackageManifest, error) {
 	if err := pruneUnselected(req.Destination, req.Components); err != nil {
 		return PackageManifest{}, err
 	}
-	if _, err := os.Stat(filepath.Join(req.Destination, "windlass.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(req.Destination, "dispatch.json")); os.IsNotExist(err) {
 		if writeErr := solution.WriteBundled(req.Destination, req.TemplateID); writeErr != nil && !solution.IsUnavailable(writeErr) {
 			return PackageManifest{}, writeErr
 		}
@@ -96,7 +96,7 @@ func Build(req PackageRequest) (PackageManifest, error) {
 		SchemaVersion: "1.0", CreatedAt: time.Now(), Repository: req.Repository,
 		TemplateID: req.TemplateID, Components: req.Components, Destination: req.Destination,
 	}
-	stateDir := filepath.Join(req.Destination, ".windlass")
+	stateDir := filepath.Join(req.Destination, ".dispatch")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return PackageManifest{}, err
 	}

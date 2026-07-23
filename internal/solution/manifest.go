@@ -21,7 +21,7 @@ type Manifest struct {
 	Box              BoxManifest `json:"box"`
 }
 
-const defaultDeploymentConfig = ".windlass/deployment.json"
+const defaultDeploymentConfig = ".dispatch/deployment.json"
 
 type DeploymentSettings struct {
 	SchemaVersion string                `json:"schema_version"`
@@ -137,7 +137,7 @@ type Capability struct {
 }
 
 func Load(root string) (Manifest, error) {
-	path := filepath.Join(root, "windlass.json")
+	path := filepath.Join(root, "dispatch.json")
 	if data, err := os.ReadFile(path); err == nil {
 		return loadPackageManifest(root, data, path)
 	} else if !os.IsNotExist(err) {
@@ -149,7 +149,7 @@ func Load(root string) (Manifest, error) {
 	}
 	data, err := bundled.ReadFile("manifests/" + templateID + ".json")
 	if err != nil {
-		return Manifest{}, fmt.Errorf("solution package requires windlass.json: %w", err)
+		return Manifest{}, fmt.Errorf("solution package requires dispatch.json: %w", err)
 	}
 	return loadPackageManifest(root, data, "bundled "+templateID+" manifest")
 }
@@ -192,7 +192,7 @@ func DefaultDeploymentSettings() DeploymentSettings {
 		Box: BoxDeploymentSettings{
 			GlobalStrategy:      "inherit",
 			Naming:              DeploymentNaming{Pattern: "{name} - {suffix}"},
-			Rollback:            RollbackSettings{Directory: ".windlass/deployments", Retain: 10},
+			Rollback:            RollbackSettings{Directory: ".dispatch/deployments", Retain: 10},
 			ComponentStrategies: map[string]ComponentStrategy{},
 			Components:          ComponentSelection{Mode: "defaults", Selections: map[string]bool{}},
 		},
@@ -285,7 +285,7 @@ func WriteBundled(root, templateID string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "windlass.json"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "dispatch.json"), data, 0o644); err != nil {
 		return err
 	}
 	_, err = loadPackageManifest(root, data, "bundled "+templateID+" manifest")
@@ -366,7 +366,7 @@ func parse(data []byte, source string) (Manifest, error) {
 }
 
 func packageTemplateID(root string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(root, ".windlass", "package.json"))
+	data, err := os.ReadFile(filepath.Join(root, ".dispatch", "package.json"))
 	if err != nil {
 		return "", err
 	}

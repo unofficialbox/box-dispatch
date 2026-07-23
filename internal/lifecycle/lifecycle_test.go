@@ -83,7 +83,7 @@ func TestCLMPrivateSurfacesHaveDeployAdapters(t *testing.T) {
 func testCLMPackage(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	state := filepath.Join(root, ".windlass")
+	state := filepath.Join(root, ".dispatch")
 	if err := os.MkdirAll(state, 0o755); err != nil {
 		t.Fatal(err)
 	}

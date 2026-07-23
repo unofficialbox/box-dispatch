@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "template_id": "clm",
-  "deployment_config": ".windlass/deployment.json",
+  "deployment_config": ".dispatch/deployment.json",
   "box": {
     "deployment_defaults": {
       "global_strategy": "create_new",
@@ -11,7 +11,7 @@
       },
       "rollback": {
         "enabled": true,
-        "directory": ".windlass/deployments",
+        "directory": ".dispatch/deployments",
         "retain": 10
       },
       "component_strategies": {},

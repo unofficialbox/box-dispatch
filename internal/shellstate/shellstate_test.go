@@ -77,13 +77,13 @@ func TestSolutionPlanRoundTripAsBCL(t *testing.T) {
 
 func TestLoadMigratesLegacyJSON(t *testing.T) {
 	root := isolateRoot(t)
-	stateDir := filepath.Join(root, stateDirName)
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	// Only a legacy JSON file (under the old .windlass dir) exists; no .bcl yet.
+	legacyDir := filepath.Join(root, legacyStateDirName)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Only a legacy JSON file exists; no .bcl yet.
 	legacy := []byte(`{"salesforceAlias":"legacy-alias","awsRegion":"us-west-2"}`)
-	if err := os.WriteFile(filepath.Join(stateDir, connectionSettingsJSON), legacy, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(legacyDir, connectionSettingsJSON), legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

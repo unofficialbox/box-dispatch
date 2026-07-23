@@ -17,10 +17,12 @@ import (
 )
 
 const (
-	stateDirName          = ".windlass"
+	stateDirName          = ".dispatch"
 	connectionSettingsBCL = "connection-settings.bcl"
 	solutionPlanBCL       = "solution-plan.bcl"
-	// Legacy JSON files read once for forward migration to BCL.
+	// Legacy JSON files (under the old .windlass state dir) read once for
+	// forward migration to BCL.
+	legacyStateDirName     = ".windlass"
 	connectionSettingsJSON = "connections.json"
 	solutionPlanJSON       = "solution.json"
 
@@ -33,11 +35,15 @@ func stateDir() string { return filepath.Join(config.Paths().Root, stateDirName)
 
 func statePath(name string) string { return filepath.Join(stateDir(), name) }
 
+func legacyStatePath(name string) string {
+	return filepath.Join(config.Paths().Root, legacyStateDirName, name)
+}
+
 // LoadConnectionSettings reads the BCL-persisted connection settings, migrating
 // from the legacy JSON file when the BCL file is not yet present.
 func LoadConnectionSettings() (config.ConnectionSettings, error) {
 	var settings config.ConnectionSettings
-	if err := readState(statePath(connectionSettingsBCL), statePath(connectionSettingsJSON), &settings); err != nil {
+	if err := readState(statePath(connectionSettingsBCL), legacyStatePath(connectionSettingsJSON), &settings); err != nil {
 		return settings, fmt.Errorf("read connection settings: %w", err)
 	}
 	return settings, nil
@@ -55,7 +61,7 @@ func SaveConnectionSettings(settings config.ConnectionSettings) error {
 // legacy JSON file when the BCL file is not yet present.
 func LoadSolutionPlan() (config.SolutionPlan, error) {
 	var plan config.SolutionPlan
-	if err := readState(statePath(solutionPlanBCL), statePath(solutionPlanJSON), &plan); err != nil {
+	if err := readState(statePath(solutionPlanBCL), legacyStatePath(solutionPlanJSON), &plan); err != nil {
 		return plan, fmt.Errorf("read solution plan: %w", err)
 	}
 	return plan, nil

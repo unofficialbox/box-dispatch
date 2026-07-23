@@ -57,7 +57,7 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "package")
 	// The template must have a bundled manifest: the fixture ships no
-	// windlass.json, so Build relies on WriteBundled to supply one.
+	// dispatch.json, so Build relies on WriteBundled to supply one.
 	manifest, err := Build(PackageRequest{Repository: source, Destination: destination, TemplateID: "clm", Components: []string{"box"}})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destination, ".git")); !os.IsNotExist(err) {
 		t.Fatal("packaged workspace retained upstream .git directory")
 	}
-	if _, err := os.Stat(filepath.Join(destination, ".windlass", "package.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(destination, ".dispatch", "package.json")); err != nil {
 		t.Fatal("package manifest was not written")
 	}
 }
