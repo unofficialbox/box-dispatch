@@ -1445,7 +1445,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 		lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH"),
 		lipgloss.NewStyle().Foreground(coral).Render("  🚀"),
 	)
-	description := dimStyle.Copy().Width(58).Render("Assemble an industry solution from open building blocks, verify every connection, and deploy with a complete audit trail.")
+	description := dimStyle.Copy().Width(58).Render("Open tools for the builders extending Box, from composable building blocks to industry solution accelerators.")
 	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  SALESFORCE  /  DATABRICKS  /  AGENTCORE")
 	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", tags)
 	options := []string{"Start new deployment", "Show deployment history"}
