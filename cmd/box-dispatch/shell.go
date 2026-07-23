@@ -1439,14 +1439,14 @@ func (m rootShellModel) stepper() string {
 }
 
 func (m rootShellModel) viewWelcome(width int) string {
-	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("BOX DEVELOPER COMMUNITY  /  EDITION 01")
-	headline := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Foreground(white).Render("BUILD BEYOND"),
-		lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("THE BOX."),
+	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Community-built. Open source. Punk Rock. 🤘")
+	headline := lipgloss.JoinHorizontal(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX "),
+		lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH"),
 	)
 	description := dimStyle.Copy().Width(58).Render("Assemble an industry solution from open building blocks, verify every connection, and deploy with a complete audit trail.")
 	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  SALESFORCE  /  DATABRICKS  /  AGENTCORE")
-	art := lipgloss.NewStyle().Foreground(coral).Render("🚢 ↓ ⚓ 🌊")
+	art := lipgloss.NewStyle().Foreground(coral).Render("🚀")
 	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, art, "", description, "", tags)
 	options := []string{"Start new deployment", "Show deployment history"}
 	optionRows := make([]string, len(options))

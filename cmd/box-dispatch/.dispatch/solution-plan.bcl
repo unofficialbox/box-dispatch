@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "scenario": "",
+  "provider": "box-dispatch",
+  "context": "solution-plan",
+  "generatedAt": "2026-07-23T21:46:48Z",
+  "resources": [],
+  "metadata": {
+    "components": [
+      "box"
+    ],
+    "repository": "https://github.com/unofficialbox/box-bedrock-for-clm",
+    "template": "Contract Lifecycle Management",
+    "template_id": "clm"
+  }
+}

@@ -338,10 +338,10 @@ func TestProviderConnectionDetailsRendersDiscoveredIdentity(t *testing.T) {
 	}
 }
 
-func TestWelcomePresentsBrandedMaritimeLaunchExperience(t *testing.T) {
+func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	model := newSetupOnlyShell()
 	view := model.viewWelcome(112)
-	for _, expected := range []string{"BOX DEVELOPER COMMUNITY", "BUILD BEYOND", "THE BOX.", "SELECT STACK", "PICK QUICKSTART", "🚢", "⚓", "🌊"} {
+	for _, expected := range []string{"Community-built. Open source. Punk Rock. 🤘", "BOX ", "DISPATCH", "SELECT STACK", "PICK QUICKSTART", "🚀"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("welcome view does not contain %q", expected)
 		}
