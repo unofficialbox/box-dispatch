@@ -12,7 +12,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 //go:embed assets/clm-form-definition.json

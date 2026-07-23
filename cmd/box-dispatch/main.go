@@ -8,21 +8,36 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
 	"github.com/unofficialbox/box-dispatch/internal/model"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 func main() {
 	root := &cobra.Command{
-		Use:          "box-dispatch",
-		Short:        "Box Dispatch - solution shipping accelerators for Box and partners",
+		Use:   "box-dispatch",
+		Short: "Box Dispatch - solution shipping accelerators for Box and partners",
+		Long:  "Run without a subcommand for the interactive launch experience.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			scenario, _ := cmd.Flags().GetString("scenario")
+			platform, _ := cmd.Flags().GetString("platform")
+			offline, _ := cmd.Flags().GetBool("offline")
+			// The full-screen shell needs a terminal; anything scripted or
+			// JSON-bound falls back to the plain connectivity report.
+			if isTTY() && !asJSON(cmd) {
+				return runLaunchShell()
+			}
+			return runConnectivityCheck(cmd, scenario, platform, offline, false)
+		},
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().String("profile", "", "configuration profile (defaults to BOX_DISPATCH_PROFILE or default)")
 	root.PersistentFlags().Bool("json", false, "machine-readable JSON output")
+	root.Flags().String("scenario", "", "scenario filter (e.g. clm, lifesciences, all)")
+	root.Flags().String("platform", "", "provider filter (box, salesforce, databricks, aws)")
+	root.Flags().Bool("offline", false, "skip live connectivity checks")
 
 	root.AddCommand(
 		makeCheckCommand(),
@@ -80,35 +95,7 @@ func makeCheckCommand() *cobra.Command {
 			scenario, _ := cmd.Flags().GetString("scenario")
 			platform, _ := cmd.Flags().GetString("platform")
 			offline, _ := cmd.Flags().GetBool("offline")
-			interactive := isTTY() && !asJSON(cmd)
-
-			cfg := checker.CheckConfig{
-				Scenario:  scenario,
-				Platform:  platform,
-				Offline:   offline,
-				Providers: checker.ProvidersForScenarioAndPlatform(scenario, platform),
-			}
-
-			var report checker.CheckReport
-			var err error
-
-			if interactive {
-				p := checker.NewInteractiveCheckModel(cfg)
-				if _, err := tea.NewProgram(p).Run(); err != nil {
-					return fmt.Errorf("interactive check failed: %w", err)
-				}
-				report = p.Report()
-			} else {
-				report, err = checker.Check(cfg)
-				if err != nil {
-					return err
-				}
-			}
-
-			if asJSON(cmd) {
-				return writeJSON(cmd, report)
-			}
-			return printTextReport(cmd, report)
+			return runConnectivityCheck(cmd, scenario, platform, offline, isTTY())
 		},
 	}
 
@@ -117,6 +104,57 @@ func makeCheckCommand() *cobra.Command {
 	cmd.Flags().Bool("offline", false, "skip live connectivity checks")
 
 	return cmd
+}
+
+// runLaunchShell starts the full-screen solution launch wizard.
+func runLaunchShell() error {
+	program := tea.NewProgram(newWindlassShell(), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
+		return fmt.Errorf("launch shell failed: %w", err)
+	}
+	return nil
+}
+
+func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline, preferInteractive bool) error {
+	cfg := checker.CheckConfig{
+		Scenario:  scenario,
+		Platform:  platform,
+		Offline:   offline,
+		Providers: checker.ProvidersForScenarioAndPlatform(scenario, platform),
+	}
+
+	var report checker.CheckReport
+	var err error
+
+	interactive := preferInteractive && !asJSON(cmd)
+	if interactive {
+		p := checker.NewInteractiveCheckModel(cfg)
+		if _, err := tea.NewProgram(p).Run(); err != nil {
+			// Fall back to non-interactive text mode if interactive execution is unavailable.
+			report, err = checker.Check(cfg)
+			if err != nil {
+				return err
+			}
+			if asJSON(cmd) {
+				return writeJSON(cmd, report)
+			}
+			return printTextReport(cmd, report)
+		}
+		if asJSON(cmd) {
+			return writeJSON(cmd, p.Report())
+		}
+		return nil
+	} else {
+		report, err = checker.Check(cfg)
+		if err != nil {
+			return err
+		}
+	}
+
+	if asJSON(cmd) {
+		return writeJSON(cmd, report)
+	}
+	return printTextReport(cmd, report)
 }
 
 func makeInitCommand() *cobra.Command {

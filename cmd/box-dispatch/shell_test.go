@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/unofficialbox/box-windlass/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/checker"
+	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 )
 
 func updatedShell(t *testing.T, model rootShellModel, key tea.KeyType) rootShellModel {
@@ -20,8 +21,9 @@ func updatedShell(t *testing.T, model rootShellModel, key tea.KeyType) rootShell
 
 func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 	model := newSetupOnlyShell()
-	model.screen = screenTemplates
-	model.components[1].selected = true
+	// Connect is entered from the component picker; selections live on answers.
+	model.screen = screenComponents
+	model.answers.components = []string{"box", "salesforce"}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
 	result := updated.(rootShellModel)
@@ -53,13 +55,20 @@ func TestConnectedServicesUnlockConfigurationAndPackage(t *testing.T) {
 	choice := model.templates[0]
 	model.selected = &choice
 
+	// Connect precedes template selection, which in turn unlocks configuration.
+	model = updatedShell(t, model, tea.KeyRight)
+	if model.screen != screenTemplates {
+		t.Fatalf("screen = %v, want templates", model.screen)
+	}
+
 	model = updatedShell(t, model, tea.KeyRight)
 	if model.screen != screenConfig {
 		t.Fatalf("screen = %v, want config", model.screen)
 	}
 
-	model.setConfigFocus(2)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	// Focus 4 is the confirm row that starts packaging.
+	model.setConfigFocus(4)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(rootShellModel)
 	if model.screen != screenPackage {
 		t.Fatalf("screen = %v, want package", model.screen)
@@ -187,9 +196,9 @@ func TestProviderChecklistGroupsDeploymentComponents(t *testing.T) {
 		Present: []string{"CustomObject:Contract__c", "CustomField:Contract__c.Name__c"},
 		Missing: []string{"CustomField:Contract__c.Status__c", "Layout:Contract__c-Contract Layout"},
 	}
-	view := renderComponentChecklist(item, 80)
-	item.Deployable = true
-	view = renderComponentChecklist(item, 80)
+	view := renderComponentChecklist(item, "deploy", false, 1, "", 80)
+	item.DeployableComponents = append([]string{}, item.Missing...)
+	view = renderComponentChecklist(item, "deploy", false, 1, "", 80)
 	for _, expected := range []string{"DEPLOYMENT CHECKLIST", "CustomField", "1 present · 1 to deploy", "Layout"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("checklist does not contain %q: %q", expected, view)
@@ -197,13 +206,41 @@ func TestProviderChecklistGroupsDeploymentComponents(t *testing.T) {
 	}
 }
 
+func TestProviderConnectionDetailsRendersDiscoveredIdentity(t *testing.T) {
+	box := providerConnectionDetails(checker.ProviderResult{
+		Name:      "box",
+		Discovery: checker.ProviderDiscovery{Identity: "kadams@boxdemo.com", Account: "385982796", Enterprise: "5105484"},
+	})
+	for _, expected := range []string{"user kadams@boxdemo.com", "UID 385982796", "EID 5105484"} {
+		if !strings.Contains(box, expected) {
+			t.Fatalf("box detail %q does not contain %q", box, expected)
+		}
+	}
+
+	salesforce := providerConnectionDetails(checker.ProviderResult{
+		Name:      "salesforce",
+		Discovery: checker.ProviderDiscovery{Identity: "kadams@agentforce.com", Profile: "agentforce"},
+	})
+	if !strings.Contains(salesforce, "alias agentforce") {
+		t.Fatalf("salesforce detail missing alias: %q", salesforce)
+	}
+	// Empty fields are omitted rather than rendered as dangling labels.
+	if strings.Contains(salesforce, "org ") {
+		t.Fatalf("salesforce detail rendered an empty org: %q", salesforce)
+	}
+}
+
 func TestWelcomePresentsBrandedMaritimeLaunchExperience(t *testing.T) {
 	model := newSetupOnlyShell()
 	view := model.viewWelcome(112)
-	for _, expected := range []string{"UNOFFICIALBOX.DEV", "HEAVE YOUR SOLUTION", "BEGIN ASSEMBLY", "PICK QUICKSTART", "🚢", "⚓", "🌊"} {
+	for _, expected := range []string{"BOX DEVELOPER COMMUNITY", "BUILD BEYOND", "THE BOX.", "SELECT STACK", "PICK QUICKSTART", "🚢", "⚓", "🌊"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("welcome view does not contain %q", expected)
 		}
+	}
+	// Product branding lives in the shared header rather than the welcome body.
+	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {
+		t.Fatalf("header does not carry product branding: %q", header)
 	}
 }
 

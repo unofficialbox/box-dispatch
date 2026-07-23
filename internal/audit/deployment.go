@@ -10,8 +10,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/unofficialbox/box-windlass/internal/lifecycle"
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type DeploymentRecord struct {

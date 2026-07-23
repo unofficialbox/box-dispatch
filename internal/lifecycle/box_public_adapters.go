@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type boxAIResource struct {

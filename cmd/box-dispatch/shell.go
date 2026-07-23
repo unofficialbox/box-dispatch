@@ -21,12 +21,12 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
-	deploymentaudit "github.com/unofficialbox/box-windlass/internal/audit"
-	"github.com/unofficialbox/box-windlass/internal/checker"
-	"github.com/unofficialbox/box-windlass/internal/config"
-	"github.com/unofficialbox/box-windlass/internal/lifecycle"
-	"github.com/unofficialbox/box-windlass/internal/solution"
-	"github.com/unofficialbox/box-windlass/internal/workspace"
+	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/checker"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
 
 type shellScreen int

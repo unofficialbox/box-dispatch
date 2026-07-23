@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
 	"github.com/unofficialbox/box-dispatch/internal/model"
-	"github.com/spf13/cobra"
 )
 
 func makeImportCommand() *cobra.Command {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 func TestBoxAccessTokenParsesCLIJSONWithoutPersistingIt(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type PackageRequest struct {

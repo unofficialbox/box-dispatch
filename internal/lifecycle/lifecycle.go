@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/unofficialbox/box-windlass/internal/config"
-	"github.com/unofficialbox/box-windlass/internal/solution"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type Status string
