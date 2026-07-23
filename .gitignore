@@ -1,5 +1,7 @@
 # Box Dispatch workspace state
 .box-dispatch/
+# Solution plan written to a repo-relative path when the tool runs in-tree
+/.windlass/
 config/runtime/environment.json
 config/runtime/bootstrap-state.json
 config/runtime/generated/
