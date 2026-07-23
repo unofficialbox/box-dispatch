@@ -56,9 +56,14 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 		}
 	}
 	destination := filepath.Join(t.TempDir(), "package")
-	manifest, err := Build(PackageRequest{Repository: source, Destination: destination, TemplateID: "test", Components: []string{"box"}})
+	// The template must have a bundled manifest: the fixture ships no
+	// windlass.json, so Build relies on WriteBundled to supply one.
+	manifest, err := Build(PackageRequest{Repository: source, Destination: destination, TemplateID: "clm", Components: []string{"box"}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if manifest.TemplateID != "clm" {
+		t.Fatalf("template = %q, want clm", manifest.TemplateID)
 	}
 	if manifest.Destination != destination {
 		t.Fatalf("destination = %q, want %q", manifest.Destination, destination)
