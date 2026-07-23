@@ -108,7 +108,7 @@ func makeCheckCommand() *cobra.Command {
 
 // runLaunchShell starts the full-screen solution launch wizard.
 func runLaunchShell() error {
-	program := tea.NewProgram(newWindlassShell(), tea.WithAltScreen())
+	program := tea.NewProgram(newDispatchShell(), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("launch shell failed: %w", err)
 	}

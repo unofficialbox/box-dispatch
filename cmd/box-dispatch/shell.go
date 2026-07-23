@@ -139,7 +139,7 @@ var (
 	accent     = lipgloss.NewStyle().Bold(true).Foreground(cyan)
 )
 
-func windlassHuhTheme() *huh.Theme {
+func dispatchHuhTheme() *huh.Theme {
 	theme := huh.ThemeCharm()
 	focusedButton := theme.Focused.FocusedButton.Foreground(white).Background(cyan).Bold(true)
 	blurredButton := theme.Focused.BlurredButton.Foreground(ice).Background(lipgloss.Color("#172235"))
@@ -291,7 +291,7 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	return m
 }
 
-func newWindlassShell() rootShellModel { return newSetupOnlyShell() }
+func newDispatchShell() rootShellModel { return newSetupOnlyShell() }
 
 // componentsFromRuntime builds the component picker from the active BCL scenario,
 // translating BCL provider IDs to internal keys and filling display copy from the
@@ -393,7 +393,7 @@ func defaultTemplates() []templateChoice {
 // newSolutionStarter is the built-in "create your own" affordance appended after
 // the BCL-configured scenarios.
 func newSolutionStarter() templateChoice {
-	return templateChoice{id: "new", name: "Create a New Solution", sector: "STARTER", description: "Begin with the Windlass reference architecture and shape your own solution.", repository: "https://github.com/unofficialbox/box-bedrock-template"}
+	return templateChoice{id: "new", name: "Create a New Solution", sector: "STARTER", description: "Begin with the Box Dispatch reference architecture and shape your own solution.", repository: "https://github.com/unofficialbox/box-bedrock-template"}
 }
 
 // packageNameForTemplate derives the default package directory name from a
@@ -426,12 +426,12 @@ func (m *rootShellModel) rebuildComponentForm() {
 				Value(&m.answers.components).
 				Validate(func(values []string) error {
 					if !slices.Contains(values, "box") {
-						return errors.New("Box is required for every Windlass solution")
+						return errors.New("Box is required for every Box Dispatch solution")
 					}
 					return nil
 				}),
 		),
-	).WithTheme(windlassHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
 }
 
 func (m *rootShellModel) rebuildTemplateForm() {
@@ -444,11 +444,11 @@ func (m *rootShellModel) rebuildTemplateForm() {
 			huh.NewSelect[string]().
 				Key("template").
 				Title("Choose an industry quickstart").
-				Description("Start from a proven architecture or the Windlass solution template.").
+				Description("Start from a proven architecture or the Box Dispatch solution template.").
 				Options(options...).
 				Value(&m.answers.templateID),
 		),
-	).WithTheme(windlassHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
 }
 
 func (m *rootShellModel) prepareConfigInputs() {
@@ -566,7 +566,7 @@ func (m rootShellModel) chooseDirectory(path string) (tea.Model, tea.Cmd) {
 
 func (m *rootShellModel) syncComponentAnswers() error {
 	if !slices.Contains(m.answers.components, "box") {
-		return errors.New("Box is required for every Windlass solution")
+		return errors.New("Box is required for every Box Dispatch solution")
 	}
 	for i := range m.components {
 		m.components[i].selected = slices.Contains(m.answers.components, m.components[i].provider)
@@ -696,7 +696,7 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 	m.deployApproved = &approved
 	m.confirmingDeploy = true
 	title := fmt.Sprintf("Deploy %d provider configuration set(s)?", deployable)
-	description := "Windlass will deploy missing configuration to: " + strings.Join(providers, ", ") + ". Existing components will be skipped."
+	description := "Box Dispatch will deploy missing configuration to: " + strings.Join(providers, ", ") + ". Existing components will be skipped."
 	affirmative := "Deploy"
 	if deployable == 0 {
 		title = "Complete with no deployment changes?"
@@ -712,7 +712,7 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 				Negative("Cancel").
 				Value(m.deployApproved),
 		),
-	).WithTheme(windlassHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
 	m.message = "Review and confirm the deployment plan."
 	return m, m.deployConfirmForm.Init()
 }
@@ -1276,7 +1276,7 @@ func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
 			settings, _ := shellstate.LoadConnectionSettings()
 			settings.DatabricksHost = host
 			if settings.DatabricksProfile == "" {
-				settings.DatabricksProfile = "windlass"
+				settings.DatabricksProfile = "box-dispatch"
 			}
 			_ = shellstate.SaveConnectionSettings(settings)
 			m.screen = screenProvider
@@ -1392,7 +1392,7 @@ func (m rootShellModel) View() string {
 
 func (m rootShellModel) header(width int) string {
 	mark := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("B/")
-	product := lipgloss.NewStyle().Bold(true).Foreground(white).Render("  WINDLASS")
+	product := lipgloss.NewStyle().Bold(true).Foreground(white).Render("  DISPATCH")
 	tag := dimStyle.Render("  SOLUTION ASSEMBLY")
 	domain := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("UNOFFICIALBOX.DEV")
 	used := lipgloss.Width(mark + product + tag + domain)
@@ -1510,7 +1510,7 @@ func (m rootShellModel) viewDeploymentHistory(width int) string {
 		dimStyle.Render("Duration") + "  " + selected.Duration,
 		dimStyle.Render("Audit") + "  " + selected.SourcePath,
 	}, "\n")
-	return titleStyle.Render("Deployment history") + "\n" + dimStyle.Render("Credential-free audit records exported by Windlass, newest first.") + "\n\n" +
+	return titleStyle.Render("Deployment history") + "\n" + dimStyle.Render("Credential-free audit records exported by Box Dispatch, newest first.") + "\n\n" +
 		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n")) + "\n\n" +
 		panel.Copy().BorderForeground(cyan).Width(width-4).Padding(1, 2).Render(detail)
 }
@@ -1799,7 +1799,7 @@ func (m rootShellModel) boxCapabilitySelected(capability solution.Capability) bo
 func (m rootShellModel) viewDirectoryPicker(width int) string {
 	content := titleStyle.Render("Browsing: ") + accent.Render(m.directoryPicker.CurrentDirectory) + "\n\n" + m.directoryPicker.View()
 	controls := dimStyle.Render("↑/↓ navigate  ·  Enter/→ open  ·  ← parent  ·  Space choose highlighted  ·  c choose current  ·  Esc cancel")
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose the parent directory") + "\n" + dimStyle.Render("Navigate the folder tree, then choose where Windlass should create the package.") + "\n\n" +
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose the parent directory") + "\n" + dimStyle.Render("Navigate the folder tree, then choose where Box Dispatch should create the package.") + "\n\n" +
 		activePane.Copy().Padding(1, 2).Width(width-4).Render(content) + "\n" + controls
 }
 
@@ -1863,10 +1863,10 @@ func (m rootShellModel) viewDeploy(width int) string {
 		} else {
 			action += "\n" + lipgloss.NewStyle().Foreground(green).Render("✓ Deployment audit exported")
 			action += "\n" + dimStyle.Render(m.deploymentAuditPath)
-			action += "\n" + accent.Render("Enter / →  Return to Windlass home")
+			action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
 		}
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Windlass runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
 		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + action
 }
 

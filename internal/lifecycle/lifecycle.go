@@ -117,7 +117,7 @@ func ValidateProvider(root, provider string) (Item, error) {
 		return validateBox(root, item, components)
 	}
 	item.Status = StatusManual
-	item.Detail = fmt.Sprintf("%d packaged configuration files require provider validation. A native Windlass deploy adapter is not available yet.", count)
+	item.Detail = fmt.Sprintf("%d packaged configuration files require provider validation. A native Box Dispatch deploy adapter is not available yet.", count)
 	item.Missing = components
 	return item, nil
 }
@@ -839,7 +839,7 @@ func validateSalesforce(root string, item Item) (Item, error) {
 		item.Status, item.Detail = StatusFailed, "Unable to prepare packaged Salesforce UI Bundles: "+buildErr.Error()
 		return item, nil
 	}
-	temp, err := os.MkdirTemp("", "windlass-salesforce-validate-")
+	temp, err := os.MkdirTemp("", "box-dispatch-salesforce-validate-")
 	if err != nil {
 		return item, err
 	}

@@ -120,7 +120,7 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 	if capability, enabled := enabledCapability(manifest, selection, "Box Hub"); enabled {
 		component := "Box Hub:" + capability.DisplayName
 		if slices.Contains(deployable, component) {
-			description := "Solution hub provisioned by Windlass from " + capability.Source
+			description := "Solution hub provisioned by Box Dispatch from " + capability.Source
 			if err := api.createHub(ctx, capability.DisplayName, description); err != nil {
 				return deployed, resources, fmt.Errorf("create %s: %w", component, err)
 			}

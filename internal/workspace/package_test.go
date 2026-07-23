@@ -48,7 +48,7 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "config", "box", "spec.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"init"}, {"config", "user.email", "windlass@example.com"}, {"config", "user.name", "Windlass Test"}, {"add", "."}, {"commit", "-m", "fixture"}} {
+	for _, args := range [][]string{{"init"}, {"config", "user.email", "dispatch@example.com"}, {"config", "user.name", "Box Dispatch Test"}, {"add", "."}, {"commit", "-m", "fixture"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = source
 		if output, err := cmd.CombinedOutput(); err != nil {
