@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -544,7 +545,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func DeployMissing(root string, items []Item) ([]Item, error) {
-	settings, err := config.LoadConnectionSettings()
+	settings, err := shellstate.LoadConnectionSettings()
 	if err != nil {
 		return nil, err
 	}
@@ -559,7 +560,7 @@ func DeployMissing(root string, items []Item) ([]Item, error) {
 }
 
 func DeployProvider(root string, item Item) (Item, error) {
-	settings, err := config.LoadConnectionSettings()
+	settings, err := shellstate.LoadConnectionSettings()
 	if err != nil {
 		return item, err
 	}
@@ -821,7 +822,7 @@ type salesforceObject struct {
 }
 
 func validateSalesforce(root string, item Item) (Item, error) {
-	settings, err := config.LoadConnectionSettings()
+	settings, err := shellstate.LoadConnectionSettings()
 	if err != nil {
 		return item, err
 	}

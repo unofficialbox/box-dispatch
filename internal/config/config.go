@@ -19,12 +19,20 @@ type Scenario struct {
 	DisplayName string   `json:"displayName"`
 	Providers   []string `json:"providers"`
 	Notes       []string `json:"notes"`
+	// Presentation metadata consumed by the launch shell. Optional so existing
+	// configs remain valid; the shell falls back to built-in copy when absent.
+	Sector      string `json:"sector,omitempty"`
+	Description string `json:"description,omitempty"`
+	Repository  string `json:"repository,omitempty"`
 }
 
 type ProviderConfig struct {
 	DisplayName string                 `json:"displayName"`
 	Env         map[string]string      `json:"env"`
 	Variables   map[string]interface{} `json:"variables"`
+	// Role is the short capability blurb the launch shell shows next to the
+	// provider. Optional; the shell falls back to built-in copy when absent.
+	Role string `json:"role,omitempty"`
 }
 
 type RuntimeConfig struct {

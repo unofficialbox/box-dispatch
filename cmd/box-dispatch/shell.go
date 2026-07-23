@@ -25,6 +25,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
@@ -223,11 +224,12 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(muted)
 	helpModel.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#52637A"))
 
-	components := []componentChoice{
-		{provider: "box", name: "Box", role: "Content, unstructured data, and AI", selected: true, required: true},
-		{provider: "salesforce", name: "Salesforce + Agentforce", role: "Structured data, human experience, and agents"},
-		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence"},
-		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration"},
+	// BCL runtime config is the source of truth for scenarios and providers.
+	// When it is absent (setup has not run) the shell falls back to built-in copy.
+	runtime, _ := config.LoadRuntimeConfig()
+	components := componentsFromRuntime(runtime)
+	if len(components) == 0 {
+		components = defaultComponents()
 	}
 	provider := ""
 	if len(scopedProvider) > 0 {
@@ -245,23 +247,33 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 			selectedComponents = append(selectedComponents, component.provider)
 		}
 	}
+
+	templates := templatesFromRuntime(runtime)
+	if len(templates) == 0 {
+		templates = defaultTemplates()
+	}
+	// The "new solution" starter is a built-in affordance, not a configured scenario.
+	templates = append(templates, newSolutionStarter())
+
+	activeTemplateID := "clm"
+	if runtime != nil && runtime.ActiveScenario != "" {
+		if _, ok := runtime.Scenarios[runtime.ActiveScenario]; ok {
+			activeTemplateID = runtime.ActiveScenario
+		}
+	}
+
 	cwd, _ := os.Getwd()
 	answers := &wizardAnswers{
 		components:         selectedComponents,
-		templateID:         "clm",
+		templateID:         activeTemplateID,
 		directory:          filepath.Dir(cwd),
-		packageName:        "box-bedrock-for-clm",
+		packageName:        packageNameForTemplate(templates, activeTemplateID),
 		deploymentStrategy: solution.StrategyCreateNew,
 	}
 	m := rootShellModel{
-		screen:     screenWelcome,
-		components: components,
-		templates: []templateChoice{
-			{id: "clm", name: "Contract Lifecycle Management", sector: "LEGAL OPERATIONS", description: "Content-centric contract workflows with Box and intelligent agents.", repository: "https://github.com/unofficialbox/box-bedrock-for-clm"},
-			{id: "lifesciences", name: "Life Sciences", sector: "REGULATED CONTENT", description: "Accelerate document-heavy life sciences processes and insight.", repository: "https://github.com/unofficialbox/box-bedrock-for-lifesciences"},
-			{id: "citizen-services", name: "Citizen Services", sector: "PUBLIC SECTOR", description: "Modernize constituent intake, case content, and service delivery.", repository: "https://github.com/unofficialbox/box-bedrock-for-citizen-services"},
-			{id: "new", name: "Create a New Solution", sector: "STARTER", description: "Begin with the Windlass reference architecture and shape your own solution.", repository: "https://github.com/unofficialbox/box-bedrock-template"},
-		},
+		screen:             screenWelcome,
+		components:         components,
+		templates:          templates,
 		statuses:           map[string]connectionStatus{},
 		results:            map[string]checker.ProviderResult{},
 		validationProgress: map[string]float64{},
@@ -280,6 +292,120 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 }
 
 func newWindlassShell() rootShellModel { return newSetupOnlyShell() }
+
+// componentsFromRuntime builds the component picker from the active BCL scenario,
+// translating BCL provider IDs to internal keys and filling display copy from the
+// provider config (falling back to built-in copy for anything the config omits).
+func componentsFromRuntime(cfg *config.RuntimeConfig) []componentChoice {
+	if cfg == nil {
+		return nil
+	}
+	scenario, ok := cfg.Scenarios[cfg.ActiveScenario]
+	if !ok || len(scenario.Providers) == 0 {
+		return nil
+	}
+	fallback := map[string]componentChoice{}
+	for _, c := range defaultComponents() {
+		fallback[c.provider] = c
+	}
+	components := make([]componentChoice, 0, len(scenario.Providers))
+	for _, bclID := range scenario.Providers {
+		key := config.InternalProviderKey(bclID)
+		pc := cfg.Providers[bclID]
+		fb := fallback[key]
+		name := pc.DisplayName
+		if name == "" {
+			name = fb.name
+		}
+		if name == "" {
+			name = key
+		}
+		role := pc.Role
+		if role == "" {
+			role = fb.role
+		}
+		components = append(components, componentChoice{
+			provider: key,
+			name:     name,
+			role:     role,
+			required: key == "box",
+			selected: key == "box",
+		})
+	}
+	return components
+}
+
+// templatesFromRuntime builds the template list from the BCL scenarios, ordered
+// with the active scenario first and the rest alphabetically for determinism.
+func templatesFromRuntime(cfg *config.RuntimeConfig) []templateChoice {
+	if cfg == nil || len(cfg.Scenarios) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(cfg.Scenarios))
+	for id := range cfg.Scenarios {
+		ids = append(ids, id)
+	}
+	slices.SortFunc(ids, func(a, b string) int {
+		switch {
+		case a == cfg.ActiveScenario:
+			return -1
+		case b == cfg.ActiveScenario:
+			return 1
+		default:
+			return strings.Compare(a, b)
+		}
+	})
+	templates := make([]templateChoice, 0, len(ids))
+	for _, id := range ids {
+		scenario := cfg.Scenarios[id]
+		name := scenario.DisplayName
+		if name == "" {
+			name = id
+		}
+		templates = append(templates, templateChoice{
+			id:          id,
+			name:        name,
+			sector:      scenario.Sector,
+			description: scenario.Description,
+			repository:  scenario.Repository,
+		})
+	}
+	return templates
+}
+
+func defaultComponents() []componentChoice {
+	return []componentChoice{
+		{provider: "box", name: "Box", role: "Content, unstructured data, and AI", selected: true, required: true},
+		{provider: "salesforce", name: "Salesforce + Agentforce", role: "Structured data, human experience, and agents"},
+		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence"},
+		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration"},
+	}
+}
+
+func defaultTemplates() []templateChoice {
+	return []templateChoice{
+		{id: "clm", name: "Contract Lifecycle Management", sector: "LEGAL OPERATIONS", description: "Content-centric contract workflows with Box and intelligent agents.", repository: "https://github.com/unofficialbox/box-bedrock-for-clm"},
+		{id: "lifesciences", name: "Life Sciences", sector: "REGULATED CONTENT", description: "Accelerate document-heavy life sciences processes and insight.", repository: "https://github.com/unofficialbox/box-bedrock-for-lifesciences"},
+		{id: "citizen-services", name: "Citizen Services", sector: "PUBLIC SECTOR", description: "Modernize constituent intake, case content, and service delivery.", repository: "https://github.com/unofficialbox/box-bedrock-for-citizen-services"},
+	}
+}
+
+// newSolutionStarter is the built-in "create your own" affordance appended after
+// the BCL-configured scenarios.
+func newSolutionStarter() templateChoice {
+	return templateChoice{id: "new", name: "Create a New Solution", sector: "STARTER", description: "Begin with the Windlass reference architecture and shape your own solution.", repository: "https://github.com/unofficialbox/box-bedrock-template"}
+}
+
+// packageNameForTemplate derives the default package directory name from a
+// template's repository basename, falling back to the CLM default.
+func packageNameForTemplate(templates []templateChoice, id string) string {
+	for _, t := range templates {
+		if t.id == id && t.repository != "" {
+			return filepath.Base(t.repository)
+		}
+	}
+	return "box-bedrock-for-clm"
+}
 
 func (m *rootShellModel) rebuildComponentForm() {
 	options := make([]huh.Option[string], 0, len(m.components))
@@ -1147,12 +1273,12 @@ func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Enter the full Databricks workspace URL."
 				return m, nil
 			}
-			settings, _ := config.LoadConnectionSettings()
+			settings, _ := shellstate.LoadConnectionSettings()
 			settings.DatabricksHost = host
 			if settings.DatabricksProfile == "" {
 				settings.DatabricksProfile = "windlass"
 			}
-			_ = config.SaveConnectionSettings(settings)
+			_ = shellstate.SaveConnectionSettings(settings)
 			m.screen = screenProvider
 			m.hostInput.Blur()
 			profile := settings.DatabricksProfile
@@ -1175,7 +1301,7 @@ func (m rootShellModel) providerActions() []string {
 }
 
 func (m rootShellModel) saveProviderOption(value string) {
-	settings, _ := config.LoadConnectionSettings()
+	settings, _ := shellstate.LoadConnectionSettings()
 	switch m.provider {
 	case "salesforce":
 		settings.SalesforceAlias = value
@@ -1184,14 +1310,14 @@ func (m rootShellModel) saveProviderOption(value string) {
 	case "aws":
 		settings.AWSProfile = value
 	}
-	_ = config.SaveConnectionSettings(settings)
+	_ = shellstate.SaveConnectionSettings(settings)
 }
 
 func (m rootShellModel) savePlan() {
 	if m.selected == nil {
 		return
 	}
-	_ = config.SaveSolutionPlan(config.SolutionPlan{
+	_ = shellstate.SaveSolutionPlan(config.SolutionPlan{
 		Components: m.selectedProviders(), TemplateID: m.selected.id,
 		Template: m.selected.name, Repository: m.selected.repository, PackagePath: m.packagePath,
 	})

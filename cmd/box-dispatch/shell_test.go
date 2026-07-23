@@ -1,11 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
+	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 )
 
@@ -203,6 +206,111 @@ func TestProviderChecklistGroupsDeploymentComponents(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("checklist does not contain %q: %q", expected, view)
 		}
+	}
+}
+
+func TestComponentsFromRuntimeMapsBCLIdentifiers(t *testing.T) {
+	cfg := &config.RuntimeConfig{
+		ActiveScenario: "clm",
+		Scenarios: map[string]config.Scenario{
+			"clm": {DisplayName: "CLM", Providers: []string{"box", "salesforce-agentforce", "bedrock-agentcore"}},
+		},
+		Providers: map[string]config.ProviderConfig{
+			"box":                   {DisplayName: "Box", Role: "content"},
+			"salesforce-agentforce": {DisplayName: "Salesforce + Agentforce", Role: "structured"},
+			"bedrock-agentcore":     {DisplayName: "AWS Bedrock AgentCore", Role: "runtime"},
+		},
+	}
+	components := componentsFromRuntime(cfg)
+	if len(components) != 3 {
+		t.Fatalf("got %d components, want 3: %+v", len(components), components)
+	}
+	// BCL IDs are translated to internal keys the checker/lifecycle understand.
+	wantKeys := []string{"box", "salesforce", "aws"}
+	for i, want := range wantKeys {
+		if components[i].provider != want {
+			t.Fatalf("component %d provider = %q, want %q", i, components[i].provider, want)
+		}
+	}
+	if components[1].name != "Salesforce + Agentforce" || components[1].role != "structured" {
+		t.Fatalf("display copy not sourced from config: %+v", components[1])
+	}
+	if !components[0].required || !components[0].selected {
+		t.Fatal("box must be required and selected")
+	}
+}
+
+func TestComponentsFromRuntimeFallsBackForMissingCopy(t *testing.T) {
+	cfg := &config.RuntimeConfig{
+		ActiveScenario: "clm",
+		Scenarios:      map[string]config.Scenario{"clm": {Providers: []string{"salesforce-agentforce"}}},
+		Providers:      map[string]config.ProviderConfig{}, // no ProviderConfig entry
+	}
+	components := componentsFromRuntime(cfg)
+	if len(components) != 1 || components[0].provider != "salesforce" {
+		t.Fatalf("unexpected components: %+v", components)
+	}
+	// Falls back to built-in copy when the config omits displayName/role.
+	if components[0].name != "Salesforce + Agentforce" || components[0].role == "" {
+		t.Fatalf("fallback copy not applied: %+v", components[0])
+	}
+}
+
+func TestTemplatesFromRuntimeOrdersActiveFirst(t *testing.T) {
+	cfg := &config.RuntimeConfig{
+		ActiveScenario: "clm",
+		Scenarios: map[string]config.Scenario{
+			"lifesciences":     {DisplayName: "Life Sciences", Sector: "REGULATED", Repository: "r-ls"},
+			"clm":              {DisplayName: "CLM", Sector: "LEGAL", Repository: "r-clm"},
+			"citizen-services": {DisplayName: "Citizen Services"},
+		},
+	}
+	templates := templatesFromRuntime(cfg)
+	gotOrder := []string{templates[0].id, templates[1].id, templates[2].id}
+	wantOrder := []string{"clm", "citizen-services", "lifesciences"} // active first, then alpha
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("template order = %v, want %v", gotOrder, wantOrder)
+		}
+	}
+	if templates[0].sector != "LEGAL" || templates[0].repository != "r-clm" {
+		t.Fatalf("template fields not sourced from config: %+v", templates[0])
+	}
+}
+
+func TestShellFallsBackToDefaultsWithoutConfig(t *testing.T) {
+	// TestMain isolates XDG_CONFIG_HOME to an empty dir, so no runtime config exists.
+	model := newSetupOnlyShell()
+	if len(model.components) != 4 {
+		t.Fatalf("got %d components, want 4 defaults", len(model.components))
+	}
+	if model.components[1].provider != "salesforce" || model.components[3].provider != "aws" {
+		t.Fatalf("default internal keys wrong: %+v", model.components)
+	}
+	// The "new solution" starter is always appended last.
+	last := model.templates[len(model.templates)-1]
+	if last.id != "new" {
+		t.Fatalf("last template = %q, want new starter", last.id)
+	}
+}
+
+func TestShellSourcesScenariosFromSeededConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "box-dispatch", "default")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seeded := `{"activeScenario":"clm","scenarios":{"clm":{"displayName":"CLM","providers":["box","salesforce-agentforce"]}},"providers":{"box":{"displayName":"Box"},"salesforce-agentforce":{"displayName":"SF"}}}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "environment.json"), []byte(seeded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	model := newSetupOnlyShell()
+	if len(model.components) != 2 {
+		t.Fatalf("got %d components, want 2 from seeded config: %+v", len(model.components), model.components)
+	}
+	if model.components[1].provider != "salesforce" {
+		t.Fatalf("seeded provider not mapped to internal key: %+v", model.components[1])
 	}
 }
 

@@ -2,7 +2,10 @@
   "activeScenario": "clm",
   "scenarios": {
     "clm": {
-      "displayName": "CLM",
+      "displayName": "Contract Lifecycle Management",
+      "sector": "LEGAL OPERATIONS",
+      "description": "Content-centric contract workflows with Box and intelligent agents.",
+      "repository": "https://github.com/unofficialbox/box-bedrock-for-clm",
       "providers": [
         "box",
         "salesforce-agentforce",
@@ -16,6 +19,9 @@
     },
     "lifesciences": {
       "displayName": "Life Sciences",
+      "sector": "REGULATED CONTENT",
+      "description": "Accelerate document-heavy life sciences processes and insight.",
+      "repository": "https://github.com/unofficialbox/box-bedrock-for-lifesciences",
       "providers": [
         "box",
         "salesforce-agentforce",
@@ -25,11 +31,27 @@
       "notes": [
         "Reference scenario for regulated workloads"
       ]
+    },
+    "citizen-services": {
+      "displayName": "Citizen Services",
+      "sector": "PUBLIC SECTOR",
+      "description": "Modernize constituent intake, case content, and service delivery.",
+      "repository": "https://github.com/unofficialbox/box-bedrock-for-citizen-services",
+      "providers": [
+        "box",
+        "salesforce-agentforce",
+        "databricks",
+        "bedrock-agentcore"
+      ],
+      "notes": [
+        "Reference scenario for public sector constituent services"
+      ]
     }
   },
   "providers": {
     "box": {
       "displayName": "Box",
+      "role": "Content, unstructured data, and AI",
       "env": {
         "BOX_ACCESS_TOKEN": "${BOX_ACCESS_TOKEN}",
         "BOX_FOLDER_ID": "${BOX_FOLDER_ID}",
@@ -41,7 +63,8 @@
       }
     },
     "salesforce-agentforce": {
-      "displayName": "Salesforce Agentforce",
+      "displayName": "Salesforce + Agentforce",
+      "role": "Structured data, human experience, and agents",
       "env": {
         "SF_ALIAS": "${SF_ALIAS}",
         "SF_PROJECT_DIR": "${SF_PROJECT_DIR}",
@@ -54,6 +77,7 @@
     },
     "databricks": {
       "displayName": "Databricks",
+      "role": "Analytics, models, and data intelligence",
       "env": {
         "DATABRICKS_HOST": "${DATABRICKS_HOST}",
         "DATABRICKS_TOKEN": "${DATABRICKS_TOKEN}"
@@ -65,6 +89,7 @@
     },
     "bedrock-agentcore": {
       "displayName": "AWS Bedrock AgentCore",
+      "role": "Agent runtime and orchestration",
       "env": {
         "AWS_PROFILE": "${AWS_PROFILE}",
         "AWS_REGION": "${AWS_REGION}",
