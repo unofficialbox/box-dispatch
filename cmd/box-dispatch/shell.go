@@ -341,22 +341,35 @@ func templatesFromRuntime(cfg *config.RuntimeConfig) []templateChoice {
 			return strings.Compare(a, b)
 		}
 	})
+	// Built-in copy fills fields a minimal or imported config omits — notably
+	// the repository, without which packaging cannot clone the template.
+	fallback := map[string]templateChoice{}
+	for _, t := range defaultTemplates() {
+		fallback[t.id] = t
+	}
 	templates := make([]templateChoice, 0, len(ids))
 	for _, id := range ids {
 		scenario := cfg.Scenarios[id]
-		name := scenario.DisplayName
-		if name == "" {
-			name = id
-		}
+		fb := fallback[id]
+		name := firstNonEmptyString(scenario.DisplayName, fb.name, id)
 		templates = append(templates, templateChoice{
 			id:          id,
 			name:        name,
-			sector:      scenario.Sector,
-			description: scenario.Description,
-			repository:  scenario.Repository,
+			sector:      firstNonEmptyString(scenario.Sector, fb.sector),
+			description: firstNonEmptyString(scenario.Description, fb.description),
+			repository:  firstNonEmptyString(scenario.Repository, fb.repository),
 		})
 	}
 	return templates
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func defaultComponents() []componentChoice {
@@ -588,6 +601,10 @@ func (m rootShellModel) selectTemplateAndConfigure() (tea.Model, tea.Cmd) {
 func (m rootShellModel) startPackage() (tea.Model, tea.Cmd) {
 	if m.selected == nil {
 		m.message = "Choose a solution template before packaging."
+		return m, nil
+	}
+	if strings.TrimSpace(m.selected.repository) == "" {
+		m.message = "This solution has no source repository configured; set a repository for scenario " + m.selected.id + " in the runtime config before packaging."
 		return m, nil
 	}
 	m.answers.directory = strings.TrimSpace(m.directoryInput.Value())

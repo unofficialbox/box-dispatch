@@ -278,6 +278,26 @@ func TestTemplatesFromRuntimeOrdersActiveFirst(t *testing.T) {
 	}
 }
 
+func TestTemplatesFillMissingRepositoryFromDefaults(t *testing.T) {
+	// An imported/minimal config that names clm but omits the repository (and
+	// other presentation fields) must still be packageable.
+	cfg := &config.RuntimeConfig{
+		ActiveScenario: "clm",
+		Scenarios:      map[string]config.Scenario{"clm": {DisplayName: "Clm deployment", Providers: []string{"box"}}},
+	}
+	templates := templatesFromRuntime(cfg)
+	if len(templates) == 0 || templates[0].id != "clm" {
+		t.Fatalf("expected clm template: %+v", templates)
+	}
+	if templates[0].repository != "https://github.com/unofficialbox/box-bedrock-for-clm" {
+		t.Fatalf("repository not filled from defaults: %+v", templates[0])
+	}
+	// The config's own display name is preserved; only empty fields are filled.
+	if templates[0].name != "Clm deployment" {
+		t.Fatalf("config display name overwritten: %+v", templates[0])
+	}
+}
+
 func TestShellFallsBackToDefaultsWithoutConfig(t *testing.T) {
 	// TestMain isolates XDG_CONFIG_HOME to an empty dir, so no runtime config exists.
 	model := newSetupOnlyShell()
