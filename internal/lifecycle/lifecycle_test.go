@@ -80,6 +80,35 @@ func TestCLMPrivateSurfacesHaveDeployAdapters(t *testing.T) {
 	}
 }
 
+func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
+	root := testCLMPackage(t)
+	manifest, err := solution.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := solution.ReadDeploymentSettings(root, manifest.DeploymentConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Real packages get a run_id at build time; supply a stable one so the
+	// create_new naming strategy resolves.
+	settings.Box.RunID = "20260101T000000Z"
+	item := &Item{Provider: "box"}
+	// Must not touch the browser and must mark the private surfaces for
+	// automatic deployment.
+	if err := validateBoxPrivateAdapters(root, manifest, settings.Box, settings.Box.Components, item); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Box Form:New Contract Request", "Box App:Contract Lifecycle Management"} {
+		if !slices.Contains(item.DeployableComponents, want) {
+			t.Fatalf("private surface %q not marked deployable: %+v", want, item.DeployableComponents)
+		}
+		if slices.Contains(item.Present, want) {
+			t.Fatalf("private surface %q should not be reported present without inspection", want)
+		}
+	}
+}
+
 func testCLMPackage(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

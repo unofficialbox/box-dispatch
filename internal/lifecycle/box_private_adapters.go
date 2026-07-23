@@ -69,20 +69,20 @@ type boxPrivateResponse struct {
 	} `json:"result"`
 }
 
+// validateBoxPrivateAdapters records the Box private surfaces (Forms and Apps)
+// as deployable without inspecting them. Those surfaces have no read API, so a
+// status check would have to drive an authenticated browser tab. Keeping
+// validate read-only and non-interactive, the surfaces are marked for automatic
+// creation and the deploy step provisions them through the browser.
 func validateBoxPrivateAdapters(root string, manifest solution.Manifest, settings solution.BoxDeploymentSettings, selection solution.ComponentSelection, item *Item) error {
-	request, components, err := privateAdapterRequest(root, manifest, settings, selection, "inspect", nil, "", nil)
+	_, components, err := privateAdapterRequest(root, manifest, settings, selection, "inspect", nil, "", nil)
 	if err != nil || len(components) == 0 {
 		return err
 	}
-	response, err := executeBoxPrivateBrowser(request)
-	if err != nil {
-		return fmt.Errorf("inspect Box Forms and Apps through the authenticated browser: %w", err)
-	}
-	if request.Form != nil && response.Result.Form != nil {
-		classifyBoxComponent(item, components["form"], response.Result.Form.Present, !response.Result.Form.Present)
-	}
-	if request.App != nil && response.Result.App != nil {
-		classifyBoxComponent(item, components["app"], response.Result.App.Present, !response.Result.App.Present)
+	for _, key := range []string{"form", "app"} {
+		if component, ok := components[key]; ok {
+			classifyBoxComponent(item, component, false, true)
+		}
 	}
 	return nil
 }
