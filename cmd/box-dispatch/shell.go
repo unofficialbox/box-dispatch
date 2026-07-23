@@ -296,41 +296,27 @@ func newDispatchShell() rootShellModel { return newSetupOnlyShell() }
 // componentsFromRuntime builds the component picker from the active BCL scenario,
 // translating BCL provider IDs to internal keys and filling display copy from the
 // provider config (falling back to built-in copy for anything the config omits).
+// componentsFromRuntime returns the platforms box-dispatch supports for the
+// BUILD picker. Availability is fixed (the tool checks and deploys exactly these
+// providers) and independent of the active scenario, which is chosen later at the
+// TEMPLATE step; the BCL providers map only enriches each platform's display copy.
 func componentsFromRuntime(cfg *config.RuntimeConfig) []componentChoice {
+	components := defaultComponents()
 	if cfg == nil {
-		return nil
+		return components
 	}
-	scenario, ok := cfg.Scenarios[cfg.ActiveScenario]
-	if !ok || len(scenario.Providers) == 0 {
-		return nil
-	}
-	fallback := map[string]componentChoice{}
-	for _, c := range defaultComponents() {
-		fallback[c.provider] = c
-	}
-	components := make([]componentChoice, 0, len(scenario.Providers))
-	for _, bclID := range scenario.Providers {
-		key := config.InternalProviderKey(bclID)
-		pc := cfg.Providers[bclID]
-		fb := fallback[key]
-		name := pc.DisplayName
-		if name == "" {
-			name = fb.name
+	for i := range components {
+		bclID := config.BCLProviderID(components[i].provider)
+		pc, ok := cfg.Providers[bclID]
+		if !ok {
+			continue
 		}
-		if name == "" {
-			name = key
+		if pc.DisplayName != "" {
+			components[i].name = pc.DisplayName
 		}
-		role := pc.Role
-		if role == "" {
-			role = fb.role
+		if pc.Role != "" {
+			components[i].role = pc.Role
 		}
-		components = append(components, componentChoice{
-			provider: key,
-			name:     name,
-			role:     role,
-			required: key == "box",
-			selected: key == "box",
-		})
 	}
 	return components
 }

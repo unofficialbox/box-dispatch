@@ -209,50 +209,50 @@ func TestProviderChecklistGroupsDeploymentComponents(t *testing.T) {
 	}
 }
 
-func TestComponentsFromRuntimeMapsBCLIdentifiers(t *testing.T) {
+func TestComponentsAlwaysOfferAllSupportedPlatforms(t *testing.T) {
+	// Even a minimal config that names only Box must still offer every
+	// platform box-dispatch supports; BCL only enriches display copy.
 	cfg := &config.RuntimeConfig{
 		ActiveScenario: "clm",
-		Scenarios: map[string]config.Scenario{
-			"clm": {DisplayName: "CLM", Providers: []string{"box", "salesforce-agentforce", "bedrock-agentcore"}},
-		},
+		Scenarios:      map[string]config.Scenario{"clm": {Providers: []string{"box"}}},
 		Providers: map[string]config.ProviderConfig{
 			"box":                   {DisplayName: "Box", Role: "content"},
-			"salesforce-agentforce": {DisplayName: "Salesforce + Agentforce", Role: "structured"},
-			"bedrock-agentcore":     {DisplayName: "AWS Bedrock AgentCore", Role: "runtime"},
+			"salesforce-agentforce": {DisplayName: "SF Custom", Role: "structured"},
 		},
 	}
 	components := componentsFromRuntime(cfg)
-	if len(components) != 3 {
-		t.Fatalf("got %d components, want 3: %+v", len(components), components)
+	wantKeys := []string{"box", "salesforce", "databricks", "aws"}
+	if len(components) != len(wantKeys) {
+		t.Fatalf("got %d components, want %d: %+v", len(components), len(wantKeys), components)
 	}
-	// BCL IDs are translated to internal keys the checker/lifecycle understand.
-	wantKeys := []string{"box", "salesforce", "aws"}
 	for i, want := range wantKeys {
 		if components[i].provider != want {
 			t.Fatalf("component %d provider = %q, want %q", i, components[i].provider, want)
 		}
 	}
-	if components[1].name != "Salesforce + Agentforce" || components[1].role != "structured" {
-		t.Fatalf("display copy not sourced from config: %+v", components[1])
+	// Config enrichment reaches providers via their BCL id (salesforce-agentforce).
+	if components[1].name != "SF Custom" || components[1].role != "structured" {
+		t.Fatalf("salesforce copy not enriched from config: %+v", components[1])
+	}
+	// databricks/aws have no config entry, so they keep built-in copy.
+	if components[2].name == "" || components[3].name == "" {
+		t.Fatalf("unconfigured platforms lost their default copy: %+v", components)
 	}
 	if !components[0].required || !components[0].selected {
 		t.Fatal("box must be required and selected")
 	}
 }
 
-func TestComponentsFromRuntimeFallsBackForMissingCopy(t *testing.T) {
-	cfg := &config.RuntimeConfig{
-		ActiveScenario: "clm",
-		Scenarios:      map[string]config.Scenario{"clm": {Providers: []string{"salesforce-agentforce"}}},
-		Providers:      map[string]config.ProviderConfig{}, // no ProviderConfig entry
+func TestComponentsFallBackToDefaultsWithoutConfig(t *testing.T) {
+	components := componentsFromRuntime(nil)
+	wantKeys := []string{"box", "salesforce", "databricks", "aws"}
+	if len(components) != len(wantKeys) {
+		t.Fatalf("got %d components, want %d", len(components), len(wantKeys))
 	}
-	components := componentsFromRuntime(cfg)
-	if len(components) != 1 || components[0].provider != "salesforce" {
-		t.Fatalf("unexpected components: %+v", components)
-	}
-	// Falls back to built-in copy when the config omits displayName/role.
-	if components[0].name != "Salesforce + Agentforce" || components[0].role == "" {
-		t.Fatalf("fallback copy not applied: %+v", components[0])
+	for i, want := range wantKeys {
+		if components[i].provider != want {
+			t.Fatalf("component %d = %q, want %q", i, components[i].provider, want)
+		}
 	}
 }
 
@@ -301,16 +301,23 @@ func TestShellSourcesScenariosFromSeededConfig(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	seeded := `{"activeScenario":"clm","scenarios":{"clm":{"displayName":"CLM","providers":["box","salesforce-agentforce"]}},"providers":{"box":{"displayName":"Box"},"salesforce-agentforce":{"displayName":"SF"}}}`
+	// A minimal config that names only Box as a provider.
+	seeded := `{"activeScenario":"clm","scenarios":{"clm":{"displayName":"CLM","providers":["box"]}},"providers":{"box":{"displayName":"Box Custom"}}}`
 	if err := os.WriteFile(filepath.Join(cfgDir, "environment.json"), []byte(seeded), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	model := newSetupOnlyShell()
-	if len(model.components) != 2 {
-		t.Fatalf("got %d components, want 2 from seeded config: %+v", len(model.components), model.components)
+	// BUILD still offers all four supported platforms regardless of the config's
+	// provider subset; only display copy is enriched.
+	if len(model.components) != 4 {
+		t.Fatalf("got %d components, want all 4 supported: %+v", len(model.components), model.components)
 	}
-	if model.components[1].provider != "salesforce" {
-		t.Fatalf("seeded provider not mapped to internal key: %+v", model.components[1])
+	if model.components[0].name != "Box Custom" {
+		t.Fatalf("box display copy not enriched from config: %+v", model.components[0])
+	}
+	// The template list still reflects the seeded scenarios.
+	if model.templates[0].id != "clm" {
+		t.Fatalf("template not sourced from seeded scenario: %+v", model.templates[0])
 	}
 }
 
