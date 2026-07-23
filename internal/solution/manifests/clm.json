@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "template_id": "clm",
+  "deployment_config": ".windlass/deployment.json",
+  "box": {
+    "deployment_defaults": {
+      "global_strategy": "create_new",
+      "naming": {
+        "suffix": "{run_id}",
+        "pattern": "{name} - {suffix}"
+      },
+      "rollback": {
+        "enabled": true,
+        "directory": ".windlass/deployments",
+        "retain": 10
+      },
+      "component_strategies": {},
+      "components": {
+        "mode": "defaults"
+      }
+    },
+    "component_order": [
+      "Folder Structure",
+      "Metadata Template",
+      "Doc Gen Template",
+      "Extract Configuration",
+      "AI Agent",
+      "HTTPS Connector",
+      "Box Form",
+      "Automate Workflow",
+      "Box Hub",
+      "Sample Content",
+      "Box App"
+    ],
+    "workspace": {
+      "component_type": "Folder Structure",
+      "display_name": "CLM Contract Workspace",
+      "name": "CLM-2026-Northstar",
+      "children": [
+        "01 - Intake",
+        "02 - Drafts and Redlines",
+        "03 - Review Packets",
+        "04 - Approvals",
+        "05 - Signature",
+        "06 - Executed Agreement",
+        "07 - Obligations",
+        "08 - DocGen Templates",
+        "Approved Clauses"
+      ]
+    },
+    "sample_content": [
+      {"source": "output/pdf/northstar-msa-redline-v3.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/pdf/northstar-dpa.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/pdf/northstar-sow-implementation.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/pdf/northstar-order-form.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/pdf/northstar-security-exhibit.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/pdf/northstar-insurance-certificate.pdf", "target_folder": "02 - Drafts and Redlines"},
+      {"source": "output/docgen/clm-approval-memo-template.docx", "target_folder": "08 - DocGen Templates"},
+      {"source": "output/docgen/clm-order-summary-template.docx", "target_folder": "08 - DocGen Templates"},
+      {"source": "output/docgen/clm-renewal-notice-template.docx", "target_folder": "08 - DocGen Templates"},
+      {"source": "sample-data/clauses/README.md", "target_folder": "Approved Clauses"},
+      {"source": "sample-data/clauses/approved/CLM-DATA-001-standard.md", "target_folder": "Approved Clauses"},
+      {"source": "sample-data/clauses/approved/CLM-DATA-002-fallback.md", "target_folder": "Approved Clauses"},
+      {"source": "sample-data/clauses/approved/CLM-LIAB-001-standard.md", "target_folder": "Approved Clauses"},
+      {"source": "sample-data/clauses/approved/CLM-LIAB-002-fallback.md", "target_folder": "Approved Clauses"}
+    ],
+    "capabilities": [
+      {"id": "folder_structure", "component_type": "Folder Structure", "enabled_by_default": true, "api": "public", "handler": "box.folder-tree"},
+      {"id": "metadata_template", "component_type": "Metadata Template", "enabled_by_default": true, "api": "public", "handler": "box.metadata-template"},
+      {"id": "sample_content", "component_type": "Sample Content", "enabled_by_default": true, "api": "public", "handler": "box.file-upload"},
+      {"id": "docgen_template", "component_type": "Doc Gen Template", "enabled_by_default": true, "api": "public", "handler": "box.docgen-template", "operations": ["validate", "deploy"]},
+      {"id": "extract_configuration", "component_type": "Extract Configuration", "enabled_by_default": true, "api": "public", "handler": "box.ai-extract", "operations": ["validate", "deploy"]},
+      {"id": "ai_agent", "component_type": "AI Agent", "enabled_by_default": true, "api": "public", "handler": "box.ai-agent", "operations": ["validate", "deploy"]},
+      {"id": "https_connector", "component_type": "HTTPS Connector", "enabled_by_default": true, "api": "configuration", "operations": ["package"]},
+      {"id": "box_form", "component_type": "Box Form", "display_name": "New Contract Request", "source": "form-definition.json", "enabled_by_default": true, "api": "private", "handler": "box.private-form", "operations": ["validate", "deploy"]},
+      {"id": "automate_workflow", "component_type": "Automate Workflow", "enabled_by_default": true, "api": "public", "handler": "box.automate-workflow", "operations": ["validate"]},
+      {"id": "box_hub", "component_type": "Box Hub", "display_name": "Acme Contract Clause Library", "source": "hub-blueprint.md", "enabled_by_default": true, "api": "public", "handler": "box.hub", "operations": ["validate", "deploy"]},
+      {"id": "box_app", "component_type": "Box App", "display_name": "Contract Lifecycle Management", "source": "box-app-blueprint.md", "enabled_by_default": true, "api": "private", "handler": "box.private-app", "template": "Contract Lifecycle Management", "operations": ["validate", "deploy"]}
+    ]
+  }
+}
