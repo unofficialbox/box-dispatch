@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -261,7 +262,7 @@ func connectivitySalesforce() (bool, string, ProviderDiscovery) {
 	defer cancel()
 	out, err := runCommandOutput(ctx, "sf", args...)
 	if err != nil {
-		return false, fmt.Sprintf("sf org display failed: %s", out), discovery
+		return false, "sf org display failed: " + salesforceCLIError(out), discovery
 	}
 	var payload struct {
 		Result struct {
@@ -445,6 +446,21 @@ func awsOptions() []string {
 	return dedupe(options)
 }
 
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// salesforceCLIError reduces a failed `sf` command's output to a concise,
+// ANSI-free message, preferring the CLI's structured error message.
+func salesforceCLIError(out string) string {
+	clean := ansiEscape.ReplaceAllString(out, "")
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(clean), &payload) == nil && strings.TrimSpace(payload.Message) != "" {
+		return payload.Message
+	}
+	return firstLine(clean)
+}
+
 // firstLine reduces multi-line CLI error output to its first non-empty line so
 // it renders on a single status row.
 func firstLine(text string) string {
@@ -533,7 +549,11 @@ var allProviderBuilders = map[string]provider{
 		name: "salesforce",
 		tool: func() bool { return toolExists("sf") },
 		configured: func() bool {
-			return strings.TrimSpace(os.Getenv("SF_ALIAS")) != "" || strings.TrimSpace(os.Getenv("SALESFORCE_ACCESS_TOKEN")) != ""
+			// With the sf CLI present we can validate the chosen alias or the
+			// authenticated default org, so an explicit SF_ALIAS/token is optional.
+			return strings.TrimSpace(os.Getenv("SF_ALIAS")) != "" ||
+				strings.TrimSpace(os.Getenv("SALESFORCE_ACCESS_TOKEN")) != "" ||
+				toolExists("sf")
 		},
 		connect:  connectivitySalesforce,
 		guidance: salesforceGuidance,

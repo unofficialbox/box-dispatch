@@ -53,6 +53,18 @@ func TestBoxUserDiscoveryMapsFields(t *testing.T) {
 	}
 }
 
+func TestSalesforceCLIErrorExtractsMessage(t *testing.T) {
+	// ANSI-colored JSON error, as the sf CLI emits it.
+	raw := "\x1b[97m{\x1b[39m\n  \x1b[94m\"name\"\x1b[39m: \x1b[92m\"NoDefaultEnvError\"\x1b[39m,\n  \x1b[94m\"message\"\x1b[39m: \x1b[92m\"No default environment found. Use -o or --target-org to specify an environment.\"\x1b[39m\n\x1b[97m}\x1b[39m"
+	if got := salesforceCLIError(raw); got != "No default environment found. Use -o or --target-org to specify an environment." {
+		t.Fatalf("salesforceCLIError = %q", got)
+	}
+	// Non-JSON output falls back to the first non-empty line, ANSI stripped.
+	if got := salesforceCLIError("\x1b[31mcommand not found\x1b[39m\nextra"); got != "command not found" {
+		t.Fatalf("fallback salesforceCLIError = %q", got)
+	}
+}
+
 func TestFirstLineCollapsesMultilineOutput(t *testing.T) {
 	if got := firstLine("\n\nMust provide app auth configuration\nsecond line"); got != "Must provide app auth configuration" {
 		t.Fatalf("firstLine = %q", got)

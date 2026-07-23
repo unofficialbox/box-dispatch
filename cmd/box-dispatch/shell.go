@@ -1203,6 +1203,11 @@ func (m rootShellModel) startNextCheck() (tea.Model, tea.Cmd) {
 
 func checkProviderCmd(provider string) tea.Cmd {
 	return func() tea.Msg {
+		// The checker reads provider credentials from the environment, so apply
+		// the profile the user chose in the shell before running it. Without
+		// this, choosing a Salesforce alias (or AWS profile) never reaches the
+		// connectivity check and the provider never shows as connected.
+		applyConnectionEnv()
 		report, err := checker.Check(checker.CheckConfig{Providers: []string{provider}})
 		if err != nil {
 			return checkFinishedMsg{provider: provider, err: err}
@@ -1211,6 +1216,23 @@ func checkProviderCmd(provider string) tea.Cmd {
 			return checkFinishedMsg{provider: provider, err: fmt.Errorf("no result returned")}
 		}
 		return checkFinishedMsg{provider: provider, result: report.Providers[0]}
+	}
+}
+
+// applyConnectionEnv exports the connection choices saved by the shell so the
+// checker (which is environment-driven) targets them. Only non-empty values are
+// set, so a real environment variable still wins when nothing was chosen.
+func applyConnectionEnv() {
+	settings, _ := shellstate.LoadConnectionSettings()
+	for key, value := range map[string]string{
+		"SF_ALIAS":        settings.SalesforceAlias,
+		"AWS_PROFILE":     settings.AWSProfile,
+		"AWS_REGION":      settings.AWSRegion,
+		"DATABRICKS_HOST": settings.DatabricksHost,
+	} {
+		if strings.TrimSpace(value) != "" {
+			_ = os.Setenv(key, value)
+		}
 	}
 }
 
