@@ -362,7 +362,7 @@ func templatesFromRuntime(cfg *config.RuntimeConfig) []templateChoice {
 func defaultComponents() []componentChoice {
 	return []componentChoice{
 		{provider: "box", name: "Box", role: "Content, unstructured data, and AI", selected: true, required: true},
-		{provider: "salesforce", name: "Salesforce + Agentforce", role: "Structured data, human experience, and agents"},
+		{provider: "salesforce", name: "Agentforce", role: "Structured data, human experience, and agents"},
 		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence"},
 		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration"},
 	}
@@ -2083,7 +2083,7 @@ func providerLabel(provider string) string {
 	case "box":
 		return "Box"
 	case "salesforce":
-		return "Salesforce + Agentforce"
+		return "Agentforce"
 	case "databricks":
 		return "Databricks"
 	case "aws":

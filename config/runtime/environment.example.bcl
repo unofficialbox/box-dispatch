@@ -63,7 +63,7 @@
       }
     },
     "salesforce-agentforce": {
-      "displayName": "Salesforce + Agentforce",
+      "displayName": "Agentforce",
       "role": "Structured data, human experience, and agents",
       "env": {
         "SF_ALIAS": "${SF_ALIAS}",

@@ -1137,7 +1137,7 @@ func providerName(provider string) string {
 	case "box":
 		return "Box configuration"
 	case "salesforce":
-		return "Salesforce + Agentforce metadata"
+		return "Agentforce metadata"
 	case "databricks":
 		return "Databricks assets"
 	case "aws":
