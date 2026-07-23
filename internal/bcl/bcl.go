@@ -438,10 +438,11 @@ func (p *hclLikeParser) parseValue() (any, error) {
 	case '"':
 		return p.parseString()
 	default:
-		if starts := p.src[p.pos:]; strings.HasPrefix(starts, "true") {
-			p.pos += 4
-			return true, nil
-		}
+			starts := p.src[p.pos:]
+			if strings.HasPrefix(starts, "true") {
+				p.pos += 4
+				return true, nil
+			}
 		if strings.HasPrefix(starts, "false") {
 			p.pos += 5
 			return false, nil
