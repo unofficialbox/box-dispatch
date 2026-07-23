@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,15 +19,28 @@ type CheckConfig struct {
 	Providers []string
 }
 
+// ProviderDiscovery carries the identity details a provider reports once it is
+// reachable. Fields are provider-specific and left empty when unavailable.
+type ProviderDiscovery struct {
+	Identity   string   `json:"identity,omitempty"`   // login / username the CLI is authenticated as
+	Account    string   `json:"account,omitempty"`    // Box user ID, AWS account number
+	Enterprise string   `json:"enterprise,omitempty"` // Box enterprise ID
+	Profile    string   `json:"profile,omitempty"`    // Salesforce alias, Databricks/AWS profile
+	Host       string   `json:"host,omitempty"`       // Salesforce instance URL, Databricks workspace
+	Region     string   `json:"region,omitempty"`     // AWS region
+	Options    []string `json:"options,omitempty"`    // selectable authenticated profiles/aliases
+}
+
 type ProviderResult struct {
-	Name              string   `json:"name"`
-	Checks           []string `json:"checks"`
-	Guidance         []string `json:"guidance"`
-	ToolInstalled    bool     `json:"tool_installed"`
-	ConfigSatisfied  bool     `json:"config_satisfied"`
-	ConnectivityOK   bool     `json:"connectivity_ok"`
-	Blocked          bool     `json:"blocked"`
-	RequiresAttention bool    `json:"requires_attention"`
+	Name              string            `json:"name"`
+	Checks            []string          `json:"checks"`
+	Guidance          []string          `json:"guidance"`
+	ToolInstalled     bool              `json:"tool_installed"`
+	ConfigSatisfied   bool              `json:"config_satisfied"`
+	ConnectivityOK    bool              `json:"connectivity_ok"`
+	Blocked           bool              `json:"blocked"`
+	RequiresAttention bool              `json:"requires_attention"`
+	Discovery         ProviderDiscovery `json:"discovery"`
 }
 
 type CheckReport struct {
@@ -56,9 +70,13 @@ func ProvidersForScenarioAndPlatform(scenario, platform string) []string {
 type provider struct {
 	name       string
 	guidance   func() []string
-	connect    func() (bool, string)
+	connect    func() (bool, string, ProviderDiscovery)
 	tool       func() bool
 	configured func() bool
+	// options lists the locally authenticated profiles a user can pick between.
+	// It runs as soon as the tool is present, so profile selection stays
+	// available before connectivity succeeds. May be nil.
+	options func() []string
 }
 
 func Check(cfg CheckConfig) (CheckReport, error) {
@@ -91,6 +109,10 @@ func checkProvider(p provider, cfg CheckConfig) ProviderResult {
 		return res
 	}
 
+	if p.options != nil {
+		res.Discovery.Options = p.options()
+	}
+
 	res.ConfigSatisfied = p.configured()
 	res.Checks = append(res.Checks, fmt.Sprintf("%s tools discovered", p.name))
 
@@ -107,15 +129,39 @@ func checkProvider(p provider, cfg CheckConfig) ProviderResult {
 		return res
 	}
 
-	ok, detail := p.connect()
+	ok, detail, discovered := p.connect()
 	res.ConnectivityOK = ok
 	res.Checks = append(res.Checks, detail)
+	mergeDiscovery(&res.Discovery, discovered)
 	if !ok {
 		res.RequiresAttention = true
 		res.Checks = append(res.Checks, "provider not connected")
 		res.Guidance = append(res.Guidance, p.guidance()...)
 	}
 	return res
+}
+
+// mergeDiscovery copies non-empty fields from src over dst, so connectivity
+// results refine (rather than erase) anything already discovered locally.
+func mergeDiscovery(dst *ProviderDiscovery, src ProviderDiscovery) {
+	for _, field := range []struct {
+		into *string
+		from string
+	}{
+		{&dst.Identity, src.Identity},
+		{&dst.Account, src.Account},
+		{&dst.Enterprise, src.Enterprise},
+		{&dst.Profile, src.Profile},
+		{&dst.Host, src.Host},
+		{&dst.Region, src.Region},
+	} {
+		if strings.TrimSpace(field.from) != "" {
+			*field.into = field.from
+		}
+	}
+	if len(src.Options) > 0 {
+		dst.Options = src.Options
+	}
 }
 
 func toolExists(name string) bool {
@@ -132,25 +178,43 @@ func runCommandOutput(ctx context.Context, name string, args ...string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
-func connectivityBox() (bool, string) {
+func connectivityBox() (bool, string, ProviderDiscovery) {
+	var discovery ProviderDiscovery
 	token := strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN"))
 	if token == "" {
-		return false, "missing BOX_ACCESS_TOKEN"
+		return false, "missing BOX_ACCESS_TOKEN", discovery
 	}
-	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me", nil)
+	// enterprise is not part of the default field set, so request it explicitly.
+	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me?fields=id,login,name,enterprise", nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
 	if err != nil {
-		return false, fmt.Sprintf("box api request failed: %v", err)
+		return false, fmt.Sprintf("box api request failed: %v", err), discovery
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Sprintf("box api returned %s", resp.Status)
+		return false, fmt.Sprintf("box api returned %s", resp.Status), discovery
 	}
-	return true, "box api reachable"
+	var payload struct {
+		ID         string `json:"id"`
+		Login      string `json:"login"`
+		Enterprise struct {
+			ID string `json:"id"`
+		} `json:"enterprise"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
+		discovery.Identity = payload.Login
+		discovery.Account = payload.ID
+		discovery.Enterprise = payload.Enterprise.ID
+	}
+	if discovery.Identity != "" {
+		return true, fmt.Sprintf("box api reachable as %s", discovery.Identity), discovery
+	}
+	return true, "box api reachable", discovery
 }
 
-func connectivitySalesforce() (bool, string) {
+func connectivitySalesforce() (bool, string, ProviderDiscovery) {
+	var discovery ProviderDiscovery
 	alias := strings.TrimSpace(os.Getenv("SF_ALIAS"))
 	args := []string{"org", "display", "--json"}
 	if alias != "" {
@@ -160,50 +224,210 @@ func connectivitySalesforce() (bool, string) {
 	defer cancel()
 	out, err := runCommandOutput(ctx, "sf", args...)
 	if err != nil {
-		return false, fmt.Sprintf("sf org display failed: %s", out)
+		return false, fmt.Sprintf("sf org display failed: %s", out), discovery
 	}
 	var payload struct {
 		Result struct {
-			Username string `json:"username"`
+			Username    string `json:"username"`
+			Alias       string `json:"alias"`
+			InstanceURL string `json:"instanceUrl"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err == nil && payload.Result.Username != "" {
-		return true, fmt.Sprintf("salesforce org connected: %s", payload.Result.Username)
+		discovery.Identity = payload.Result.Username
+		discovery.Profile = payload.Result.Alias
+		discovery.Host = payload.Result.InstanceURL
+		if discovery.Profile == "" {
+			discovery.Profile = alias
+		}
+		return true, fmt.Sprintf("salesforce org connected: %s", payload.Result.Username), discovery
 	}
-	return true, "salesforce cli responded"
+	return true, "salesforce cli responded", discovery
 }
 
-func connectivityDatabricks() (bool, string) {
+// salesforceOptions lists the aliases/usernames the Salesforce CLI is authenticated against.
+func salesforceOptions() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	out, err := runCommandOutput(ctx, "sf", "org", "list", "--json")
+	if err != nil {
+		return nil
+	}
+	var payload struct {
+		Result struct {
+			NonScratchOrgs []struct {
+				Alias    string `json:"alias"`
+				Username string `json:"username"`
+			} `json:"nonScratchOrgs"`
+			ScratchOrgs []struct {
+				Alias    string `json:"alias"`
+				Username string `json:"username"`
+			} `json:"scratchOrgs"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		return nil
+	}
+	options := make([]string, 0, len(payload.Result.NonScratchOrgs)+len(payload.Result.ScratchOrgs))
+	add := func(alias, username string) {
+		if value := strings.TrimSpace(alias); value != "" {
+			options = append(options, value)
+		} else if value := strings.TrimSpace(username); value != "" {
+			options = append(options, value)
+		}
+	}
+	for _, org := range payload.Result.NonScratchOrgs {
+		add(org.Alias, org.Username)
+	}
+	for _, org := range payload.Result.ScratchOrgs {
+		add(org.Alias, org.Username)
+	}
+	return dedupe(options)
+}
+
+func connectivityDatabricks() (bool, string, ProviderDiscovery) {
+	discovery := ProviderDiscovery{Profile: strings.TrimSpace(os.Getenv("DATABRICKS_PROFILE"))}
 	host := strings.TrimRight(strings.TrimSpace(os.Getenv("DATABRICKS_HOST")), "/")
 	token := strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN"))
 	if host == "" || token == "" {
-		return false, "missing DATABRICKS_HOST or DATABRICKS_TOKEN"
+		return false, "missing DATABRICKS_HOST or DATABRICKS_TOKEN", discovery
 	}
+	discovery.Host = host
+	client := &http.Client{Timeout: 8 * time.Second}
 	req, _ := http.NewRequest("GET", host+"/api/2.0/clusters/list", nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return false, fmt.Sprintf("databricks api request failed: %v", err)
+		return false, fmt.Sprintf("databricks api request failed: %v", err), discovery
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
-		return false, fmt.Sprintf("databricks api returned %s", resp.Status)
+		return false, fmt.Sprintf("databricks api returned %s", resp.Status), discovery
 	}
-	return true, "databricks api reachable"
+	discovery.Identity = databricksCurrentUser(client, host, token)
+	if discovery.Identity != "" {
+		return true, fmt.Sprintf("databricks api reachable as %s", discovery.Identity), discovery
+	}
+	return true, "databricks api reachable", discovery
 }
 
-func connectivityAWS() (bool, string) {
+// databricksCurrentUser resolves the authenticated user, returning "" when the
+// workspace does not expose the SCIM endpoint.
+func databricksCurrentUser(client *http.Client, host, token string) string {
+	req, _ := http.NewRequest("GET", host+"/api/2.0/preview/scim/v2/Me", nil)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		return ""
+	}
+	var payload struct {
+		UserName string `json:"userName"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.UserName)
+}
+
+// databricksOptions reads profile names out of ~/.databrickscfg.
+func databricksOptions() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".databrickscfg"))
+	if err != nil {
+		return nil
+	}
+	var options []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			if name := strings.TrimSpace(line[1 : len(line)-1]); name != "" {
+				options = append(options, name)
+			}
+		}
+	}
+	return dedupe(options)
+}
+
+func connectivityAWS() (bool, string, ProviderDiscovery) {
+	discovery := ProviderDiscovery{
+		Profile: strings.TrimSpace(os.Getenv("AWS_PROFILE")),
+		Region:  firstNonEmpty(os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION")),
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	out, err := runCommandOutput(ctx, "aws", "sts", "get-caller-identity", "--output", "json")
 	if err != nil {
-		return false, out
+		return false, out, discovery
 	}
-	var payload map[string]any
+	var payload struct {
+		Account string `json:"Account"`
+		Arn     string `json:"Arn"`
+		UserID  string `json:"UserId"`
+	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
-		return false, "aws output could not be parsed"
+		return false, "aws output could not be parsed", discovery
 	}
-	return true, "aws sts identity resolved"
+	discovery.Account = payload.Account
+	discovery.Identity = awsIdentityFromARN(payload.Arn)
+	return true, "aws sts identity resolved", discovery
+}
+
+// awsIdentityFromARN reduces an STS ARN to its trailing principal name.
+func awsIdentityFromARN(arn string) string {
+	arn = strings.TrimSpace(arn)
+	if arn == "" {
+		return ""
+	}
+	if index := strings.LastIndex(arn, "/"); index >= 0 && index < len(arn)-1 {
+		return arn[index+1:]
+	}
+	return arn
+}
+
+// awsOptions lists locally configured AWS profiles.
+func awsOptions() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	out, err := runCommandOutput(ctx, "aws", "configure", "list-profiles")
+	if err != nil {
+		return nil
+	}
+	var options []string
+	for _, line := range strings.Split(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			options = append(options, name)
+		}
+	}
+	return dedupe(options)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func dedupe(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func boxGuidance() []string {
@@ -255,25 +479,34 @@ var allProviderBuilders = map[string]provider{
 		guidance:   boxGuidance,
 	},
 	"salesforce": {
-		name:       "salesforce",
-		tool:       func() bool { return toolExists("sf") },
-		configured: func() bool { return strings.TrimSpace(os.Getenv("SF_ALIAS")) != "" || strings.TrimSpace(os.Getenv("SALESFORCE_ACCESS_TOKEN")) != "" },
-		connect:    connectivitySalesforce,
-		guidance:   salesforceGuidance,
+		name: "salesforce",
+		tool: func() bool { return toolExists("sf") },
+		configured: func() bool {
+			return strings.TrimSpace(os.Getenv("SF_ALIAS")) != "" || strings.TrimSpace(os.Getenv("SALESFORCE_ACCESS_TOKEN")) != ""
+		},
+		connect:  connectivitySalesforce,
+		guidance: salesforceGuidance,
+		options:  salesforceOptions,
 	},
 	"databricks": {
-		name:       "databricks",
-		tool:       func() bool { return toolExists("databricks") },
-		configured: func() bool { return strings.TrimSpace(os.Getenv("DATABRICKS_HOST")) != "" && strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN")) != "" },
-		connect:    connectivityDatabricks,
-		guidance:   databricksGuidance,
+		name: "databricks",
+		tool: func() bool { return toolExists("databricks") },
+		configured: func() bool {
+			return strings.TrimSpace(os.Getenv("DATABRICKS_HOST")) != "" && strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN")) != ""
+		},
+		connect:  connectivityDatabricks,
+		guidance: databricksGuidance,
+		options:  databricksOptions,
 	},
 	"aws": {
-		name:       "aws",
-		tool:       func() bool { return toolExists("aws") },
-		configured: func() bool { return strings.TrimSpace(os.Getenv("AWS_PROFILE")) != "" || strings.TrimSpace(os.Getenv("AWS_REGION")) != "" || strings.TrimSpace(os.Getenv("AWS_DEFAULT_REGION")) != "" },
-		connect:    connectivityAWS,
-		guidance:   awsGuidance,
+		name: "aws",
+		tool: func() bool { return toolExists("aws") },
+		configured: func() bool {
+			return strings.TrimSpace(os.Getenv("AWS_PROFILE")) != "" || strings.TrimSpace(os.Getenv("AWS_REGION")) != "" || strings.TrimSpace(os.Getenv("AWS_DEFAULT_REGION")) != ""
+		},
+		connect:  connectivityAWS,
+		guidance: awsGuidance,
+		options:  awsOptions,
 	},
 }
 
@@ -282,7 +515,7 @@ func newUnknownProvider(name string) provider {
 		name:       name,
 		tool:       func() bool { return false },
 		configured: func() bool { return false },
-		connect:    func() (bool, string) { return false, "unsupported provider" },
+		connect:    func() (bool, string, ProviderDiscovery) { return false, "unsupported provider", ProviderDiscovery{} },
 		guidance:   func() []string { return unknownGuidance(name) },
 	}
 }
