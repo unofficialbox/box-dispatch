@@ -83,7 +83,7 @@ func (m checkModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m checkModel) View() string {
-	logo := `Windlass
+	logo := `Box Dispatch
    ____      _         _ _      
   / __ \____(_)____   (_) |___  
  / / / / __/ / __ \ / / / __ \ 
@@ -139,7 +139,7 @@ func (m checkModel) View() string {
 		if allProvidersHealthy(m.results) {
 			b.WriteString("\nAll providers are healthy.\n")
 		} else {
-			b.WriteString("\nSome providers need attention. Complete steps above and rerun `windlass check`.\n")
+			b.WriteString("\nSome providers need attention. Complete steps above and rerun `box-dispatch check`.\n")
 		}
 	}
 	return b.String()
@@ -167,10 +167,10 @@ func runProviderCmd(name string, offline bool, scenario, platform string) tea.Cm
 		report, err := Check(cfg)
 		if err != nil || len(report.Providers) == 0 {
 			return providerDoneMsg{result: ProviderResult{
-				Name:               name,
-				Checks:             []string{fmt.Sprintf("check failed: %v", err)},
-				Blocked:            true,
-				RequiresAttention:   true,
+				Name:              name,
+				Checks:            []string{fmt.Sprintf("check failed: %v", err)},
+				Blocked:           true,
+				RequiresAttention: true,
 			}}
 		}
 		return providerDoneMsg{result: report.Providers[0]}
@@ -185,4 +185,3 @@ func allProvidersHealthy(results []ProviderResult) bool {
 	}
 	return true
 }
-

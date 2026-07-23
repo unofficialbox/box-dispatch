@@ -2,15 +2,16 @@
 
 ## 2026-07-21
 
-- ✅ Started repository as Go CLI project named `windlass`.
-- ✅ Added `cmd/windlass/main.go` entrypoint with `check` command.
+- ✅ Started repository as Go CLI project named `box-dispatch`.
+- ✅ Added `cmd/box-dispatch/main.go` entrypoint with `check` command.
 - ✅ Added interactive Bubble Tea check experience.
 - ✅ Added live connectivity checks for Box, Salesforce, Databricks, and AWS.
 - ✅ Added guidance output for failed provider connectivity.
 - ✅ Added initial `README`, `CHANGELOG`, and `PROGRESS`.
+- ✅ Wired command surface in `cmd/box-dispatch/main.go` for `init`, `setup`, `resolve`, `bootstrap` (and `deploy` alias), `status`, `scenarios`, `source`, `env`, `validate`, `present`, `smoke`, and `publish-check`.
+- ✅ Added profile-aware runtime config resolution (`--profile` / `BOX_DISPATCH_PROFILE`) with state under `~/.config/box-dispatch/<profile>/`.
 
 ## Next
 
-- Build `scenario`, `init`, and `deploy` flows around the same runtime model.
-- Add optional profile-based configuration file resolution (`~/.config/windlass`).
+- Keep profile references clean: verify all engine calls route through profile-scoped paths.
 - Add `glow`-based markdown preview mode for check report rendering in interactive sessions.

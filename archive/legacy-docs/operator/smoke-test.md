@@ -4,4 +4,4 @@
 2. Confirm unresolved tokens are either filled or explicitly deferred.
 3. Confirm local bootstrap state exists and indicates provider pass states.
 4. Confirm manual task register items are clear.
-5. Confirm no destructive or publish actions were performed outside `windlass` confirmation gates.
+5. Confirm no destructive or publish actions were performed outside `box-dispatch` confirmation gates.

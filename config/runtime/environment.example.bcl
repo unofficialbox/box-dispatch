@@ -1,0 +1,80 @@
+{
+  "activeScenario": "clm",
+  "scenarios": {
+    "clm": {
+      "displayName": "CLM",
+      "providers": [
+        "box",
+        "salesforce-agentforce",
+        "databricks",
+        "bedrock-agentcore"
+      ],
+      "notes": [
+        "Standard CLM deployment flow",
+        "Use this scenario for a baseline multi-provider rollout"
+      ]
+    },
+    "lifesciences": {
+      "displayName": "Life Sciences",
+      "providers": [
+        "box",
+        "salesforce-agentforce",
+        "databricks",
+        "bedrock-agentcore"
+      ],
+      "notes": [
+        "Reference scenario for regulated workloads"
+      ]
+    }
+  },
+  "providers": {
+    "box": {
+      "displayName": "Box",
+      "env": {
+        "BOX_ACCESS_TOKEN": "${BOX_ACCESS_TOKEN}",
+        "BOX_FOLDER_ID": "${BOX_FOLDER_ID}",
+        "BOX_ENTERPRISE_ID": "${BOX_ENTERPRISE_ID}"
+      },
+      "variables": {
+        "scope": "environment",
+        "artifactRoot": "clm"
+      }
+    },
+    "salesforce-agentforce": {
+      "displayName": "Salesforce Agentforce",
+      "env": {
+        "SF_ALIAS": "${SF_ALIAS}",
+        "SF_PROJECT_DIR": "${SF_PROJECT_DIR}",
+        "SF_ORG_ID": "${SF_ORG_ID}"
+      },
+      "variables": {
+        "platform": "agentforce",
+        "namespace": "clm"
+      }
+    },
+    "databricks": {
+      "displayName": "Databricks",
+      "env": {
+        "DATABRICKS_HOST": "${DATABRICKS_HOST}",
+        "DATABRICKS_TOKEN": "${DATABRICKS_TOKEN}"
+      },
+      "variables": {
+        "workspace": "clm-${AWS_REGION}",
+        "catalog": "clm_catalog"
+      }
+    },
+    "bedrock-agentcore": {
+      "displayName": "AWS Bedrock AgentCore",
+      "env": {
+        "AWS_PROFILE": "${AWS_PROFILE}",
+        "AWS_REGION": "${AWS_REGION}",
+        "AGENTCORE_AGENT_NAME": "${AGENTCORE_AGENT_NAME}",
+        "AGENTCORE_RUNTIME_NAME": "${AGENTCORE_RUNTIME_NAME}"
+      },
+      "variables": {
+        "region": "${AWS_REGION}",
+        "environment": "clm"
+      }
+    }
+  }
+}

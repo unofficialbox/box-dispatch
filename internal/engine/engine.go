@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/box/windlass/internal/config"
-	"github.com/box/windlass/internal/model"
-	"github.com/box/windlass/internal/providers"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/model"
+	"github.com/unofficialbox/box-dispatch/internal/providers"
 )
 
 type Engine struct {
 	Paths config.RuntimePaths
 }
 
-func NewEngine() *Engine {
-	return &Engine{Paths: config.Paths()}
+func NewEngine(profile string) *Engine {
+	return &Engine{Paths: config.PathsForProfile(profile)}
 }
 
 func (e *Engine) Init(sourceURL string, branch string, scenarioPath string, sourceRef string, force bool) (*model.CommandReport, int) {
@@ -39,9 +39,9 @@ func (e *Engine) Init(sourceURL string, branch string, scenarioPath string, sour
 		scenarioPath = "."
 	}
 
-	sourceRoot := filepath.Join(e.Paths.Root, ".windlass", "scenario-source")
+	sourceRoot := filepath.Join(e.Paths.Root, "box-dispatch", "scenario-source")
 	repoPath := sourceRoot
-	manifestPath := filepath.Join(repoPath, scenarioPath, "config", "runtime", "demo-environment.example.json")
+	manifestPath := filepath.Join(repoPath, scenarioPath, "config", "runtime", "environment.example.bcl")
 
 	if err := e.fetchScenarioSource(sourceURL, branch, sourceRef, repoPath, force); err != nil {
 		report.AddPhase("init.source", string(model.PhaseFailed), elapsedMs(start), err)
@@ -50,13 +50,13 @@ func (e *Engine) Init(sourceURL string, branch string, scenarioPath string, sour
 	report.AddPhase("init.source", string(model.PhasePassed), elapsedMs(start), nil)
 
 	if _, err := os.Stat(manifestPath); err != nil {
-		fallback := filepath.Join(repoPath, "config", "runtime", "demo-environment.example.json")
+		fallback := filepath.Join(repoPath, "config", "runtime", "environment.example.bcl")
 		if _, err := os.Stat(fallback); err == nil {
 			manifestPath = fallback
 		} else {
-			report.AddPhase("init.manifest", string(model.PhaseFailed), elapsedMs(start), fmt.Errorf("unable to locate demo-environment.example.json from repo"))
+			report.AddPhase("init.manifest", string(model.PhaseFailed), elapsedMs(start), fmt.Errorf("unable to locate environment.example.bcl from repo"))
 			report.Validation["searchPath"] = filepath.Join(repoPath, scenarioPath)
-			report.AddPhase("init.manifest_help", string(model.PhaseBlocked), elapsedMs(start), fmt.Errorf("expected path: <sourcePath>/config/runtime/demo-environment.example.json or <sourcePath>/<scenarioPath>/config/runtime/demo-environment.example.json"))
+			report.AddPhase("init.manifest_help", string(model.PhaseBlocked), elapsedMs(start), fmt.Errorf("expected path: <sourcePath>/config/runtime/environment.example.bcl or <sourcePath>/<scenarioPath>/config/runtime/environment.example.bcl"))
 			return &report, 2
 		}
 	}
@@ -78,14 +78,14 @@ func (e *Engine) Init(sourceURL string, branch string, scenarioPath string, sour
 	} else if h, err := resolveCommit(repoPath); err == nil {
 		state.Commit = h
 	}
-	if err := config.PersistSourceState(&state); err != nil {
+	if err := config.PersistSourceStateFromPaths(e.Paths, &state); err != nil {
 		report.AddPhase("init.state", string(model.PhaseWarn), elapsedMs(start), err)
 	}
 
 	report.AddPhase("init.state", string(model.PhasePassed), elapsedMs(start), nil)
-	report.Validation["sourceState"] = filepath.Join(e.Paths.Root, ".windlass", "source-state.json")
+	report.Validation["sourceState"] = e.Paths.SourceState
 	report.Validation["sourcePath"] = repoPath
-	report.NextCommand = "windlass setup"
+	report.NextCommand = "box-dispatch setup"
 	return &report, 0
 }
 
@@ -93,7 +93,7 @@ func (e *Engine) Setup(force bool) (*model.CommandReport, int) {
 	report := model.NewReport("setup")
 
 	start := time.Now()
-	cfg, err := config.LoadOrInitRuntimeConfig(force)
+	cfg, err := config.LoadOrInitRuntimeConfigFromPaths(e.Paths, force)
 	if err != nil {
 		report.AddPhase("setup.runtime", string(model.PhaseFailed), elapsedMs(start), err)
 		return &report, 2
@@ -111,7 +111,7 @@ func (e *Engine) Setup(force bool) (*model.CommandReport, int) {
 	report.Validation["stateFile"] = e.Paths.BootstrapState
 	report.Validation["generatedDir"] = e.Paths.GeneratedDir
 	report.Validation["exampleConfig"] = e.Paths.ExampleConfig
-	report.NextCommand = "windlass check --scenario " + scenario
+	report.NextCommand = "box-dispatch check --scenario " + scenario
 
 	return &report, 0
 }
@@ -119,7 +119,8 @@ func (e *Engine) Setup(force bool) (*model.CommandReport, int) {
 func (e *Engine) Check(scenario string, platform string, offline bool) (*model.CommandReport, int) {
 	report, code := e.Doctor(scenario, platform, offline)
 	if report == nil {
-		report = model.NewReport("check")
+		newReport := model.NewReport("check")
+		report = &newReport
 		return report, code
 	}
 
@@ -128,29 +129,29 @@ func (e *Engine) Check(scenario string, platform string, offline bool) (*model.C
 	report.Validation["offline"] = offline
 	if code == 0 {
 		if report.Status == string(model.PhasePassed) {
-			report.NextCommand = "windlass setup"
+			report.NextCommand = "box-dispatch setup"
 		} else if report.Status == string(model.PhaseWarn) {
 			target := ""
 			if report.Scenario != "" {
 				target = " --scenario " + report.Scenario
 			}
-			report.NextCommand = "windlass check" + target
+			report.NextCommand = "box-dispatch check" + target
 		} else {
 			target := ""
 			if report.Scenario != "" {
 				target = " --scenario " + report.Scenario
 			}
-			report.NextCommand = "windlass resolve" + target + " --allow-unresolved"
+			report.NextCommand = "box-dispatch resolve" + target + " --allow-unresolved"
 		}
 	} else {
-		report.NextCommand = "windlass init"
+		report.NextCommand = "box-dispatch init"
 	}
 
 	return report, code
 }
 
 func (e *Engine) CheckInteractive(scenario string, platform string, offline bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("check")
 		report.AddPhase("check.runtime", string(model.PhaseFailed), 0, err)
@@ -169,7 +170,7 @@ func (e *Engine) CheckInteractive(scenario string, platform string, offline bool
 	report.Validation["platform"] = platform
 	report.Validation["offline"] = offline
 
-	ui := newCheckUI(e, cfg, scenarioName, platform, offline, report)
+	ui := newCheckUI(e, cfg, scenarioName, platform, offline, &report)
 	result, runErr := ui.Run()
 	if runErr != nil {
 		result.AddPhase("check.ui", string(model.PhaseFailed), 0, runErr)
@@ -177,22 +178,22 @@ func (e *Engine) CheckInteractive(scenario string, platform string, offline bool
 	}
 
 	if result.Status == string(model.PhaseBlocked) {
-		result.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		result.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return result, 2
 	}
 	if result.Status == string(model.PhaseWarn) {
-		result.NextCommand = "windlass check --scenario " + scenarioName
+		result.NextCommand = "box-dispatch check --scenario " + scenarioName
 		return result, 0
 	}
 	if result.Status == string(model.PhasePassed) {
-		result.NextCommand = "windlass setup"
+		result.NextCommand = "box-dispatch setup"
 		return result, 0
 	}
 	return result, 2
 }
 
 func (e *Engine) Doctor(scenario string, platform string, offline bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("doctor")
 		report.AddPhase("doctor.runtime", string(model.PhaseFailed), 0, err)
@@ -224,22 +225,22 @@ func (e *Engine) Doctor(scenario string, platform string, offline bool) (*model.
 
 		phaseStart := time.Now()
 		res := e.checkProvider(scenarioName, providerKey, provider, cfg, offline)
-		e.appendDependencyPhases(report, "doctor", providerKey, provider, res, phaseStart, offline)
+		e.appendDependencyPhases(&report, "doctor", providerKey, provider, res, phaseStart, offline)
 	}
 
 	if report.Status == string(model.PhaseBlocked) {
-		report.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return &report, 2
 	}
 
 	if report.Status == string(model.PhaseWarn) {
-		report.NextCommand = "windlass status --scenario " + scenarioName
+		report.NextCommand = "box-dispatch status --scenario " + scenarioName
 	}
 	return &report, 0
 }
 
 func (e *Engine) Status(scenario string) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("status")
 		report.AddPhase("status.runtime", string(model.PhaseFailed), 0, err)
@@ -252,7 +253,7 @@ func (e *Engine) Status(scenario string) (*model.CommandReport, int) {
 		return &report, 2
 	}
 
-	state, err := config.LoadBootstrapState()
+	state, err := config.LoadBootstrapStateFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("status")
 		report.AddPhase("status.state", string(model.PhaseWarn), 0, err)
@@ -282,7 +283,7 @@ func (e *Engine) Status(scenario string) (*model.CommandReport, int) {
 	if len(unresolved) > 0 {
 		report.AddPhase("status.tokens", string(model.PhaseBlocked), 0, fmt.Errorf("unresolved tokens present"))
 		report.ConfirmRequired = true
-		report.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return &report, 2
 	}
 
@@ -290,12 +291,12 @@ func (e *Engine) Status(scenario string) (*model.CommandReport, int) {
 		report.Validation["scenarioState"] = scenarioState
 	}
 	report.AddPhase("status.ok", string(model.PhasePassed), 0, nil)
-	report.NextCommand = "windlass validate --scenario " + scenarioName
+	report.NextCommand = "box-dispatch validate --scenario " + scenarioName
 	return &report, 0
 }
 
 func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("resolve")
 		report.AddPhase("resolve.runtime", string(model.PhaseFailed), 0, err)
@@ -330,6 +331,7 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 		}
 
 		start := time.Now()
+		generatedAt := e.now()
 		resolved, missing := config.ResolveProviderConfig(pcfg, scenarioName, env)
 		if len(missing) > 0 && !allowUnresolved {
 			report.AddManual(providerKey + ".environment")
@@ -341,11 +343,21 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 			continue
 		}
 
+		deployedArtifacts := collectArtifactInventory(providerKey, scenarioName, env, generatedAt)
+		if len(deployedArtifacts) > 0 {
+			paths, err := writeArtifactBundle(outputDir, providerKey, scenarioName, "resolve", generatedAt, deployedArtifacts)
+			if err != nil {
+				report.AddPhase("resolve."+providerKey+".artifacts", string(model.PhaseWarn), elapsedMs(start), err)
+			} else {
+				report.Validation["resolve."+providerKey+".artifacts_bcl"] = paths.BCL
+			}
+		}
+
 		payload := map[string]any{
 			"scenario":       scenarioName,
 			"provider":       providerKey,
-			"generatedAt":    e.now(),
-			"providerConfig": resolved,
+			"generatedAt":    generatedAt,
+			"providerConfig": sanitizeResolvedConfig(resolved),
 		}
 		if err := config.WriteJSON(filepath.Join(outputDir, providerKey+"-resolved.json"), payload); err != nil {
 			report.AddPhase("resolve."+providerKey, string(model.PhaseFailed), elapsedMs(start), err)
@@ -355,18 +367,18 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 	}
 
 	if report.Status == string(model.PhasePassed) {
-		report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		return &report, 0
 	}
 	if report.Status == string(model.PhaseBlocked) {
-		report.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return &report, 2
 	}
 	return &report, 2
 }
 
 func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolved bool, skipValidate bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("bootstrap")
 		report.AddPhase("bootstrap.runtime", string(model.PhaseFailed), 0, err)
@@ -384,12 +396,12 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 		report.Scenario = scenarioName
 		report.ConfirmRequired = true
 		report.AddPhase("bootstrap.confirm", string(model.PhaseBlocked), 0, fmt.Errorf("use --yes or --confirm to apply changes"))
-		report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
 	scenarioCfg := cfg.Scenarios[scenarioName]
-	state, err := config.LoadBootstrapState()
+	state, err := config.LoadBootstrapStateFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("bootstrap")
 		report.AddPhase("bootstrap.state", string(model.PhaseFailed), 0, err)
@@ -489,6 +501,17 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 			continue
 		}
 		artifacts = append(artifacts, statePath)
+		generatedAt := e.now()
+
+		deployedArtifacts := collectArtifactInventory(providerKey, scenarioName, env, generatedAt)
+		if len(deployedArtifacts) > 0 {
+			paths, err := writeArtifactBundle(outputDir, providerKey, scenarioName, "bootstrap", generatedAt, deployedArtifacts)
+			if err != nil {
+				report.AddPhase("bootstrap."+providerKey+".artifacts", string(model.PhaseWarn), elapsedMs(stepStart), err)
+			} else {
+				artifacts = append(artifacts, paths.BCL)
+			}
+		}
 
 		resolved, missing := config.ResolveProviderConfig(providerCfg, scenarioName, env)
 		if len(missing) == 0 {
@@ -496,8 +519,8 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 			if err := config.WriteJSON(resolvedPayloadPath, map[string]any{
 				"scenario":       scenarioName,
 				"provider":       providerKey,
-				"generatedAt":    e.now(),
-				"providerConfig": resolved,
+				"generatedAt":    generatedAt,
+				"providerConfig": sanitizeResolvedConfig(resolved),
 			}); err != nil {
 				report.AddPhase("bootstrap."+providerKey+".resolved", string(model.PhaseFailed), elapsedMs(stepStart), err)
 				providerStates[providerKey] = map[string]any{
@@ -531,35 +554,36 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 		}
 
 		providerStates[providerKey] = map[string]any{
-			"status":    "passed",
-			"artifacts": artifacts,
-			"updatedAt": e.now(),
+			"status":            "passed",
+			"artifacts":         artifacts,
+			"deployedArtifacts": deployedArtifacts,
+			"updatedAt":         e.now(),
 		}
 		report.AddPhase("bootstrap."+providerKey, string(model.PhasePassed), elapsedMs(stepStart), nil)
 	}
 
 	state.Scenarios[scenarioName]["providers"] = providerStates
-	if err := config.PersistBootstrapState(state); err != nil {
+	if err := config.PersistBootstrapStateFromPaths(e.Paths, state); err != nil {
 		report.AddPhase("bootstrap.persist", string(model.PhaseWarn), 0, err)
 	}
 
 	if report.Status == string(model.PhasePassed) {
 		if !dryRun {
-			report.NextCommand = "windlass validate --scenario " + scenarioName
+			report.NextCommand = "box-dispatch validate --scenario " + scenarioName
 		} else {
-			report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+			report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		}
 		return &report, 0
 	}
 	if report.Status == string(model.PhaseBlocked) {
-		report.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return &report, 2
 	}
 	return &report, 2
 }
 
 func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("validate")
 		report.AddPhase("validate.runtime", string(model.PhaseFailed), 0, err)
@@ -574,7 +598,7 @@ func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*
 	report := model.NewReport("validate")
 	report.Scenario = scenarioName
 	env := environmentMap()
-	state, _ := config.LoadBootstrapState()
+	state, _ := config.LoadBootstrapStateFromPaths(e.Paths)
 	if scenarioState, ok := state.Scenarios[scenarioName]; ok {
 		report.Validation["scenarioState"] = scenarioState
 	}
@@ -614,19 +638,19 @@ func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*
 
 	report.Validation["presenterReady"] = presenterReady
 	if report.Status == string(model.PhaseBlocked) {
-		report.NextCommand = "windlass resolve --scenario " + scenarioName + " --allow-unresolved"
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
 		return &report, 2
 	}
 	if report.Status == string(model.PhaseWarn) {
-		report.NextCommand = "windlass resolve --scenario " + scenarioName
+		report.NextCommand = "box-dispatch resolve --scenario " + scenarioName
 		return &report, 0
 	}
-	report.NextCommand = "windlass smoke --scenario " + scenarioName
+	report.NextCommand = "box-dispatch smoke --scenario " + scenarioName
 	return &report, 0
 }
 
 func (e *Engine) Present(scenario string, outputPath string) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("present")
 		report.AddPhase("present.runtime", string(model.PhaseFailed), 0, err)
@@ -641,7 +665,7 @@ func (e *Engine) Present(scenario string, outputPath string) (*model.CommandRepo
 
 	scenarioCfg := cfg.Scenarios[scenarioName]
 	lines := []string{
-		"# Windlass presenter handoff",
+		"# Box Dispatch presenter handoff",
 		"",
 		"Scenario: " + scenarioName,
 		"",
@@ -653,9 +677,9 @@ func (e *Engine) Present(scenario string, outputPath string) (*model.CommandRepo
 	lines = append(lines, "", "Generated artifacts:", "", "```")
 	lines = append(lines, " - "+filepath.Join(e.Paths.GeneratedDir, scenarioName))
 	lines = append(lines, "```")
-	lines = append(lines, "", "Recommended sequence:", "1. `windlass validate --scenario "+scenarioName+" --presenter-ready`")
-	lines = append(lines, "2. `windlass smoke --scenario "+scenarioName+" --record "+filepath.Join(e.Paths.Root, "out", "smoke-report.json")+"`")
-	lines = append(lines, "3. `windlass publish-check --scenario "+scenarioName+"`")
+	lines = append(lines, "", "Recommended sequence:", "1. `box-dispatch validate --scenario "+scenarioName+" --presenter-ready`")
+	lines = append(lines, "2. `box-dispatch smoke --scenario "+scenarioName+" --record "+filepath.Join(e.Paths.Root, "out", "smoke-report.json")+"`")
+	lines = append(lines, "3. `box-dispatch publish-check --scenario "+scenarioName+"`")
 
 	if outputPath == "" {
 		outputPath = filepath.Join(e.Paths.Root, "presenter-notes.md")
@@ -676,12 +700,12 @@ func (e *Engine) Present(scenario string, outputPath string) (*model.CommandRepo
 	report.Scenario = scenarioName
 	report.Validation["outputPath"] = outputPath
 	report.AddPhase("present.file", string(model.PhasePassed), 0, nil)
-	report.NextCommand = "windlass validate --scenario " + scenarioName
+	report.NextCommand = "box-dispatch validate --scenario " + scenarioName
 	return &report, 0
 }
 
 func (e *Engine) Smoke(scenario string, recordPath string) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("smoke")
 		report.AddPhase("smoke.runtime", string(model.PhaseFailed), 0, err)
@@ -696,7 +720,7 @@ func (e *Engine) Smoke(scenario string, recordPath string) (*model.CommandReport
 
 	report := model.NewReport("smoke")
 	report.Scenario = scenarioName
-	state, _ := config.LoadBootstrapState()
+	state, _ := config.LoadBootstrapStateFromPaths(e.Paths)
 	bootstrapState := map[string]any{}
 	if state != nil {
 		bootstrapState = state.Scenarios[scenarioName]
@@ -740,7 +764,7 @@ func (e *Engine) Smoke(scenario string, recordPath string) (*model.CommandReport
 }
 
 func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("publish-check")
 		report.AddPhase("publish-check.runtime", string(model.PhaseFailed), 0, err)
@@ -753,7 +777,7 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 		return &report, 2
 	}
 
-	state, err := config.LoadBootstrapState()
+	state, err := config.LoadBootstrapStateFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("publish-check")
 		report.AddPhase("publish-check.state", string(model.PhaseFailed), 0, err)
@@ -765,13 +789,13 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 	scenarioStateRaw, ok := state.Scenarios[scenarioName]
 	if !ok || len(scenarioStateRaw) == 0 {
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("no bootstrap state found for scenario"))
-		report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 	providerRaw, ok := scenarioStateRaw["providers"].(map[string]any)
 	if !ok {
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("bootstrap providers state missing"))
-		report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
@@ -793,7 +817,7 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 		report.Manual = append(report.Manual, blockers...)
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("providers not in passed state"))
 		report.Validation["blockers"] = blockers
-		report.NextCommand = "windlass bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
@@ -804,7 +828,7 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 }
 
 func (e *Engine) Scenarios() (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("scenarios")
 		report.AddPhase("scenarios.runtime", string(model.PhaseFailed), 0, err)
@@ -823,7 +847,7 @@ func (e *Engine) Scenarios() (*model.CommandReport, int) {
 }
 
 func (e *Engine) Env(scenario string) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfig()
+	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("env")
 		report.AddPhase("env.runtime", string(model.PhaseFailed), 0, err)
@@ -945,13 +969,13 @@ func (e *Engine) fetchScenarioSource(sourceURL, branch, sourceRef, sourceRoot st
 
 func (e *Engine) Source() (*model.CommandReport, int) {
 	report := model.NewReport("source")
-	state, err := config.LoadSourceState()
+	state, err := config.LoadSourceStateFromPaths(e.Paths)
 	if err != nil {
 		report.AddPhase("source.state", string(model.PhaseFailed), 0, err)
 		return &report, 2
 	}
 	if state.URL == "" {
-		report.AddPhase("source.state", string(model.PhaseWarn), 0, fmt.Errorf("no source state found: run windlass init first"))
+		report.AddPhase("source.state", string(model.PhaseWarn), 0, fmt.Errorf("no source state found: run box-dispatch init first"))
 		return &report, 2
 	}
 	report.Scenario = state.Path
@@ -997,8 +1021,8 @@ func (e *Engine) now() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
-func elapsedMs(start time.Time) int {
-	return int(time.Since(start).Milliseconds())
+func elapsedMs(start time.Time) time.Duration {
+	return time.Since(start)
 }
 
 func unresolvedTokens(tokens []string) string {

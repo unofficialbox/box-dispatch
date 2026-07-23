@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/box/windlass/internal/model"
-	"github.com/box/windlass/internal/providers"
-	"github.com/box/windlass/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/model"
+	"github.com/unofficialbox/box-dispatch/internal/providers"
 )
 
 type checkUIResultMsg struct {
@@ -128,7 +128,7 @@ func (m checkUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m checkUIModel) View() string {
 	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "windlass check (%s)\n", m.scenario)
+	_, _ = fmt.Fprintf(&b, "box-dispatch check (%s)\n", m.scenario)
 	if m.done {
 		_, _ = fmt.Fprintln(&b, "status:", m.report.Status)
 	} else {

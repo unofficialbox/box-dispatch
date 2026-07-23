@@ -1,4 +1,4 @@
-# Box Windlass CLI — First-Principles Requirements
+# Box Dispatch CLI — First-Principles Requirements
 
 ## 1) Foundation
 - The CLI configures and deploys a solution composed of:
@@ -6,7 +6,7 @@
   - Salesforce/Agentforce (structured records + frontend + agent orchestration)
   - Databricks (analytics and AI feature workloads)
   - AWS Bedrock AgentCore (runtime agent orchestration)
-- Source of truth for each solution run is a user-supplied Git repo containing demo scenario templates, templates, and environment manifests.
+- Source of truth for each solution run is a user-supplied Git repo containing scenario templates and environment manifests.
 - The CLI must never assume a single environment; all target integrations must be optional and environment-profile driven.
 
 ## 2) UX Goals
@@ -40,15 +40,15 @@
 - Use explicit source manifests and generated runtime config instead of mutable “magic” defaults.
 
 ## 6) Initial Command Contract
-- `windlass init`:
+- `box-dispatch init`:
   - Capture scenario source repo and sync required project files into local working tree.
-- `windlass check`:
+- `box-dispatch check`:
   - Verify required tooling, credentials, and endpoint reachability.
-- `windlass setup`:
+- `box-dispatch setup`:
   - Apply credentials/config templates and bootstrap infra hooks.
-- `windlass deploy`:
+- `box-dispatch deploy`:
   - Deploy solution topology and activate services.
-- `windlass status`:
+- `box-dispatch status`:
   - Show health and runtime summaries.
-- `windlass teardown`:
+- `box-dispatch teardown`:
   - Controlled deletion and rollback actions.

@@ -1,6 +1,6 @@
 # Manual Task Register
 
-This file tracks manual UI/browser steps that `windlass` cannot execute directly.
+This file tracks manual UI/browser steps that `box-dispatch` cannot execute directly.
 
 ## Box
 
