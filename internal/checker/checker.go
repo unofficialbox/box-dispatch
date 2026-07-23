@@ -323,7 +323,22 @@ func salesforceOptions() []string {
 	return dedupe(options)
 }
 
+// connectivityDatabricks prefers an explicit DATABRICKS_HOST/TOKEN pair, falling
+// back to the databricks CLI (which authenticates via ~/.databrickscfg profiles
+// or an interactive login), so a chosen profile connects without raw creds.
 func connectivityDatabricks() (bool, string, ProviderDiscovery) {
+	host := strings.TrimSpace(os.Getenv("DATABRICKS_HOST"))
+	token := strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN"))
+	if host != "" && token != "" {
+		return connectivityDatabricksToken()
+	}
+	if toolExists("databricks") {
+		return connectivityDatabricksCLI()
+	}
+	return false, "missing DATABRICKS_HOST/DATABRICKS_TOKEN and no databricks CLI", ProviderDiscovery{}
+}
+
+func connectivityDatabricksToken() (bool, string, ProviderDiscovery) {
 	discovery := ProviderDiscovery{Profile: strings.TrimSpace(os.Getenv("DATABRICKS_PROFILE"))}
 	host := strings.TrimRight(strings.TrimSpace(os.Getenv("DATABRICKS_HOST")), "/")
 	token := strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN"))
@@ -371,7 +386,93 @@ func databricksCurrentUser(client *http.Client, host, token string) string {
 	return strings.TrimSpace(payload.UserName)
 }
 
-// databricksOptions reads profile names out of ~/.databrickscfg.
+// connectivityDatabricksCLI validates the databricks CLI's authenticated
+// session for the chosen profile (or the default), reporting the user and host.
+func connectivityDatabricksCLI() (bool, string, ProviderDiscovery) {
+	profile := strings.TrimSpace(os.Getenv("DATABRICKS_PROFILE"))
+	discovery := ProviderDiscovery{Profile: profile}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	args := []string{"current-user", "me", "--output", "json"}
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	out, err := runCommandOutput(ctx, "databricks", args...)
+	if err != nil {
+		return false, "databricks cli not authenticated: " + firstLine(out), discovery
+	}
+	identity := databricksCLIIdentity(out)
+	if identity == "" {
+		return false, "databricks cli returned no authenticated user", discovery
+	}
+	discovery.Identity = identity
+	discovery.Host = databricksCLIHost(profile)
+	return true, "databricks cli authenticated as " + identity, discovery
+}
+
+// databricksCLIIdentity extracts the authenticated user from `current-user me`
+// output, skipping any non-JSON preamble the CLI may print.
+func databricksCLIIdentity(out string) string {
+	start := strings.IndexByte(out, '{')
+	if start < 0 {
+		return ""
+	}
+	var payload struct {
+		UserName string `json:"userName"`
+		Emails   []struct {
+			Value   string `json:"value"`
+			Primary bool   `json:"primary"`
+		} `json:"emails"`
+	}
+	if json.NewDecoder(strings.NewReader(out[start:])).Decode(&payload) != nil {
+		return ""
+	}
+	if payload.UserName != "" {
+		return payload.UserName
+	}
+	for _, email := range payload.Emails {
+		if email.Primary && strings.TrimSpace(email.Value) != "" {
+			return email.Value
+		}
+	}
+	return ""
+}
+
+// databricksCLIHost resolves the workspace host for a profile, best-effort.
+func databricksCLIHost(profile string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	args := []string{"auth", "describe", "--output", "json"}
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	out, err := runCommandOutput(ctx, "databricks", args...)
+	if err != nil {
+		return ""
+	}
+	start := strings.IndexByte(out, '{')
+	if start < 0 {
+		return ""
+	}
+	var payload struct {
+		Host    string `json:"host"`
+		Details struct {
+			Host string `json:"host"`
+		} `json:"details"`
+	}
+	if json.NewDecoder(strings.NewReader(out[start:])).Decode(&payload) != nil {
+		return ""
+	}
+	if payload.Details.Host != "" {
+		return payload.Details.Host
+	}
+	return payload.Host
+}
+
+// databricksOptions reads selectable profile names out of ~/.databrickscfg.
+// Only sections that carry a host are real auth profiles; the empty [DEFAULT]
+// placeholder and the internal [__settings__] section are skipped because the
+// CLI cannot target them with --profile.
 func databricksOptions() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -381,15 +482,30 @@ func databricksOptions() []string {
 	if err != nil {
 		return nil
 	}
+	return parseDatabricksProfiles(data)
+}
+
+func parseDatabricksProfiles(data []byte) []string {
 	var options []string
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			if name := strings.TrimSpace(line[1 : len(line)-1]); name != "" {
-				options = append(options, name)
-			}
+	current := ""
+	hasHost := false
+	flush := func() {
+		if current != "" && current != "__settings__" && hasHost {
+			options = append(options, current)
 		}
 	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			flush()
+			current = strings.TrimSpace(line[1 : len(line)-1])
+			hasHost = false
+		case strings.HasPrefix(strings.ToLower(line), "host"):
+			hasHost = true
+		}
+	}
+	flush()
 	return dedupe(options)
 }
 
@@ -563,7 +679,10 @@ var allProviderBuilders = map[string]provider{
 		name: "databricks",
 		tool: func() bool { return toolExists("databricks") },
 		configured: func() bool {
-			return strings.TrimSpace(os.Getenv("DATABRICKS_HOST")) != "" && strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN")) != ""
+			// The databricks CLI validates a chosen/default profile, so an
+			// explicit host+token pair is optional when the CLI is present.
+			hasPair := strings.TrimSpace(os.Getenv("DATABRICKS_HOST")) != "" && strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN")) != ""
+			return hasPair || toolExists("databricks")
 		},
 		connect:  connectivityDatabricks,
 		guidance: databricksGuidance,

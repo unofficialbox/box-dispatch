@@ -65,6 +65,36 @@ func TestSalesforceCLIErrorExtractsMessage(t *testing.T) {
 	}
 }
 
+func TestDatabricksCLIIdentitySkipsPreamble(t *testing.T) {
+	// The CLI prints a non-JSON warning line before the JSON body.
+	out := "Databricks skills are not installed.\n{\n  \"userName\": \"kadams@box.com\",\n  \"emails\": [{\"value\": \"kadams@box.com\", \"primary\": true}]\n}"
+	if got := databricksCLIIdentity(out); got != "kadams@box.com" {
+		t.Fatalf("databricksCLIIdentity = %q", got)
+	}
+	// Falls back to the primary email when userName is absent.
+	noUser := "{\n  \"emails\": [{\"value\": \"a@b.com\", \"primary\": false}, {\"value\": \"primary@b.com\", \"primary\": true}]\n}"
+	if got := databricksCLIIdentity(noUser); got != "primary@b.com" {
+		t.Fatalf("databricksCLIIdentity fallback = %q", got)
+	}
+	if got := databricksCLIIdentity("no json here"); got != "" {
+		t.Fatalf("databricksCLIIdentity on junk = %q, want empty", got)
+	}
+}
+
+func TestParseDatabricksProfilesKeepsOnlyRealProfiles(t *testing.T) {
+	cfg := "[DEFAULT]\n\n[__settings__]\nfoo = bar\n\n[windlass]\nhost = https://x.cloud.databricks.com\ntoken = abc\n\n[prod]\nhost = https://y.cloud.databricks.com\n"
+	got := parseDatabricksProfiles([]byte(cfg))
+	want := []string{"windlass", "prod"}
+	if len(got) != len(want) {
+		t.Fatalf("profiles = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("profiles = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestFirstLineCollapsesMultilineOutput(t *testing.T) {
 	if got := firstLine("\n\nMust provide app auth configuration\nsecond line"); got != "Must provide app auth configuration" {
 		t.Fatalf("firstLine = %q", got)

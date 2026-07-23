@@ -1225,10 +1225,11 @@ func checkProviderCmd(provider string) tea.Cmd {
 func applyConnectionEnv() {
 	settings, _ := shellstate.LoadConnectionSettings()
 	for key, value := range map[string]string{
-		"SF_ALIAS":        settings.SalesforceAlias,
-		"AWS_PROFILE":     settings.AWSProfile,
-		"AWS_REGION":      settings.AWSRegion,
-		"DATABRICKS_HOST": settings.DatabricksHost,
+		"SF_ALIAS":           settings.SalesforceAlias,
+		"AWS_PROFILE":        settings.AWSProfile,
+		"AWS_REGION":         settings.AWSRegion,
+		"DATABRICKS_HOST":    settings.DatabricksHost,
+		"DATABRICKS_PROFILE": settings.DatabricksProfile,
 	} {
 		if strings.TrimSpace(value) != "" {
 			_ = os.Setenv(key, value)
