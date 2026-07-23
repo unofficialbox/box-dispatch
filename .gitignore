@@ -1,8 +1,10 @@
+# Compiled binary (produced by `go build ./cmd/box-dispatch`)
+/box-dispatch
 # Box Dispatch workspace state
 .box-dispatch/
 # Shell state written to a repo-relative path when the tool runs in-tree
-/.dispatch/
-/.windlass/
+.dispatch/
+.windlass/
 config/runtime/environment.json
 config/runtime/bootstrap-state.json
 config/runtime/generated/
