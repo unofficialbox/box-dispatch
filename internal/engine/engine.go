@@ -332,7 +332,7 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 
 		start := time.Now()
 		generatedAt := e.now()
-		resolved, missing := config.ResolveProviderConfig(pcfg, scenarioName, env)
+		_, missing := config.ResolveProviderConfig(pcfg, scenarioName, env)
 		if len(missing) > 0 && !allowUnresolved {
 			report.AddManual(providerKey + ".environment")
 			report.AddPhase("resolve."+providerKey, string(model.PhaseBlocked), elapsedMs(start), fmt.Errorf("unresolved tokens: %s", unresolvedTokens(missing)))
@@ -353,16 +353,6 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 			}
 		}
 
-		payload := map[string]any{
-			"scenario":       scenarioName,
-			"provider":       providerKey,
-			"generatedAt":    generatedAt,
-			"providerConfig": sanitizeResolvedConfig(resolved),
-		}
-		if err := config.WriteJSON(filepath.Join(outputDir, providerKey+"-resolved.json"), payload); err != nil {
-			report.AddPhase("resolve."+providerKey, string(model.PhaseFailed), elapsedMs(start), err)
-			continue
-		}
 		report.AddPhase("resolve."+providerKey, string(model.PhasePassed), elapsedMs(start), nil)
 	}
 
@@ -485,22 +475,6 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 		}
 
 		artifacts := []string{}
-		statePath := filepath.Join(outputDir, providerKey+".state.json")
-		if err := config.WriteJSON(statePath, map[string]any{
-			"provider":  providerKey,
-			"scenario":  scenarioName,
-			"status":    "running",
-			"updatedAt": e.now(),
-		}); err != nil {
-			report.AddPhase("bootstrap."+providerKey+".state", string(model.PhaseFailed), elapsedMs(stepStart), err)
-			providerStates[providerKey] = map[string]any{
-				"status":    "failed",
-				"reason":    err.Error(),
-				"updatedAt": e.now(),
-			}
-			continue
-		}
-		artifacts = append(artifacts, statePath)
 		generatedAt := e.now()
 
 		deployedArtifacts := collectArtifactInventory(providerKey, scenarioName, env, generatedAt)
@@ -513,25 +487,7 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 			}
 		}
 
-		resolved, missing := config.ResolveProviderConfig(providerCfg, scenarioName, env)
-		if len(missing) == 0 {
-			resolvedPayloadPath := filepath.Join(outputDir, providerKey+"-resolved.json")
-			if err := config.WriteJSON(resolvedPayloadPath, map[string]any{
-				"scenario":       scenarioName,
-				"provider":       providerKey,
-				"generatedAt":    generatedAt,
-				"providerConfig": sanitizeResolvedConfig(resolved),
-			}); err != nil {
-				report.AddPhase("bootstrap."+providerKey+".resolved", string(model.PhaseFailed), elapsedMs(stepStart), err)
-				providerStates[providerKey] = map[string]any{
-					"status":    "failed",
-					"reason":    err.Error(),
-					"updatedAt": e.now(),
-				}
-				continue
-			}
-			artifacts = append(artifacts, resolvedPayloadPath)
-		}
+		_, missing = config.ResolveProviderConfig(providerCfg, scenarioName, env)
 
 		stepFailed := false
 		for _, step := range spec.BootstrapSteps {
@@ -616,7 +572,7 @@ func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*
 			continue
 		}
 		if !offline {
-			artifact := filepath.Join(e.Paths.GeneratedDir, scenarioName, providerKey+"-resolved.json")
+			artifact := filepath.Join(e.Paths.GeneratedDir, scenarioName, providerKey+"-artifacts.bcl")
 			if _, err := os.Stat(artifact); err != nil {
 				report.AddPhase("validate."+providerKey+".artifact", string(model.PhaseWarn), 0, fmt.Errorf("artifact missing"))
 				continue
