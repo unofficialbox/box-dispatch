@@ -1,6 +1,6 @@
-# Windlass workspace state
-.windlass/
-config/runtime/demo-environment.json
+# Box Dispatch workspace state
+.box-dispatch/
+config/runtime/environment.json
 config/runtime/bootstrap-state.json
 config/runtime/generated/
 *.swp

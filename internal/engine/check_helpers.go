@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/box/windlass/internal/config"
-	"github.com/box/windlass/internal/model"
-	"github.com/box/windlass/internal/providers"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/model"
+	"github.com/unofficialbox/box-dispatch/internal/providers"
 )
 
 type ProviderCheckResult struct {
@@ -82,8 +82,8 @@ func (e *Engine) appendDependencyPhases(report *model.CommandReport, prefix, pro
 	}
 
 	report.Validation[prefix+"."+providerKey] = map[string]any{
-		"requiredTools":      provider.RequiredTools,
-		"requiredTokens":     provider.RequiredTokens,
+		"requiredTools":       provider.RequiredTools,
+		"requiredTokens":      provider.RequiredTokens,
 		"connectivityChecked": !offline,
 	}
 	report.AddPhase(prefix+"."+providerKey+".ok", string(model.PhasePassed), elapsedMs(phaseStartTime), nil)
@@ -188,7 +188,7 @@ func validateSalesforceConnectivity(tokens map[string]string) error {
 	var payload struct {
 		Result struct {
 			InstanceURL string `json:"instanceUrl"`
-			Alias      string `json:"alias"`
+			Alias       string `json:"alias"`
 		} `json:"result"`
 		Status string `json:"status"`
 	}

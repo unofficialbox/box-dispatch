@@ -11,6 +11,9 @@ import (
 )
 
 var tokenRe = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
+var profileNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+const defaultProfile = "default"
 
 type Scenario struct {
 	DisplayName string   `json:"displayName"`
@@ -47,6 +50,17 @@ type SourceState struct {
 	ScannedAt string `json:"scannedAt"`
 }
 
+type DeployedArtifact struct {
+	Provider         string `json:"provider"`
+	ArtifactType     string `json:"artifactType"`
+	ProviderObjectID string `json:"providerObjectId"`
+	EnterpriseID     string `json:"enterpriseId,omitempty"`
+	ArtifactName     string `json:"artifactName,omitempty"`
+	Scenario         string `json:"scenario"`
+	Source           string `json:"source"`
+	CreatedAt        string `json:"createdAt"`
+}
+
 type ProviderState struct {
 	Status     string                 `json:"status"`
 	UpdatedAt  string                 `json:"updatedAt"`
@@ -72,16 +86,49 @@ type RuntimePaths struct {
 }
 
 func Paths() RuntimePaths {
+	return PathsForProfile(resolveProfile(""))
+}
+
+func PathsForProfile(profile string) RuntimePaths {
 	root, _ := os.Getwd()
+	profileName := resolveProfile(profile)
+	configDir := filepath.Join(resolveConfigBaseDir(), "box-dispatch", profileName)
 	return RuntimePaths{
 		Root:              root,
-		ExampleConfig:     filepath.Join(root, "config", "runtime", "demo-environment.example.json"),
-		RuntimeConfig:     filepath.Join(root, "config", "runtime", "demo-environment.json"),
-		BootstrapState:    filepath.Join(root, "config", "runtime", "bootstrap-state.json"),
-		GeneratedDir:      filepath.Join(root, "config", "runtime", "generated"),
-		ValidationReceipt: filepath.Join(root, "config", "runtime", "validation-receipts.json"),
-		SourceState:       filepath.Join(root, ".windlass", "source-state.json"),
+		ExampleConfig:     filepath.Join(configDir, "environment.example.bcl"),
+		RuntimeConfig:     filepath.Join(configDir, "environment.json"),
+		BootstrapState:    filepath.Join(configDir, "bootstrap-state.json"),
+		GeneratedDir:      filepath.Join(configDir, "generated"),
+		ValidationReceipt: filepath.Join(configDir, "validation-receipts.json"),
+		SourceState:       filepath.Join(configDir, "source-state.json"),
 	}
+}
+
+func resolveProfile(profile string) string {
+	name := strings.TrimSpace(profile)
+	if name == "" {
+		name = strings.TrimSpace(os.Getenv("BOX_DISPATCH_PROFILE"))
+	}
+	if name == "" {
+		name = defaultProfile
+	}
+	name = strings.TrimSpace(profileNameRe.ReplaceAllString(name, "-"))
+	if strings.Trim(name, "-") == "" {
+		return defaultProfile
+	}
+	return strings.Trim(name, "-")
+}
+
+func resolveConfigBaseDir() string {
+	base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+	if base != "" {
+		return base
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".config")
+	}
+	return filepath.Join(os.TempDir(), ".config")
 }
 
 func ReadJSON(path string, out any) error {
@@ -105,30 +152,38 @@ func WriteJSON(path string, value any) error {
 }
 
 func LoadRuntimeConfig() (*RuntimeConfig, error) {
-	paths := Paths()
+	return LoadRuntimeConfigFromPaths(Paths())
+}
+
+func LoadRuntimeConfigFromPaths(paths RuntimePaths) (*RuntimeConfig, error) {
 	cfg := RuntimeConfig{
 		Scenarios: make(map[string]Scenario),
 		Providers: make(map[string]ProviderConfig),
 	}
-	if _, err := os.Stat(paths.RuntimeConfig); err != nil {
-		return nil, fmt.Errorf("%s is missing. Run `windlass setup` to create it from %s.", paths.RuntimeConfig, paths.ExampleConfig)
+	runtimeConfig := paths.RuntimeConfig
+	if _, err := os.Stat(runtimeConfig); err != nil {
+		return nil, fmt.Errorf("%s is missing. Run `box-dispatch setup` to create it from %s.", paths.RuntimeConfig, paths.ExampleConfig)
 	}
-	if err := ReadJSON(paths.RuntimeConfig, &cfg); err != nil {
+	if err := ReadJSON(runtimeConfig, &cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
 func LoadOrInitRuntimeConfig(force bool) (*RuntimeConfig, error) {
-	paths := Paths()
+	return LoadOrInitRuntimeConfigFromPaths(Paths(), force)
+}
+
+func LoadOrInitRuntimeConfigFromPaths(paths RuntimePaths, force bool) (*RuntimeConfig, error) {
+	exampleConfig := paths.ExampleConfig
 	if _, err := os.Stat(paths.RuntimeConfig); err == nil && !force {
-		return LoadRuntimeConfig()
+		return LoadRuntimeConfigFromPaths(paths)
 	}
-	if _, err := os.Stat(paths.ExampleConfig); err != nil {
+	if _, err := os.Stat(exampleConfig); err != nil {
 		return nil, fmt.Errorf("missing %s", paths.ExampleConfig)
 	}
 	example := RuntimeConfig{}
-	if err := ReadJSON(paths.ExampleConfig, &example); err != nil {
+	if err := ReadJSON(exampleConfig, &example); err != nil {
 		return nil, err
 	}
 	if err := WriteJSON(paths.RuntimeConfig, example); err != nil {
@@ -146,7 +201,10 @@ func LoadOrInitRuntimeConfig(force bool) (*RuntimeConfig, error) {
 }
 
 func LoadBootstrapState() (*BootstrapState, error) {
-	paths := Paths()
+	return LoadBootstrapStateFromPaths(Paths())
+}
+
+func LoadBootstrapStateFromPaths(paths RuntimePaths) (*BootstrapState, error) {
 	state := &BootstrapState{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Scenarios:   map[string]map[string]any{},
@@ -165,13 +223,19 @@ func LoadBootstrapState() (*BootstrapState, error) {
 }
 
 func PersistBootstrapState(state *BootstrapState) error {
-	paths := Paths()
+	return PersistBootstrapStateFromPaths(Paths(), state)
+}
+
+func PersistBootstrapStateFromPaths(paths RuntimePaths, state *BootstrapState) error {
 	state.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	return WriteJSON(paths.BootstrapState, state)
 }
 
 func LoadSourceState() (*SourceState, error) {
-	paths := Paths()
+	return LoadSourceStateFromPaths(Paths())
+}
+
+func LoadSourceStateFromPaths(paths RuntimePaths) (*SourceState, error) {
 	state := &SourceState{}
 	if _, err := os.Stat(paths.SourceState); err != nil {
 		return state, nil
@@ -183,7 +247,10 @@ func LoadSourceState() (*SourceState, error) {
 }
 
 func PersistSourceState(state *SourceState) error {
-	paths := Paths()
+	return PersistSourceStateFromPaths(Paths(), state)
+}
+
+func PersistSourceStateFromPaths(paths RuntimePaths, state *SourceState) error {
 	state.ScannedAt = time.Now().UTC().Format(time.RFC3339)
 	return WriteJSON(paths.SourceState, state)
 }
