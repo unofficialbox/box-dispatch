@@ -1443,11 +1443,11 @@ func (m rootShellModel) viewWelcome(width int) string {
 	headline := lipgloss.JoinHorizontal(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX "),
 		lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH"),
+		lipgloss.NewStyle().Foreground(coral).Render("  🚀"),
 	)
 	description := dimStyle.Copy().Width(58).Render("Assemble an industry solution from open building blocks, verify every connection, and deploy with a complete audit trail.")
 	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  SALESFORCE  /  DATABRICKS  /  AGENTCORE")
-	art := lipgloss.NewStyle().Foreground(coral).Render("🚀")
-	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, art, "", description, "", tags)
+	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", tags)
 	options := []string{"Start new deployment", "Show deployment history"}
 	optionRows := make([]string, len(options))
 	for index, option := range options {
