@@ -1,6 +1,9 @@
 package checker
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestMergeDiscoveryRefinesWithoutErasing(t *testing.T) {
 	dst := ProviderDiscovery{Profile: "agentforce", Options: []string{"agentforce", "sandbox"}}
@@ -36,6 +39,26 @@ func TestAWSIdentityFromARN(t *testing.T) {
 		if got := awsIdentityFromARN(arn); got != want {
 			t.Fatalf("awsIdentityFromARN(%q) = %q, want %q", arn, got, want)
 		}
+	}
+}
+
+func TestBoxUserDiscoveryMapsFields(t *testing.T) {
+	var user boxUser
+	if err := json.Unmarshal([]byte(`{"id":"385982796","login":"kadams@boxdemo.com","enterprise":{"id":"5105484"}}`), &user); err != nil {
+		t.Fatal(err)
+	}
+	d := user.discovery()
+	if d.Identity != "kadams@boxdemo.com" || d.Account != "385982796" || d.Enterprise != "5105484" {
+		t.Fatalf("unexpected discovery: %+v", d)
+	}
+}
+
+func TestFirstLineCollapsesMultilineOutput(t *testing.T) {
+	if got := firstLine("\n\nMust provide app auth configuration\nsecond line"); got != "Must provide app auth configuration" {
+		t.Fatalf("firstLine = %q", got)
+	}
+	if got := firstLine("   only line   "); got != "only line" {
+		t.Fatalf("firstLine = %q", got)
 	}
 }
 

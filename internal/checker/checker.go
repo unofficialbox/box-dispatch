@@ -178,14 +178,59 @@ func runCommandOutput(ctx context.Context, name string, args ...string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
+// boxUserFields is the field set both transports request; enterprise is not
+// part of the default projection and has to be named explicitly.
+const boxUserFields = "id,login,name,enterprise"
+
+type boxUser struct {
+	ID         string `json:"id"`
+	Login      string `json:"login"`
+	Enterprise struct {
+		ID string `json:"id"`
+	} `json:"enterprise"`
+}
+
+func (u boxUser) discovery() ProviderDiscovery {
+	return ProviderDiscovery{Identity: u.Login, Account: u.ID, Enterprise: u.Enterprise.ID}
+}
+
+// connectivityBox prefers an explicit BOX_ACCESS_TOKEN, falling back to an
+// authenticated Box CLI session. The CLI cannot hand back a raw token under an
+// OAuth login (tokens:get requires JWT app auth), so the CLI itself is used as
+// the transport rather than a source of credentials.
 func connectivityBox() (bool, string, ProviderDiscovery) {
+	if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
+		return connectivityBoxToken()
+	}
+	if toolExists("box") {
+		return connectivityBoxCLI()
+	}
+	return false, "missing BOX_ACCESS_TOKEN and no authenticated Box CLI", ProviderDiscovery{}
+}
+
+func connectivityBoxCLI() (bool, string, ProviderDiscovery) {
+	var discovery ProviderDiscovery
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := runCommandOutput(ctx, "box", "users:get", "me", "--json", "--fields="+boxUserFields)
+	if err != nil {
+		return false, fmt.Sprintf("box cli not authenticated: %s", firstLine(out)), discovery
+	}
+	var user boxUser
+	if err := json.Unmarshal([]byte(out), &user); err != nil {
+		return false, "box cli returned an unreadable user record", discovery
+	}
+	discovery = user.discovery()
+	if discovery.Identity == "" {
+		return false, "box cli returned no authenticated user", discovery
+	}
+	return true, fmt.Sprintf("box cli authenticated as %s", discovery.Identity), discovery
+}
+
+func connectivityBoxToken() (bool, string, ProviderDiscovery) {
 	var discovery ProviderDiscovery
 	token := strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN"))
-	if token == "" {
-		return false, "missing BOX_ACCESS_TOKEN", discovery
-	}
-	// enterprise is not part of the default field set, so request it explicitly.
-	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me?fields=id,login,name,enterprise", nil)
+	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me?fields="+boxUserFields, nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
 	if err != nil {
@@ -195,17 +240,9 @@ func connectivityBox() (bool, string, ProviderDiscovery) {
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Sprintf("box api returned %s", resp.Status), discovery
 	}
-	var payload struct {
-		ID         string `json:"id"`
-		Login      string `json:"login"`
-		Enterprise struct {
-			ID string `json:"id"`
-		} `json:"enterprise"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-		discovery.Identity = payload.Login
-		discovery.Account = payload.ID
-		discovery.Enterprise = payload.Enterprise.ID
+	var user boxUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err == nil {
+		discovery = user.discovery()
 	}
 	if discovery.Identity != "" {
 		return true, fmt.Sprintf("box api reachable as %s", discovery.Identity), discovery
@@ -408,6 +445,17 @@ func awsOptions() []string {
 	return dedupe(options)
 }
 
+// firstLine reduces multi-line CLI error output to its first non-empty line so
+// it renders on a single status row.
+func firstLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return strings.TrimSpace(text)
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -432,8 +480,9 @@ func dedupe(values []string) []string {
 
 func boxGuidance() []string {
 	return []string{
-		"export BOX_ACCESS_TOKEN=<your-box-access-token>",
-		"curl -H \"Authorization: Bearer $BOX_ACCESS_TOKEN\" https://api.box.com/2.0/users/me",
+		"Authenticate the Box CLI: box login",
+		"or export BOX_ACCESS_TOKEN=<your-box-access-token>",
+		"Verify with: box users:get me --json",
 	}
 }
 
@@ -472,11 +521,13 @@ func unknownGuidance(name string) []string {
 
 var allProviderBuilders = map[string]provider{
 	"box": {
-		name:       "box",
-		tool:       func() bool { return true },
-		configured: func() bool { return strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" },
-		connect:    connectivityBox,
-		guidance:   boxGuidance,
+		name: "box",
+		tool: func() bool { return true },
+		configured: func() bool {
+			return strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" || toolExists("box")
+		},
+		connect:  connectivityBox,
+		guidance: boxGuidance,
 	},
 	"salesforce": {
 		name: "salesforce",
