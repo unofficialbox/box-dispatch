@@ -11,6 +11,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
 func updatedShell(t *testing.T, model rootShellModel, key tea.KeyType) rootShellModel {
@@ -452,4 +453,55 @@ func TestTeardownWithNoRecordedResourcesIsInert(t *testing.T) {
 	if model.confirmingTeardown || model.teardownStarted {
 		t.Fatal("there is nothing to confirm or delete")
 	}
+}
+
+func TestBoxCCGActionIsOfferedOnlyForBox(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "box"
+	if !containsStr(model.providerActions(), "ccg") {
+		t.Fatal("Box should offer the CCG connect action")
+	}
+	model.provider = "salesforce"
+	if containsStr(model.providerActions(), "ccg") {
+		t.Fatal("CCG is Box-only")
+	}
+}
+
+func TestBoxCCGSavePersistsCredentials(t *testing.T) {
+	// Isolate the state dir so the save lands somewhere disposable.
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	model := newSetupOnlyShell()
+	model.provider = "box"
+	model.ccgClientID = "cid"
+	model.ccgClientSecret = "csecret"
+	model.ccgSubjectType = "user"
+	model.ccgSubjectID = "385982796"
+	updated, _ := model.saveBoxCCG()
+	model = updated.(rootShellModel)
+	if model.screen != screenProvider {
+		t.Fatalf("after save screen = %v, want provider", model.screen)
+	}
+
+	saved, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saved.HasBoxCCG() || saved.BoxCCGSubjectType != "user" || saved.BoxCCGSubjectID != "385982796" {
+		t.Fatalf("CCG credentials not persisted: %+v", saved)
+	}
+}
+
+func containsStr(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

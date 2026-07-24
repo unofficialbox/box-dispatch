@@ -52,6 +52,7 @@ const (
 	screenValidate
 	screenDeploy
 	screenTeardown
+	screenBoxCCG
 )
 
 type connectionStatus int
@@ -234,6 +235,13 @@ type rootShellModel struct {
 	teardownConfirmForm  *huh.Form
 	teardownConfirmation *string
 	teardownError        string
+
+	// Box CCG credential entry.
+	boxCCGForm      *huh.Form
+	ccgClientID     string
+	ccgClientSecret string
+	ccgSubjectType  string
+	ccgSubjectID    string
 }
 
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
@@ -939,6 +947,9 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.teardownConfirmForm != nil {
 			m.teardownConfirmForm.WithWidth(min(max(msg.Width-16, 44), 90))
 		}
+		if m.boxCCGForm != nil {
+			m.boxCCGForm.WithWidth(min(max(msg.Width-16, 44), 90))
+		}
 		if m.deployConfirmForm != nil {
 			m.deployConfirmForm.WithWidth(min(max(msg.Width-16, 44), 90))
 			if m.screen == screenDeploy && m.confirmingDeploy {
@@ -1057,6 +1068,24 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.screen == screenBoxComponents {
 		return m.updateBoxComponents(msg)
+	}
+	if m.screen == screenBoxCCG && m.boxCCGForm != nil {
+		if key, ok := msg.(tea.KeyMsg); ok && key.String() == "esc" {
+			m.screen, m.cursor = screenProvider, 0
+			m.message = "Box CCG setup cancelled."
+			return m, nil
+		}
+		form, cmd := m.boxCCGForm.Update(msg)
+		m.boxCCGForm = form.(*huh.Form)
+		if m.boxCCGForm.State == huh.StateCompleted {
+			return m.saveBoxCCG()
+		}
+		if m.boxCCGForm.State == huh.StateAborted {
+			m.screen, m.cursor = screenProvider, 0
+			m.message = "Box CCG setup cancelled."
+			return m, nil
+		}
+		return m, cmd
 	}
 	if m.screen == screenTeardown && m.confirmingTeardown && m.teardownConfirmForm != nil {
 		if key, ok := msg.(tea.KeyMsg); ok {
@@ -1477,6 +1506,8 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 	case "choose":
 		m.screen, m.cursor = screenOptions, 0
 		return m, nil
+	case "ccg":
+		return m.openBoxCCGForm()
 	case "connect":
 		if m.provider == "databricks" {
 			m.screen = screenDatabricksHost
@@ -1534,8 +1565,80 @@ func (m rootShellModel) providerActions() []string {
 	if len(m.results[m.provider].Discovery.Options) > 1 {
 		actions = append(actions, "choose")
 	}
+	if m.provider == "box" {
+		actions = append(actions, "ccg")
+	}
 	actions = append(actions, "connect", "back")
 	return actions
+}
+
+// openBoxCCGForm captures a Box Client Credentials Grant app and its subject, so
+// box-dispatch can mint a token that carries the enterprise app's scopes (the
+// CLI's OAuth token lacks some, e.g. Doc Gen).
+func (m rootShellModel) openBoxCCGForm() (tea.Model, tea.Cmd) {
+	settings, _ := shellstate.LoadConnectionSettings()
+	m.ccgClientID = settings.BoxCCGClientID
+	m.ccgClientSecret = settings.BoxCCGClientSecret
+	m.ccgSubjectType = settings.BoxCCGSubjectType
+	if m.ccgSubjectType == "" {
+		m.ccgSubjectType = "user"
+	}
+	m.ccgSubjectID = settings.BoxCCGSubjectID
+	m.boxCCGForm = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Client ID").Value(&m.ccgClientID).Validate(requiredField("Client ID")),
+			huh.NewInput().Title("Client Secret").Password(true).Value(&m.ccgClientSecret).Validate(requiredField("Client Secret")),
+			huh.NewSelect[string]().Title("Subject type").
+				Options(
+					huh.NewOption("user — created resources owned by the user", "user"),
+					huh.NewOption("enterprise — acts as the service account", "enterprise"),
+				).Value(&m.ccgSubjectType),
+			huh.NewInput().Title("Subject ID").
+				Description("Box user ID when subject is user, enterprise ID when enterprise").
+				Value(&m.ccgSubjectID).Validate(requiredField("Subject ID")),
+		),
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithWidth(76)
+	m.screen = screenBoxCCG
+	m.message = "Enter the CCG app credentials. Esc cancels."
+	return m, m.boxCCGForm.Init()
+}
+
+func requiredField(label string) func(string) error {
+	return func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required", label)
+		}
+		return nil
+	}
+}
+
+// saveBoxCCG persists the captured credentials and returns to the Box provider
+// screen. The record is written 0600, but the secret is on-disk plaintext.
+func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
+	settings, _ := shellstate.LoadConnectionSettings()
+	settings.BoxCCGClientID = strings.TrimSpace(m.ccgClientID)
+	settings.BoxCCGClientSecret = strings.TrimSpace(m.ccgClientSecret)
+	settings.BoxCCGSubjectType = strings.TrimSpace(m.ccgSubjectType)
+	settings.BoxCCGSubjectID = strings.TrimSpace(m.ccgSubjectID)
+	if err := shellstate.SaveConnectionSettings(settings); err != nil {
+		m.message = "Could not save Box CCG credentials: " + err.Error()
+	} else {
+		m.message = "Box CCG credentials saved. Choose Check connection to verify."
+	}
+	m.screen, m.cursor = screenProvider, 0
+	m.boxCCGForm = nil
+	return m, nil
+}
+
+func (m rootShellModel) viewBoxCCG(width int) string {
+	form := ""
+	if m.boxCCGForm != nil {
+		form = m.boxCCGForm.View()
+	}
+	return m.stageHeader() + "\n\n" +
+		titleStyle.Render("Connect Box with a CCG app") + "\n" +
+		dimStyle.Render("Client Credentials Grant, used as the chosen subject. Stored in .dispatch/connection-settings.bcl (0600); the secret is kept as on-disk plaintext.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(form)
 }
 
 func (m rootShellModel) saveProviderOption(value string) {
@@ -1626,6 +1729,8 @@ func (m rootShellModel) View() string {
 		body = m.viewDeploy(contentWidth)
 	case screenTeardown:
 		body = m.viewTeardown(contentWidth)
+	case screenBoxCCG:
+		body = m.viewBoxCCG(contentWidth)
 	}
 	return lipgloss.NewStyle().Margin(1, 3).Width(contentWidth).Render(m.header(contentWidth) + "\n\n" + body + "\n\n" + m.footer())
 }
@@ -1856,7 +1961,7 @@ func (m rootShellModel) viewProvider(width int) string {
 		detail = strings.Join(result.Checks, "\n")
 	}
 	actionLabels := map[string]string{
-		"check": "Check connection", "choose": "Choose authenticated profile", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+		"check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "connect": "Connect using provider CLI", "back": "Back to launch plan",
 	}
 	rows := []string{}
 	for i, action := range m.providerActions() {
