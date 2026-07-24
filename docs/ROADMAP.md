@@ -72,3 +72,42 @@ programmatic backend.
   connection screen is a step in this direction.
 - Scope: this is an evaluation, not a committed rewrite — measure how much of the
   current CLI surface the SDK covers before deciding.
+
+## 3. Box App: migrate off the deprecating Meteor API to `/app-api/graphql`
+
+**Decision (executed):** the Box App is now surfaced as a **manual** component
+instead of being auto-provisioned, gated behind
+`boxAppMeteorDeploySupported = false` in
+`internal/lifecycle/box_private_adapters.go`. This is proactive — we don't know
+when the API breaks — and it keeps the failure explicit (Roadmap item 1) rather
+than letting a deploy die on a removed method.
+
+**Why:** the Box App has no public API. box-dispatch drives Box's internal
+"Meteor" app-API through a signed-in browser at
+`POST /app-api/crooze/call-meteor-method/v1/<method>`. The Box App path is the
+**only** Meteor dependency in the codebase; every other surface uses a different
+transport:
+- **Box App (Meteor):** `app.list`, `app.get`, `app.create`, `app.lock`,
+  `app.update.all`, `app.cancelEdit` (deploy) and `app.remove` / `app.delete` /
+  `app.archive` (teardown), plus `savedSearch.get` / `savedSearch.create` for
+  metadata-bound charts. `chart.erid === savedSearch._id` (see BOX_APP_SCHEMA.md).
+- **Box Form:** `/app-api/file-request-web/` (`/form`, `/form-version`,
+  `/file-requests`) — a separate internal API, **not** Meteor; unaffected.
+- **Box Automate workflow:** `/app-api/boxrelay` — token-gated, already
+  browser/manual.
+- **Everything public** (folders, files, metadata, Doc Gen, Hub, AI agents):
+  public Box REST via the CCG token.
+
+**Migration trigger:** Box is moving these surfaces to `/app-api/graphql` —
+already observed serving live `POST` traffic in the Automate web UI. Flip
+`boxAppMeteorDeploySupported` back to `true` (or replace the injected Meteor JS
+with GraphQL mutations) once GraphQL exposes app/dashboard **and** savedSearch
+mutations equivalent to the `app.*` methods above. Teardown (`app.remove`…) rides
+the same API and needs the same migration.
+
+**Cost / open questions:**
+- No portable Box App definition exists to clone from anyway (the Meteor path
+  required an existing app named the template title — see BOX_APP_SCHEMA.md), so
+  demoting to manual loses little today.
+- A GraphQL adapter would let the App re-join the automatic deploy set and drop
+  the browser dependency for that surface entirely.

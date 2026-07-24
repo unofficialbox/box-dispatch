@@ -94,15 +94,29 @@ func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
 	// create_new naming strategy resolves.
 	settings.Box.RunID = "20260101T000000Z"
 	item := &Item{Provider: "box"}
-	// Must not touch the browser and must mark the private surfaces for
-	// automatic deployment.
+	// Must not touch the browser. The Box Form (file-request-web) is marked for
+	// automatic deployment; the Box App is demoted to manual because its Meteor
+	// deploy path is deprecated (boxAppMeteorDeploySupported == false).
 	if err := validateBoxPrivateAdapters(root, manifest, settings.Box, settings.Box.Components, item); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Box Form:New Contract Request", "Box App:Contract Lifecycle Management"} {
-		if !slices.Contains(item.DeployableComponents, want) {
-			t.Fatalf("private surface %q not marked deployable: %+v", want, item.DeployableComponents)
+	const form, app = "Box Form:New Contract Request", "Box App:Contract Lifecycle Management"
+	if !slices.Contains(item.DeployableComponents, form) {
+		t.Fatalf("Box Form not marked deployable: %+v", item.DeployableComponents)
+	}
+	if boxAppMeteorDeploySupported {
+		if !slices.Contains(item.DeployableComponents, app) {
+			t.Fatalf("Box App should be deployable while Meteor is supported: %+v", item.DeployableComponents)
 		}
+	} else {
+		if slices.Contains(item.DeployableComponents, app) {
+			t.Fatalf("Box App must not be auto-deployable while Meteor is deprecated: %+v", item.DeployableComponents)
+		}
+		if !slices.Contains(item.Missing, app) {
+			t.Fatalf("Box App should be tracked as a manual (missing) component: %+v", item.Missing)
+		}
+	}
+	for _, want := range []string{form, app} {
 		if slices.Contains(item.Present, want) {
 			t.Fatalf("private surface %q should not be reported present without inspection", want)
 		}

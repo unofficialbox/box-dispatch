@@ -1,5 +1,13 @@
 # Box App internal schema (captured 2026-07-24)
 
+> **Deprecation notice.** The Meteor app-API described here
+> (`/app-api/crooze/call-meteor-method/v1/…`) is being deprecated by Box in
+> favour of `/app-api/graphql`. box-dispatch therefore ships the Box App as a
+> **manual** component (`boxAppMeteorDeploySupported = false` in
+> `internal/lifecycle/box_private_adapters.go`) until a GraphQL-backed adapter
+> exists. This schema stays as the reference for that migration — see
+> docs/ROADMAP.md item 3.
+
 Captured live from `kadams.ent.box.com` via the app-tier API
 (`/app-api/crooze/call-meteor-method/v1/app.get`), so box-dispatch can build a
 Box App from a portable definition instead of cloning a live one.

@@ -69,11 +69,23 @@ type boxPrivateResponse struct {
 	} `json:"result"`
 }
 
+// boxAppMeteorDeploySupported gates automatic Box App provisioning. The Box App
+// has no public API, so box-dispatch drives Box's internal "Meteor" app-API
+// (app.create / app.update.all / savedSearch.create, via /app-api/crooze/…)
+// through the browser. Box is deprecating Meteor in favour of /app-api/graphql,
+// so this stays false until GraphQL exposes equivalent app and savedSearch
+// mutations: the Box App is then surfaced as a manual step rather than left to
+// fail — loudly or silently — the day Meteor is removed. The Box Form is not
+// gated by this; it rides file-request-web, a separate internal API. Flip to
+// true once a GraphQL-backed adapter exists. See docs/ROADMAP.md item 3.
+const boxAppMeteorDeploySupported = false
+
 // validateBoxPrivateAdapters records the Box private surfaces (Forms and Apps)
-// as deployable without inspecting them. Those surfaces have no read API, so a
-// status check would have to drive an authenticated browser tab. Keeping
-// validate read-only and non-interactive, the surfaces are marked for automatic
-// creation and the deploy step provisions them through the browser.
+// without inspecting them. Those surfaces have no read API, so a status check
+// would have to drive an authenticated browser tab. Keeping validate read-only
+// and non-interactive: the Box Form is marked for automatic creation (deployed
+// through file-request-web), while the Box App is deployable only when its
+// Meteor path is still supported — otherwise it is classified manual.
 func validateBoxPrivateAdapters(root string, manifest solution.Manifest, settings solution.BoxDeploymentSettings, selection solution.ComponentSelection, item *Item) error {
 	_, components, err := privateAdapterRequest(root, manifest, settings, selection, "inspect", nil, "", nil)
 	if err != nil || len(components) == 0 {
@@ -81,7 +93,8 @@ func validateBoxPrivateAdapters(root string, manifest solution.Manifest, setting
 	}
 	for _, key := range []string{"form", "app"} {
 		if component, ok := components[key]; ok {
-			classifyBoxComponent(item, component, false, true)
+			deployable := key != "app" || boxAppMeteorDeploySupported
+			classifyBoxComponent(item, component, false, deployable)
 		}
 	}
 	return nil
@@ -188,7 +201,11 @@ func privateAdapterRequest(root string, manifest solution.Manifest, settings sol
 		}
 		component := "Box App:" + appCapability.DisplayName
 		components["app"] = component
-		if operation == "inspect" || operation == "destroy" || slices.Contains(deployable, component) {
+		// Deploy runs the Meteor app path; gate it behind the deprecation flag so
+		// a demoted Box App never attempts a soon-to-break API. inspect/destroy are
+		// left as-is (read-only / teardown of an already-created app).
+		deployApp := boxAppMeteorDeploySupported && slices.Contains(deployable, component)
+		if operation == "inspect" || operation == "destroy" || deployApp {
 			request.App = &boxPrivateAppRequest{
 				Title: appTitle, Description: "Operational CLM cockpit for governed intake, document risk, approvals, approved clauses, execution, and renewal readiness.",
 				TemplateTitle: firstNonEmpty(appCapability.Template, appCapability.DisplayName), FormTitle: formTitle,
