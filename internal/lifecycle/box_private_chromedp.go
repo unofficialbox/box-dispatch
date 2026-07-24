@@ -131,6 +131,19 @@ func (s *boxTabSession) close() {
 	}
 }
 
+// isTabOpenFailure reports whether err is the "browser answered on the DevTools
+// port but could not open a tab" case (CDP -32000) — the signal to recover by
+// killing the stale browser and relaunching.
+func isTabOpenFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "-32000") ||
+		strings.Contains(msg, "no browser is open") ||
+		strings.Contains(msg, "Failed to open new tab")
+}
+
 // firstPageTargetID returns the id of the first real page tab, or "" when the
 // browser exposes none. Background pages and workers are skipped: only a page
 // can be navigated to the tenant host.
@@ -150,11 +163,33 @@ func staleBrowserHint() string {
 	return "the attached Chrome accepted a connection but could not open a tab; quit it fully (or close the debugging window) and re-run so a fresh browser launches"
 }
 
-// openBoxTab attaches to a listening browser, starting one if necessary, and
-// returns a context bound to a tab on the tenant Box host. It reports whether
-// the browser had to be launched, which tells the caller a fresh profile may not
-// be signed in yet.
+// openBoxTab returns a context bound to a tab on the tenant Box host, launching
+// a browser if none is listening. If an already-running browser answers on the
+// DevTools port but cannot open a tab — a half-exited Chrome still holding its
+// dedicated profile — it kills that stale process and relaunches a fresh one,
+// once, so an operator never has to quit Chrome by hand mid-deploy.
 func openBoxTab(ctx context.Context) (*boxTabSession, error) {
+	session, err := attachBoxTab(ctx)
+	if err == nil || !isTabOpenFailure(err) {
+		return session, err
+	}
+	if session != nil {
+		session.close()
+	}
+	if killChromeProfile(ctx) {
+		// The endpoint is now gone, so attachBoxTab launches a fresh browser.
+		if fresh, retryErr := attachBoxTab(ctx); retryErr == nil {
+			return fresh, nil
+		}
+	}
+	return nil, err
+}
+
+// attachBoxTab attaches to a listening browser (starting one if necessary) and
+// returns a context bound to a tab on the tenant Box host. It reports whether the
+// browser had to be launched, which tells the caller a fresh profile may not be
+// signed in yet.
+func attachBoxTab(ctx context.Context) (*boxTabSession, error) {
 	session := &boxTabSession{}
 	endpoint := cdpEndpoint()
 	wsURL, err := cdpWebSocketURL(ctx, endpoint)

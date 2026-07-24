@@ -158,3 +158,29 @@ func TestFirstPageTargetIDReusesAnExistingTab(t *testing.T) {
 		t.Fatalf("empty target list should yield empty, got %q", got)
 	}
 }
+
+func TestIsTabOpenFailureMatchesTheRecoverableError(t *testing.T) {
+	recoverable := []string{
+		"open https://x.ent.box.com: Failed to open new tab - no browser is open (-32000)",
+		"could not open a tab -32000",
+		"no browser is open",
+	}
+	for _, s := range recoverable {
+		if !isTabOpenFailure(errorString(s)) {
+			t.Fatalf("expected %q to be recoverable", s)
+		}
+	}
+	other := []string{"could not determine the enterprise Box host", "context deadline exceeded", ""}
+	for _, s := range other {
+		if isTabOpenFailure(errorString(s)) {
+			t.Fatalf("did not expect %q to trigger a browser relaunch", s)
+		}
+	}
+	if isTabOpenFailure(nil) {
+		t.Fatal("nil error must not be a tab-open failure")
+	}
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }

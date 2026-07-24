@@ -90,6 +90,29 @@ func chromeExecutable() (string, error) {
 	return "", fmt.Errorf("no Chrome, Chromium or Edge installation was found; set %s to the browser executable", chromeExecutableEnv)
 }
 
+// killChromeProfile terminates any browser box-dispatch previously launched with
+// its dedicated profile, matched by that profile directory so the operator's own
+// Chrome is never touched. It recovers a half-exited Chrome that still answers on
+// the DevTools port but can no longer open tabs. Best-effort and unix-only; it
+// reports whether a kill was attempted so the caller knows a relaunch is worth
+// trying (on Windows the "-32000" error message guides a manual quit instead).
+func killChromeProfile(ctx context.Context) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	profile, err := chromeProfileDir()
+	if err != nil {
+		return false
+	}
+	// pkill -f matches the full command line; every Chrome process carries
+	// --user-data-dir=<profile>, and only box-dispatch's dedicated profile does.
+	_ = exec.CommandContext(ctx, "pkill", "-f", profile).Run() // non-zero when nothing matched — fine
+	// Let the debugging port and the profile's singleton lock release before the
+	// caller relaunches.
+	time.Sleep(700 * time.Millisecond)
+	return true
+}
+
 // chromeProfileDir is the persistent profile the launched browser uses, so the
 // Box sign-in survives between runs.
 func chromeProfileDir() (string, error) {

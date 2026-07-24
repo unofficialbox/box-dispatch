@@ -80,6 +80,15 @@ type boxPrivateResponse struct {
 // true once a GraphQL-backed adapter exists. See docs/ROADMAP.md item 3.
 const boxAppMeteorDeploySupported = false
 
+// BoxAppDeploysAutomatically reports whether box-dispatch has a working native
+// adapter for the Box App. It does not while the Meteor app-API is deprecated,
+// so the UI and deploy path present the Box App as a manual configuration step
+// (like the HTTPS Connector) rather than a component that will be provisioned.
+func BoxAppDeploysAutomatically() bool { return boxAppMeteorDeploySupported }
+
+// BoxAppHandler is the manifest handler for the browser-driven Box App.
+const BoxAppHandler = "box.private-app"
+
 // validateBoxPrivateAdapters records the Box private surfaces (Forms and Apps)
 // without inspecting them. Those surfaces have no read API, so a status check
 // would have to drive an authenticated browser tab. Keeping validate read-only

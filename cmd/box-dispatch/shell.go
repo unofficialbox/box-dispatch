@@ -237,6 +237,7 @@ type rootShellModel struct {
 	teardownConfirmForm  *huh.Form
 	teardownConfirmation *string
 	teardownError        string
+	teardownScroll       int // first visible row of the (often long) resource preview
 
 	// Box CCG credential entry. The values are held behind pointers so the huh
 	// form writes to stable heap storage: bubbletea passes the model by value, so
@@ -834,6 +835,7 @@ func deploymentProgressCmd(provider string) tea.Cmd {
 func (m rootShellModel) openTeardown(record deploymentaudit.DeploymentRecord) (tea.Model, tea.Cmd) {
 	m.teardownRecord = &record
 	m.teardownError = ""
+	m.teardownScroll = 0
 	m.teardownStarted = false
 	m.teardownDone = false
 	m.teardownResults = nil
@@ -1194,6 +1196,20 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openTeardown(m.deploymentHistory[m.cursor])
 		}
 	case screenTeardown:
+		switch key.String() {
+		case "down", "j":
+			total := len(m.teardownBodyRows(m.width))
+			maxScroll := total - m.teardownVisibleRows()
+			if m.teardownScroll < maxScroll {
+				m.teardownScroll++
+			}
+			return m, nil
+		case "up", "k":
+			if m.teardownScroll > 0 {
+				m.teardownScroll--
+			}
+			return m, nil
+		}
 		if key.String() == "left" || key.String() == "esc" || key.String() == "q" {
 			if m.teardownStarted {
 				return m, nil
@@ -2246,10 +2262,18 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 	rows := make([]string, 0, len(m.boxCapabilities))
 	for i, capability := range m.boxCapabilities {
 		enabled := m.boxCapabilitySelected(capability)
+		// The Box App's only adapter is the deprecated Meteor app-API, so it is a
+		// manual configuration step (like the HTTPS Connector), not an
+		// auto-deployed component — surface it as CONFIGURATION, not READY.
+		autoDeploy := capability.Handler != "" &&
+			!(capability.Handler == lifecycle.BoxAppHandler && !lifecycle.BoxAppDeploysAutomatically())
 		status := strings.ToUpper(capability.API)
-		if capability.Handler != "" {
+		switch {
+		case capability.Handler == lifecycle.BoxAppHandler && !lifecycle.BoxAppDeploysAutomatically():
+			status = "CONFIGURATION"
+		case autoDeploy:
 			status = "READY"
-		} else if capability.API == "public" {
+		case capability.API == "public":
 			status = "ADAPTER PENDING"
 		}
 		// Same marker vocabulary and colours the validate and deploy checklists
@@ -2259,7 +2283,7 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 		switch {
 		case !enabled:
 			status = "EXCLUDED"
-		case capability.Handler != "":
+		case autoDeploy:
 			marker, tone = "✓", green
 		default:
 			tone = gold
@@ -2351,6 +2375,40 @@ func (m rootShellModel) viewTeardown(width int) string {
 		return title + "\n" + subtitle + "\n\n" + lipgloss.NewStyle().Foreground(gold).Render(m.teardownError)
 	}
 
+	rows := m.teardownBodyRows(width)
+	// The resource list is often longer than the terminal, so window it around the
+	// scroll offset (↑/↓ move it) instead of overflowing off-screen.
+	visible := m.teardownVisibleRows()
+	scroll := m.clampedTeardownScroll(len(rows), visible)
+	shown := rows
+	if len(rows) > visible {
+		shown = append([]string(nil), rows[scroll:min(scroll+visible, len(rows))]...)
+		hint := fmt.Sprintf("rows %d–%d of %d", scroll+1, scroll+len(shown), len(rows))
+		up, down := "  ", "  "
+		if scroll > 0 {
+			up = "↑ "
+		}
+		if scroll+visible < len(rows) {
+			down = "↓ "
+		}
+		shown = append(shown, dimStyle.Render(fmt.Sprintf("%s%s more · %s scroll", up, down, hint)))
+	}
+
+	panelBody := panel.Copy().Padding(1, 2).Width(width - 4).Render(strings.Join(shown, "\n"))
+	if m.confirmingTeardown && m.teardownConfirmForm != nil {
+		return title + "\n" + subtitle + "\n\n" + panelBody + "\n" + activePane.Copy().Width(width-4).Render(m.teardownConfirmForm.View())
+	}
+	return title + "\n" + subtitle + "\n\n" + panelBody
+}
+
+// teardownBodyRows builds every line of the reset preview / result view. It is
+// shared by the renderer (which windows it) and the key handler (which clamps
+// the scroll offset to its length).
+func (m rootShellModel) teardownBodyRows(width int) []string {
+	if m.teardownRecord == nil {
+		return nil
+	}
+	record := *m.teardownRecord
 	body := []string{}
 	if m.teardownDone || m.teardownStarted {
 		for _, provider := range m.teardownProviders {
@@ -2368,25 +2426,48 @@ func (m rootShellModel) viewTeardown(width int) string {
 				body = append(body, style.Render(fmt.Sprintf("  %s %s %s", marker, outcome.Resource.Kind, outcome.Resource.Name))+dimStyle.Render("  "+reason))
 			}
 		}
-	} else {
-		// Preview: every resource the reset would delete, by kind and id.
-		body = append(body, lipgloss.NewStyle().Bold(true).Foreground(coral).Render("The following resources will be permanently deleted:"))
-		for _, provider := range record.Providers {
-			if len(provider.Resources) == 0 {
-				continue
-			}
-			body = append(body, "", accent.Render(strings.ToUpper(providerLabel(provider.Provider))))
-			for _, resource := range provider.Resources {
-				body = append(body, dimStyle.Render(fmt.Sprintf("  • %-18s %s", resource.Kind, resource.Name))+lipgloss.NewStyle().Foreground(muted).Render("  "+resource.ID))
-			}
+		return body
+	}
+	// Preview: every resource the reset would delete, by kind and id.
+	body = append(body, lipgloss.NewStyle().Bold(true).Foreground(coral).Render("The following resources will be permanently deleted:"))
+	for _, provider := range record.Providers {
+		if len(provider.Resources) == 0 {
+			continue
+		}
+		body = append(body, "", accent.Render(strings.ToUpper(providerLabel(provider.Provider))))
+		for _, resource := range provider.Resources {
+			body = append(body, dimStyle.Render(fmt.Sprintf("  • %-18s %s", resource.Kind, resource.Name))+lipgloss.NewStyle().Foreground(muted).Render("  "+resource.ID))
 		}
 	}
+	return body
+}
 
-	panelBody := panel.Copy().Padding(1, 2).Width(width - 4).Render(strings.Join(body, "\n"))
-	if m.confirmingTeardown && m.teardownConfirmForm != nil {
-		return title + "\n" + subtitle + "\n\n" + panelBody + "\n" + activePane.Copy().Width(width-4).Render(m.teardownConfirmForm.View())
+// teardownVisibleRows is how many preview rows fit under the header, title, and
+// footer chrome on the current terminal.
+func (m rootShellModel) teardownVisibleRows() int {
+	n := m.height - 14
+	if m.confirmingTeardown {
+		n -= 4
 	}
-	return title + "\n" + subtitle + "\n\n" + panelBody
+	if n < 6 {
+		n = 6
+	}
+	return n
+}
+
+// clampedTeardownScroll keeps the offset within [0, total-visible].
+func (m rootShellModel) clampedTeardownScroll(total, visible int) int {
+	maxScroll := total - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.teardownScroll > maxScroll {
+		return maxScroll
+	}
+	if m.teardownScroll < 0 {
+		return 0
+	}
+	return m.teardownScroll
 }
 
 func (m rootShellModel) viewDeploy(width int) string {
