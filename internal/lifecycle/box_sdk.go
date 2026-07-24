@@ -53,8 +53,14 @@ type boxAPI interface {
 }
 
 func newBoxAPI() (boxAPI, error) {
-	if sdk, err := newBoxSDK(); err == nil {
+	sdk, err := newBoxSDK()
+	if err == nil {
 		return sdk, nil
+	}
+	// A configured CCG app must not silently degrade to the lower-scoped OAuth
+	// CLI path — that hides the real failure and produces confusing 403s later.
+	if settings, sErr := shellstate.LoadConnectionSettings(); sErr == nil && settings.HasBoxCCG() {
+		return nil, fmt.Errorf("the configured Box CCG app could not authenticate (check the client id, secret and subject in the Box CCG connection): %w", err)
 	}
 	return boxCLI{}, nil
 }
