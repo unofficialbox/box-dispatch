@@ -238,15 +238,19 @@ type rootShellModel struct {
 	teardownConfirmation *string
 	teardownError        string
 
-	// Box CCG credential entry.
+	// Box CCG credential entry. The values are held behind pointers so the huh
+	// form writes to stable heap storage: bubbletea passes the model by value, so
+	// a plain string field would be bound by the address of a copy huh keeps
+	// updating while saveBoxCCG reads a different, stale copy.
 	boxCCGForm      *huh.Form
-	ccgClientID     string
-	ccgClientSecret string
-	ccgSubjectType  string
-	ccgSubjectID    string
+	ccgClientID     *string
+	ccgClientSecret *string
+	ccgSubjectType  *string
+	ccgSubjectID    *string
 
 	// Box connection switcher.
-	boxConnections []boxconn.Connection
+	boxConnections   []boxconn.Connection
+	boxRemovePending string // connection name awaiting a second remove keypress
 }
 
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
@@ -1291,14 +1295,25 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.runProviderAction(m.cursor)
 		}
 	case screenBoxSwitch:
-		m.moveCursor(key, len(m.boxConnections))
-		if key.String() == "left" || key.String() == "esc" {
+		switch key.String() {
+		case "up", "down", "k", "j", "tab":
+			m.boxRemovePending = ""
+			m.moveCursor(key, len(m.boxConnections))
+			return m, nil
+		case "left", "esc":
+			m.boxRemovePending = ""
 			m.screen, m.cursor = screenProvider, 0
 			m.message = ""
 			return m, nil
-		}
-		if (key.String() == "enter" || key.String() == "right") && m.cursor < len(m.boxConnections) {
-			return m.setBoxDefault(m.boxConnections[m.cursor])
+		case "enter", "right":
+			m.boxRemovePending = ""
+			if m.cursor < len(m.boxConnections) {
+				return m.setBoxDefault(m.boxConnections[m.cursor])
+			}
+		case "x", "delete", "backspace":
+			if m.cursor < len(m.boxConnections) {
+				return m.removeBoxConnection(m.boxConnections[m.cursor])
+			}
 		}
 	case screenOptions:
 		options := m.results[m.provider].Discovery.Options
@@ -1594,25 +1609,27 @@ func (m rootShellModel) providerActions() []string {
 // CLI's OAuth token lacks some, e.g. Doc Gen).
 func (m rootShellModel) openBoxCCGForm() (tea.Model, tea.Cmd) {
 	settings, _ := shellstate.LoadConnectionSettings()
-	m.ccgClientID = settings.BoxCCGClientID
-	m.ccgClientSecret = settings.BoxCCGClientSecret
-	m.ccgSubjectType = settings.BoxCCGSubjectType
-	if m.ccgSubjectType == "" {
-		m.ccgSubjectType = "user"
+	subjectType := settings.BoxCCGSubjectType
+	if subjectType == "" {
+		subjectType = "user"
 	}
-	m.ccgSubjectID = settings.BoxCCGSubjectID
+	// Heap-allocated so the form's writes survive bubbletea's model copies.
+	m.ccgClientID = &settings.BoxCCGClientID
+	m.ccgClientSecret = &settings.BoxCCGClientSecret
+	m.ccgSubjectType = &subjectType
+	m.ccgSubjectID = &settings.BoxCCGSubjectID
 	m.boxCCGForm = huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().Title("Client ID").Value(&m.ccgClientID).Validate(requiredField("Client ID")),
-			huh.NewInput().Title("Client Secret").Password(true).Value(&m.ccgClientSecret).Validate(requiredField("Client Secret")),
+			huh.NewInput().Title("Client ID").Value(m.ccgClientID).Validate(requiredField("Client ID")),
+			huh.NewInput().Title("Client Secret").Password(true).Value(m.ccgClientSecret).Validate(requiredField("Client Secret")),
 			huh.NewSelect[string]().Title("Subject type").
 				Options(
 					huh.NewOption("user — created resources owned by the user", "user"),
 					huh.NewOption("enterprise — acts as the service account", "enterprise"),
-				).Value(&m.ccgSubjectType),
+				).Value(m.ccgSubjectType),
 			huh.NewInput().Title("Subject ID").
 				Description("Box user ID when subject is user, enterprise ID when enterprise").
-				Value(&m.ccgSubjectID).Validate(requiredField("Subject ID")),
+				Value(m.ccgSubjectID).Validate(requiredField("Subject ID")),
 		),
 	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithWidth(76)
 	m.screen = screenBoxCCG
@@ -1629,18 +1646,32 @@ func requiredField(label string) func(string) error {
 	}
 }
 
-// saveBoxCCG persists the captured credentials and returns to the Box provider
-// screen. The record is written 0600, but the secret is on-disk plaintext.
+// saveBoxCCG persists the captured credentials and makes the new CCG connection
+// the default, then returns to the Box provider screen. Values are read through
+// the heap pointers the form wrote to (see the model field comment). The record
+// is written 0600, but the secret is on-disk plaintext.
 func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return strings.TrimSpace(*p)
+	}
+	subjectType := deref(m.ccgSubjectType)
+	if subjectType == "" {
+		subjectType = "user"
+	}
 	settings, _ := shellstate.LoadConnectionSettings()
-	settings.BoxCCGClientID = strings.TrimSpace(m.ccgClientID)
-	settings.BoxCCGClientSecret = strings.TrimSpace(m.ccgClientSecret)
-	settings.BoxCCGSubjectType = strings.TrimSpace(m.ccgSubjectType)
-	settings.BoxCCGSubjectID = strings.TrimSpace(m.ccgSubjectID)
+	settings.BoxCCGClientID = deref(m.ccgClientID)
+	settings.BoxCCGClientSecret = deref(m.ccgClientSecret)
+	settings.BoxCCGSubjectType = subjectType
+	settings.BoxCCGSubjectID = deref(m.ccgSubjectID)
+	// A freshly captured connection becomes the default box-dispatch deploys with.
+	settings.BoxDefaultConnection = boxconn.DispatchCCGName
 	if err := shellstate.SaveConnectionSettings(settings); err != nil {
 		m.message = "Could not save Box CCG credentials: " + err.Error()
 	} else {
-		m.message = "Box CCG credentials saved. Choose Check connection to verify."
+		m.message = "Box CCG credentials saved and set as the default. Choose Check connection to verify."
 	}
 	m.screen, m.cursor = screenProvider, 0
 	m.boxCCGForm = nil
@@ -1679,6 +1710,31 @@ func (m rootShellModel) setBoxDefault(conn boxconn.Connection) (tea.Model, tea.C
 	}
 	m.boxConnections = boxconn.List()
 	m.message = conn.Name + " (" + conn.AuthType + ") is now the default Box connection."
+	return m, nil
+}
+
+// removeBoxConnection deletes a connection, guarded by a confirming second
+// keypress since removing a CLI environment is a global, sign-in-losing change.
+func (m rootShellModel) removeBoxConnection(conn boxconn.Connection) (tea.Model, tea.Cmd) {
+	if m.boxRemovePending != conn.Name {
+		m.boxRemovePending = conn.Name
+		what := "the box CLI environment " + conn.Name + " (you would need to sign in again to restore it)"
+		if conn.Source == boxconn.SourceDispatch {
+			what = "the box-dispatch CCG credentials"
+		}
+		m.message = "Press x again to remove " + what + ". Any other key cancels."
+		return m, nil
+	}
+	m.boxRemovePending = ""
+	if err := boxconn.Remove(conn); err != nil {
+		m.message = "Could not remove " + conn.Name + ": " + err.Error()
+		return m, nil
+	}
+	m.boxConnections = boxconn.List()
+	if m.cursor >= len(m.boxConnections) && m.cursor > 0 {
+		m.cursor = len(m.boxConnections) - 1
+	}
+	m.message = "Removed " + conn.Name + "."
 	return m, nil
 }
 
@@ -2585,6 +2641,7 @@ func (m rootShellModel) footer() string {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set default")),
+			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "remove")),
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "back")),
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
 type CheckConfig struct {
@@ -199,18 +200,42 @@ func (u boxUser) discovery() ProviderDiscovery {
 	return ProviderDiscovery{Identity: u.Login, Account: u.ID, Enterprise: u.Enterprise.ID}
 }
 
-// connectivityBox prefers an explicit BOX_ACCESS_TOKEN, falling back to an
-// authenticated Box CLI session. The CLI cannot hand back a raw token under an
-// OAuth login (tokens:get requires JWT app auth), so the CLI itself is used as
-// the transport rather than a source of credentials.
+// connectivityBox validates the connection box-dispatch will actually deploy
+// with. When that is the box-dispatch CCG app, it mints a CCG token and checks
+// it directly — the box CLI is a different (OAuth) identity, so testing the CLI
+// would report on the wrong connection. Otherwise it prefers an explicit
+// BOX_ACCESS_TOKEN, then the authenticated CLI session as the transport (the CLI
+// cannot hand back a raw token under an OAuth login).
 func connectivityBox() (bool, string, ProviderDiscovery) {
+	active, found := boxconn.Active()
+	if found && active.Source == boxconn.SourceDispatch {
+		ok, detail, discovery := connectivityBoxCCG()
+		discovery.AuthType = active.AuthType
+		return ok, detail, discovery
+	}
 	ok, detail, discovery := connectivityBoxTransport()
-	// Label the auth of the connection box-dispatch will actually deploy with
-	// (a pinned default, the box-dispatch CCG app, or the CLI's current env).
-	if active, found := boxconn.Active(); found {
+	if found {
 		discovery.AuthType = active.AuthType
 	}
 	return ok, detail, discovery
+}
+
+// connectivityBoxCCG mints a token for the captured CCG app and confirms it can
+// read the acting user, so the reported status reflects the CCG connection
+// itself rather than the CLI's separate OAuth login.
+func connectivityBoxCCG() (bool, string, ProviderDiscovery) {
+	var discovery ProviderDiscovery
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil || !settings.HasBoxCCG() {
+		return false, "box CCG app is not fully configured", discovery
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	token, err := boxconn.CCGTokenFromSettings(ctx, settings)
+	if err != nil {
+		return false, "box CCG app could not authenticate: " + firstLine(err.Error()), discovery
+	}
+	return connectivityBoxBearer(token)
 }
 
 func connectivityBoxTransport() (bool, string, ProviderDiscovery) {
@@ -243,8 +268,13 @@ func connectivityBoxCLI() (bool, string, ProviderDiscovery) {
 }
 
 func connectivityBoxToken() (bool, string, ProviderDiscovery) {
+	return connectivityBoxBearer(strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")))
+}
+
+// connectivityBoxBearer reads the acting user from the Box API with a bearer
+// token, shared by the BOX_ACCESS_TOKEN and CCG paths.
+func connectivityBoxBearer(token string) (bool, string, ProviderDiscovery) {
 	var discovery ProviderDiscovery
-	token := strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN"))
 	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me?fields="+boxUserFields, nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)

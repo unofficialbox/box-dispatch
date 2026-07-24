@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
@@ -478,10 +479,13 @@ func TestBoxCCGSavePersistsCredentials(t *testing.T) {
 
 	model := newSetupOnlyShell()
 	model.provider = "box"
-	model.ccgClientID = "cid"
-	model.ccgClientSecret = "csecret"
-	model.ccgSubjectType = "user"
-	model.ccgSubjectID = "385982796"
+	// The CCG values live behind heap pointers so huh's writes survive bubbletea's
+	// model copies; saveBoxCCG reads them back through those pointers.
+	clientID, clientSecret, subjectType, subjectID := "cid", "csecret", "user", "385982796"
+	model.ccgClientID = &clientID
+	model.ccgClientSecret = &clientSecret
+	model.ccgSubjectType = &subjectType
+	model.ccgSubjectID = &subjectID
 	updated, _ := model.saveBoxCCG()
 	model = updated.(rootShellModel)
 	if model.screen != screenProvider {
@@ -492,8 +496,13 @@ func TestBoxCCGSavePersistsCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !saved.HasBoxCCG() || saved.BoxCCGSubjectType != "user" || saved.BoxCCGSubjectID != "385982796" {
+	if !saved.HasBoxCCG() || saved.BoxCCGClientID != "cid" || saved.BoxCCGClientSecret != "csecret" ||
+		saved.BoxCCGSubjectType != "user" || saved.BoxCCGSubjectID != "385982796" {
 		t.Fatalf("CCG credentials not persisted: %+v", saved)
+	}
+	// A newly captured connection becomes the default box-dispatch deploys with.
+	if saved.BoxDefaultConnection != boxconn.DispatchCCGName {
+		t.Fatalf("new CCG connection should be the default, got %q", saved.BoxDefaultConnection)
 	}
 }
 

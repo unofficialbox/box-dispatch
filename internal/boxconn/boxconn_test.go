@@ -1,6 +1,12 @@
 package boxconn
 
-import "testing"
+import (
+	"os"
+	"testing"
+
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+)
 
 func TestParseCLIEnvironmentsExtractsNameAndAuthType(t *testing.T) {
 	// Shape of `box configure:environments:get`, with ANSI colour codes.
@@ -48,5 +54,54 @@ func TestMarkStateFlagsCurrentAndDefault(t *testing.T) {
 	// A box-dispatch connection is never the CLI current, even if names collided.
 	if conns[2].Current {
 		t.Fatal("a dispatch connection must not be marked CLI-current")
+	}
+}
+
+func TestUsableCLIConnectionsHidesCCGAndJWT(t *testing.T) {
+	in := []Connection{
+		{Name: "kadams1", AuthType: "OAuth2", Source: SourceCLI},
+		{Name: "box-cmis-increo-5105484", AuthType: "CCG", Source: SourceCLI},
+		{Name: "svc", AuthType: "JWT", Source: SourceCLI},
+		{Name: "oauth", AuthType: "OAuth2", Source: SourceCLI},
+	}
+	got := usableCLIConnections(in)
+	if len(got) != 2 {
+		t.Fatalf("kept %d, want 2 (only OAuth2): %+v", len(got), got)
+	}
+	for _, c := range got {
+		if c.AuthType != "OAuth2" {
+			t.Fatalf("kept a non-OAuth2 CLI connection: %+v", c)
+		}
+	}
+}
+
+func TestRemoveDispatchClearsCredentialsAndDefault(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
+		BoxCCGClientID: "id", BoxCCGClientSecret: "secret",
+		BoxCCGSubjectType: "user", BoxCCGSubjectID: "1",
+		BoxDefaultConnection: DispatchCCGName,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Remove(Connection{Name: DispatchCCGName, Source: SourceDispatch}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.HasBoxCCG() {
+		t.Fatalf("CCG credentials should be cleared: %+v", saved)
+	}
+	if saved.BoxDefaultConnection != "" {
+		t.Fatalf("default should be cleared when it pointed at the removed connection, got %q", saved.BoxDefaultConnection)
 	}
 }

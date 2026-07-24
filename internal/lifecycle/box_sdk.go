@@ -4,13 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
@@ -89,7 +85,7 @@ func newBoxSDK() (*boxSDK, error) {
 	// carries the enterprise scopes (e.g. Doc Gen) the CLI's OAuth token lacks,
 	// while the resources it creates stay owned by that user.
 	if settings, err := shellstate.LoadConnectionSettings(); err == nil && prefersBoxCCG(settings) {
-		token, tokenErr := boxCCGToken(context.Background(), settings.BoxCCGClientID, settings.BoxCCGClientSecret, settings.BoxCCGSubjectType, settings.BoxCCGSubjectID)
+		token, tokenErr := boxconn.CCGTokenFromSettings(context.Background(), settings)
 		if tokenErr != nil {
 			return nil, tokenErr
 		}
@@ -113,61 +109,6 @@ func newBoxSDK() (*boxSDK, error) {
 		return nil, fmt.Errorf("Box CLI returned an unreadable access token")
 	}
 	return &boxSDK{client: boxclient.NewClient(gantryruntime.DeveloperToken(token))}, nil
-}
-
-var boxTokenURL = "https://api.box.com/oauth2/token"
-
-// boxCCGToken mints a Client Credentials Grant access token for the given
-// subject. subjectType "user" makes the token act as that user, so objects it
-// creates are owned by the user; "enterprise" acts as the service account. Both
-// carry the CCG app's enterprise scopes.
-func boxCCGToken(ctx context.Context, clientID, clientSecret, subjectType, subjectID string) (string, error) {
-	form := url.Values{
-		"grant_type":       {"client_credentials"},
-		"client_id":        {clientID},
-		"client_secret":    {clientSecret},
-		"box_subject_type": {subjectType},
-		"box_subject_id":   {subjectID},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, boxTokenURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request Box CCG token: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Box CCG token request returned %s: %s", resp.Status, boxTokenError(body))
-	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", fmt.Errorf("parse Box CCG token response: %w", err)
-	}
-	if payload.AccessToken == "" {
-		return "", fmt.Errorf("Box CCG token response contained no access token")
-	}
-	return payload.AccessToken, nil
-}
-
-// boxTokenError extracts the human-readable message from a Box OAuth error body.
-func boxTokenError(body []byte) string {
-	var payload struct {
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-	}
-	if json.Unmarshal(body, &payload) == nil && payload.Error != "" {
-		if payload.Description != "" {
-			return payload.Error + ": " + payload.Description
-		}
-		return payload.Error
-	}
-	return strings.TrimSpace(string(body))
 }
 
 func boxUserID(output []byte) string {

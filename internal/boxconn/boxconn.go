@@ -101,12 +101,16 @@ func SetCLICurrent(name string) error {
 	return err
 }
 
-// List returns every known Box connection: the CLI environments plus the
-// box-dispatch CCG when captured, with Current and Default marked.
+// List returns the Box connections box-dispatch can actually authenticate with:
+// the CLI's OAuth2 environments plus the box-dispatch CCG app when captured, with
+// Current and Default marked. CLI environments whose auth is CCG or JWT are
+// omitted: box-dispatch holds no credentials for them and cannot mint their
+// tokens through the CLI, so offering them would only produce failures (see
+// docs/ROADMAP.md item 2).
 func List() []Connection {
 	connections := []Connection{}
 	if out, err := run("configure:environments:get"); err == nil {
-		connections = ParseCLIEnvironments(out)
+		connections = usableCLIConnections(ParseCLIEnvironments(out))
 	}
 
 	current := ""
@@ -121,6 +125,50 @@ func List() []Connection {
 	}
 
 	return markState(connections, current, settings.BoxDefaultConnection)
+}
+
+// usableCLIConnections drops CLI environments whose auth is CCG or JWT:
+// box-dispatch holds no credentials for them and cannot mint their tokens
+// through the CLI, so surfacing them would only offer connections that fail.
+func usableCLIConnections(connections []Connection) []Connection {
+	kept := make([]Connection, 0, len(connections))
+	for _, connection := range connections {
+		if connection.AuthType == "CCG" || connection.AuthType == "JWT" {
+			continue
+		}
+		kept = append(kept, connection)
+	}
+	return kept
+}
+
+// Remove deletes a connection. The box-dispatch CCG app clears its captured
+// credentials; a CLI environment is removed from the box CLI (a global change,
+// since the CLI has no per-command environment). A pin at the removed connection
+// is cleared so nothing points at a connection that no longer exists.
+func Remove(conn Connection) error {
+	if conn.Source == SourceDispatch {
+		settings, err := shellstate.LoadConnectionSettings()
+		if err != nil {
+			return err
+		}
+		settings.BoxCCGClientID = ""
+		settings.BoxCCGClientSecret = ""
+		settings.BoxCCGSubjectType = ""
+		settings.BoxCCGSubjectID = ""
+		if settings.BoxDefaultConnection == conn.Name {
+			settings.BoxDefaultConnection = ""
+		}
+		return shellstate.SaveConnectionSettings(settings)
+	}
+
+	if _, err := run("configure:environments:remove", conn.Name); err != nil {
+		return err
+	}
+	if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.BoxDefaultConnection == conn.Name {
+		settings.BoxDefaultConnection = ""
+		return shellstate.SaveConnectionSettings(settings)
+	}
+	return nil
 }
 
 // markState flags Current (CLI) and Default across the connection set.
