@@ -431,7 +431,7 @@ func (sdk *boxSDK) createAIAgent(ctx context.Context, mode, name, description, i
 
 func (sdk *boxSDK) hubTitles(ctx context.Context) (map[string]bool, error) {
 	titles := map[string]bool{}
-	for hub, err := range sdk.client.Hubs.ListEnterprise(ctx, nil) {
+	for hub, err := range sdk.client.Hubs.List(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
@@ -556,7 +556,7 @@ func (boxCLI) createAIAgent(ctx context.Context, mode, name, description, instru
 }
 
 func (boxCLI) hubTitles(ctx context.Context) (map[string]bool, error) {
-	output, err := boxRequest(ctx, "GET", "/enterprise_hubs?limit=1000", nil, "box-version: 2025.0")
+	output, err := boxRequest(ctx, "GET", "/hubs?limit=1000", nil, "box-version: 2025.0")
 	if err != nil {
 		return nil, err
 	}
