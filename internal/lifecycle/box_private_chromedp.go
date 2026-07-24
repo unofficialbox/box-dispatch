@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
@@ -26,7 +27,22 @@ const (
 	defaultCDPEndpoint = "http://127.0.0.1:9222"
 	cdpEndpointEnv     = "BOX_DISPATCH_CDP_URL"
 	boxTabHost         = ".ent.box.com"
+
+	// How long to wait for an operator to sign in to Box in the browser window.
+	boxSignInTimeoutEnv    = "BOX_DISPATCH_SIGNIN_TIMEOUT"
+	defaultBoxSignInWindow = 5 * time.Minute
 )
+
+// boxSignInTimeout is how long to hold the deploy open while the operator
+// authenticates. Long enough for SSO and MFA, bounded so nothing hangs forever.
+func boxSignInTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(boxSignInTimeoutEnv)); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultBoxSignInWindow
+}
 
 // cdpEndpoint returns the DevTools HTTP endpoint to attach to.
 func cdpEndpoint() string {
@@ -186,7 +202,9 @@ func openBoxTab(ctx context.Context) (*boxTabSession, error) {
 // through. An unauthenticated tab lands on the login host instead of the tenant
 // host, which is the signal used here.
 func ensureBoxPrivateSession() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeout := boxSignInTimeout()
+	// Allow room for the launch and navigation on top of the sign-in window.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+2*time.Minute)
 	defer cancel()
 
 	session, err := openBoxTab(ctx)
@@ -195,22 +213,62 @@ func ensureBoxPrivateSession() error {
 	}
 	defer session.close()
 
-	host, err := tabHostname(session.ctx)
-	if err != nil {
-		return fmt.Errorf("check the Box browser session: %w", err)
-	}
-	if strings.HasSuffix(host, boxTabHost) {
+	host, err := currentHostname(session.ctx)
+	if err == nil && strings.HasSuffix(host, boxTabHost) {
 		return nil
 	}
-	where := "is on " + host
-	if strings.TrimSpace(host) == "" {
-		where = "has not finished loading Box"
+
+	// Not signed in. Box has redirected the tab to the login page, so raise the
+	// window and wait for the operator to authenticate rather than failing and
+	// making them run the whole deploy again.
+	_ = chromedp.Run(session.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return page.BringToFront().Do(ctx)
+	}))
+	return waitForBoxSignIn(ctx, session, timeout)
+}
+
+// waitForBoxSignIn blocks until the tab lands on the tenant host, which only
+// happens once Box has accepted the operator's credentials.
+func waitForBoxSignIn(ctx context.Context, session *boxTabSession, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	redirected := false
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"timed out after %s waiting for a Box sign-in.\nSign in to Box in the box-dispatch browser window and run this again, or set %s to allow longer",
+				timeout, boxSignInTimeoutEnv)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("gave up waiting for a Box sign-in: %w", ctx.Err())
+		case <-time.After(time.Second):
+		}
+
+		host, err := currentHostname(session.ctx)
+		if err != nil {
+			continue
+		}
+		if strings.HasSuffix(host, boxTabHost) {
+			return nil
+		}
+		// Signed in but landed somewhere other than the tenant host (Box often
+		// returns to a generic landing page). Send the tab to the tenant once.
+		if !redirected && host != "" && !strings.Contains(host, "account.box.com") && strings.HasSuffix(host, ".box.com") {
+			redirected = true
+			if target := enterpriseBoxURL(ctx); strings.Contains(target, boxTabHost) {
+				_ = chromedp.Run(session.ctx, chromedp.Navigate(target))
+			}
+		}
 	}
-	message := fmt.Sprintf("not signed in to Box: the browser %s instead of a %s tab.\nSign in to Box in the box-dispatch browser window, then retry", where, boxTabHost)
-	if session.launched {
-		message += "\n(a browser was just started with a new profile, so it has no Box session yet)"
+}
+
+// currentHostname reads the tab's hostname once.
+func currentHostname(tabCtx context.Context) (string, error) {
+	var host string
+	if err := chromedp.Run(tabCtx, chromedp.Evaluate("location.hostname", &host)); err != nil {
+		return "", err
 	}
-	return fmt.Errorf("%s", message)
+	return strings.TrimSpace(host), nil
 }
 
 // tabHostname reads the tab's hostname, waiting for a freshly opened tab to
@@ -219,11 +277,11 @@ func ensureBoxPrivateSession() error {
 func tabHostname(tabCtx context.Context) (string, error) {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var host string
-		if err := chromedp.Run(tabCtx, chromedp.Evaluate("location.hostname", &host)); err != nil {
+		host, err := currentHostname(tabCtx)
+		if err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(host) != "" {
+		if host != "" {
 			return host, nil
 		}
 		if time.Now().After(deadline) {

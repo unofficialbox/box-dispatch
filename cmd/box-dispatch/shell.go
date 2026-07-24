@@ -2155,7 +2155,10 @@ func (m rootShellModel) viewDeploy(width int) string {
 		action = activePane.Copy().Width(width - 4).Render(m.deployConfirmForm.View())
 	}
 	if m.deployStarted {
-		action = m.spinner.View() + " Deploying provider configuration..."
+		// Box Forms and Apps are provisioned through the browser, which may raise
+		// a Box sign-in window and wait for it before the deploy continues.
+		action = m.spinner.View() + " Deploying provider configuration...\n" +
+			dimStyle.Render("   If a Box sign-in window opens, complete it and the deployment continues.")
 	} else if m.deployDone {
 		action = lipgloss.NewStyle().Bold(true).Foreground(green).Render("Deployment run complete")
 		if m.deploymentAuditPath == "" {
