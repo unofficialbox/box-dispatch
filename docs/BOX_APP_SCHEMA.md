@@ -68,6 +68,33 @@ settings { metadataTemplateID, columns[], gridFields[], search[],
            sortInfo {column,direction}, permission, thumbnailShow, ... }
 ```
 
+## How each block binds to a resource (`erid`)
+
+Captured from a live app. This is the contract a portable definition has to
+express symbolically and re-resolve per environment.
+
+| Block type | `erid` holds | `data` carries | Symbolic form in a definition |
+|---|---|---|---|
+| `fileFolder` | the **numeric folder id** (`375833318039`) | `contentType: "folder"`, `contentName` | folder name, e.g. `01 - Intake` |
+| `shortcut` | a **URL** (`https://<tenant>.ent.box.com/f/…`, `/s/…`, `/sign/inbox`) | — | named target, e.g. the Hub, or a literal path like `/sign/inbox` |
+| `form` | `"form_" + formId` | — | form title, e.g. `New Contract Request` |
+| `chart` / `search` | a **savedSearch id** | `chartType`, `templateKey`, `attributeToVisualize`, `categoriesCount`, `barChartOrientation` | metadata template key + attribute (already environment-independent) |
+
+Charts and searches are the only blocks whose binding is not a plain id or URL:
+they point at a `savedSearch` record, which is why that record has to be created
+(or derived) at deploy rather than simply rewritten.
+
+Note `shortcut` erids are absolute tenant URLs, so they must be rewritten to the
+target tenant host — not just repointed at a new id.
+
+### Read-only cross-check
+
+The public API exposes `GET /folders/{id}/app_item_associations` and
+`GET /files/{id}/app_item_associations`, which report the app items associated
+with a folder or file. These are **read-only** — useful for verifying what a
+deploy produced, and for confirming the JSON shape, but not a write path. There
+is no public `/app_items/{id}` (404).
+
 ## What a portable definition must strip and rebind
 
 | Field | Handling |
