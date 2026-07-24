@@ -217,28 +217,38 @@ func destroyBoxPrivateSurfaces(root string, box boxContext, resources []Resource
 		outcome := TeardownOutcome{Resource: resource}
 		switch resource.Kind {
 		case "form":
-			switch {
-			case response.Result.Form == nil:
+			if response.Result.Form == nil {
 				outcome.Error = "the browser returned no Box Form result"
-			case response.Result.Form.Present:
-				outcome.Error = firstNonEmpty(response.Result.Form.Outcome, "the Box Form was not removed")
-			default:
-				outcome.Deleted = true
+			} else {
+				applyPrivateDestroyOutcome(&outcome, response.Result.Form.Outcome, "Box Form")
 			}
 		case "app":
-			switch {
-			case response.Result.App == nil:
+			if response.Result.App == nil {
 				outcome.Error = "the browser returned no Box App result"
-			case response.Result.App.Present:
-				outcome.Error = firstNonEmpty(response.Result.App.Outcome, "the Box App was not removed")
-			default:
-				outcome.Deleted = true
+			} else {
+				applyPrivateDestroyOutcome(&outcome, response.Result.App.Outcome, "Box App")
 			}
 		}
 		outcomes = append(outcomes, outcome)
 		handled[resourceKey(resource)] = true
 	}
 	return outcomes, handled
+}
+
+// applyPrivateDestroyOutcome records a delete only when the browser reported it
+// actually happened. "absent" must never count as deleted: an unauthenticated
+// session makes every surface look absent (the Box app tier answers 200 with an
+// empty list rather than 401), which would otherwise report a reset that never
+// removed anything.
+func applyPrivateDestroyOutcome(outcome *TeardownOutcome, reported, label string) {
+	switch reported {
+	case "deleted":
+		outcome.Deleted = true
+	case "absent":
+		outcome.Error = fmt.Sprintf("%s was not found in Box; nothing was removed", label)
+	default:
+		outcome.Error = firstNonEmpty(reported, label+" was not removed")
+	}
 }
 
 func privateResourceLinks(resources []ResourceReference) map[string]privateBoxLink {
@@ -279,7 +289,7 @@ func boxPrivateBrowserScript(payload string) string {
 	return fmt.Sprintf(`window.__boxDispatchPrivateResult=null;window.__boxDispatchPrivateNetwork=[];(async()=>{
 "use strict";
 const request=%s;
-if(!location.hostname.endsWith(".box.com"))throw new Error("Box Dispatch private API guard requires an authenticated *.box.com tab");
+if(!location.hostname.endsWith(".ent.box.com"))throw new Error("not signed in to Box: expected a <tenant>.ent.box.com tab but this tab is on "+location.hostname+". Sign in to Box in the box-dispatch browser window, then retry");
 const network=window.__boxDispatchPrivateNetwork;
 const capturedFetch=async(url,options={})=>{const entry={startedAt:new Date().toISOString(),method:options.method||"GET",url:String(url),requestBody:null,status:null,responseBody:null};if(options.body instanceof FormData){entry.requestBody={};for(const [key,value] of options.body.entries())entry.requestBody[key]=value}else if(typeof options.body==="string"){try{entry.requestBody=JSON.parse(options.body)}catch{entry.requestBody=options.body}}network.push(entry);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),15000);try{const response=await fetch(url,{...options,signal:controller.signal});entry.status=response.status;const responseText=await response.clone().text();entry.responseBody=responseText;try{entry.responseBody=JSON.parse(responseText)}catch{}return response}finally{clearTimeout(timeout)}};
 const sortValue=value=>Array.isArray(value)?value.map(sortValue):(value&&typeof value==="object")?Object.fromEntries(Object.keys(value).sort().map(key=>[key,sortValue(value[key])])):value;

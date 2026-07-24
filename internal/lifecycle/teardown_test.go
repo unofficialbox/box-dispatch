@@ -100,3 +100,35 @@ func TestDestroyProviderReportsUnsupportedProvider(t *testing.T) {
 		t.Fatal("nothing may be deleted for an unsupported provider")
 	}
 }
+
+func TestPrivateDestroyNeverCountsAbsentAsDeleted(t *testing.T) {
+	// An unauthenticated Box session makes every private surface look "absent"
+	// (the app tier answers 200 with an empty list instead of 401). Reporting
+	// that as deleted would claim a reset that removed nothing.
+	var absent TeardownOutcome
+	applyPrivateDestroyOutcome(&absent, "absent", "Box Form")
+	if absent.Deleted {
+		t.Fatal("an absent surface must never be reported as deleted")
+	}
+	if absent.Error == "" {
+		t.Fatal("an absent surface must explain that nothing was removed")
+	}
+
+	var deleted TeardownOutcome
+	applyPrivateDestroyOutcome(&deleted, "deleted", "Box Form")
+	if !deleted.Deleted || deleted.Error != "" {
+		t.Fatalf("a confirmed delete should be recorded: %+v", deleted)
+	}
+
+	var failed TeardownOutcome
+	applyPrivateDestroyOutcome(&failed, "Box App delete failed: boom", "Box App")
+	if failed.Deleted || failed.Error == "" {
+		t.Fatalf("a failure must not be recorded as deleted: %+v", failed)
+	}
+
+	var empty TeardownOutcome
+	applyPrivateDestroyOutcome(&empty, "", "Box App")
+	if empty.Deleted || empty.Error == "" {
+		t.Fatalf("an empty outcome must not be recorded as deleted: %+v", empty)
+	}
+}
