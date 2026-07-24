@@ -63,12 +63,20 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 	}
 
 	if capability, enabled := enabledCapability(manifest, selection, "Box Hub"); enabled {
-		existing, err := api.hubTitles(ctx)
-		if err != nil {
-			return fmt.Errorf("inspect Box Hubs: %w", err)
-		}
 		component := "Box Hub:" + capability.DisplayName
-		classifyBoxComponent(item, component, existing[capability.DisplayName], !existing[capability.DisplayName])
+		existing, err := api.hubTitles(ctx)
+		switch {
+		case isBoxPermissionError(err):
+			// Hub listing is forbidden for this Box user or app. Without it we
+			// cannot tell whether the hub already exists, and creating one blindly
+			// would duplicate it, so leave it for manual handling.
+			classifyBoxComponent(item, component, false, false)
+			item.Detail = "Box Hub could not be inspected (permission denied); create or verify it manually."
+		case err != nil:
+			return fmt.Errorf("inspect Box Hubs: %w", err)
+		default:
+			classifyBoxComponent(item, component, existing[capability.DisplayName], !existing[capability.DisplayName])
+		}
 	}
 
 	if manifest.CapabilityEnabled("Automate Workflow", selection) && workspaceID != "" {

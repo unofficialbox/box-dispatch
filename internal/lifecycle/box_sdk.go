@@ -207,7 +207,40 @@ func boxRequest(ctx context.Context, method, resource string, body any, headers 
 	if err != nil {
 		return nil, fmt.Errorf("Box API %s %s: %s", method, resource, summarizeCommandOutput(output, err))
 	}
-	return output, nil
+	return boxRequestBody(output, method, resource)
+}
+
+// isBoxPermissionError reports whether a Box API call was refused for access
+// reasons, which callers degrade on rather than treating as a hard failure.
+func isBoxPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "returned 403") || strings.Contains(message, "returned 401")
+}
+
+// boxRequestBody unwraps the Box CLI's response envelope. `box request` emits
+// {"statusCode":…,"headers":…,"body":…} and every caller wants the body, so
+// returning the envelope made each parser read the wrong level: IDs came back
+// empty and existing objects were reported as absent, which re-created them.
+// A non-2xx status is surfaced as an error rather than parsed as a result.
+func boxRequestBody(output []byte, method, resource string) ([]byte, error) {
+	var envelope struct {
+		StatusCode int             `json:"statusCode"`
+		Body       json.RawMessage `json:"body"`
+	}
+	if json.Unmarshal(output, &envelope) != nil || envelope.StatusCode == 0 {
+		// Not an envelope; hand back whatever the CLI produced.
+		return output, nil
+	}
+	if envelope.StatusCode >= 300 {
+		return nil, fmt.Errorf("Box API %s %s returned %d: %s", method, resource, envelope.StatusCode, strings.TrimSpace(string(envelope.Body)))
+	}
+	if len(envelope.Body) == 0 {
+		return output, nil
+	}
+	return envelope.Body, nil
 }
 
 func (boxCLI) findFolder(_ context.Context, parentID, name string) (string, bool, error) {

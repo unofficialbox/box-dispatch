@@ -768,14 +768,18 @@ func deployBoxFoundation(root string, item Item) Item {
 	deployed = append(deployed, publicDeployed...)
 	item.Resources = append(item.Resources, publicResources...)
 	privateDeployed, privateResources, privateErr := deployBoxPrivateAdapters(root, manifest, settings.Box, selection, item.DeployableComponents, workspaceID, item.Resources)
-	if privateErr != nil {
-		item.Status, item.Detail = StatusFailed, privateErr.Error()
-		return item
-	}
 	deployed = append(deployed, privateDeployed...)
 	item.Resources = append(item.Resources, privateResources...)
+	// Record what succeeded before reporting any failure. Returning early here
+	// discarded every public component that had already been created, so the
+	// run reported nothing deployed while the objects existed in Box.
 	for _, component := range deployed {
 		classifyBoxComponent(&item, component, true, false)
+	}
+	if privateErr != nil {
+		item.Status = StatusFailed
+		item.Detail = fmt.Sprintf("Deployed %d Box components, then failed: %s", len(deployed), privateErr.Error())
+		return item
 	}
 	item.Deployable = len(item.DeployableComponents) > 0
 	if len(item.Missing) == 0 {

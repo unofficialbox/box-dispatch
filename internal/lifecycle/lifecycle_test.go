@@ -228,3 +228,29 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 		t.Fatalf("got %d Box components, want 12: %#v", len(entries), entries)
 	}
 }
+
+func TestBoxRequestBodyUnwrapsCLIEnvelope(t *testing.T) {
+	// `box request` wraps responses; parsing the envelope instead of the body
+	// made IDs come back empty and existing objects look absent.
+	envelope := []byte(`{"statusCode":201,"headers":{"date":"x"},"body":{"id":"12345","type":"hub"}}`)
+	body, err := boxRequestBody(envelope, "POST", "/hubs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := boxResourceID(body); got != "12345" {
+		t.Fatalf("id = %q, want 12345", got)
+	}
+
+	// A non-2xx status must be an error, not a silently parsed result.
+	failure := []byte(`{"statusCode":403,"headers":{},"body":{"message":"forbidden"}}`)
+	if _, err := boxRequestBody(failure, "POST", "/hubs"); err == nil {
+		t.Fatal("a 403 response must surface as an error")
+	}
+
+	// Output that is not an envelope passes through untouched.
+	plain := []byte(`{"entries":[{"title":"a"}]}`)
+	body, err = boxRequestBody(plain, "GET", "/enterprise_hubs")
+	if err != nil || string(body) != string(plain) {
+		t.Fatalf("plain output should pass through, got %q err %v", body, err)
+	}
+}
