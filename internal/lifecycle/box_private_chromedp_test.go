@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -69,5 +71,51 @@ func TestCDPEndpointHonoursOverride(t *testing.T) {
 	t.Setenv(cdpEndpointEnv, "")
 	if got := cdpEndpoint(); got != defaultCDPEndpoint {
 		t.Fatalf("endpoint = %q, want the default", got)
+	}
+}
+
+func TestCDPPortFallsBackToDefault(t *testing.T) {
+	if got := cdpPort("http://127.0.0.1:9333"); got != "9333" {
+		t.Fatalf("port = %q, want 9333", got)
+	}
+	if got := cdpPort("not a url"); got != "9222" {
+		t.Fatalf("port = %q, want the 9222 default", got)
+	}
+}
+
+func TestChromeAutoLaunchCanBeDisabled(t *testing.T) {
+	t.Setenv(chromeAutoLaunchEnv, "false")
+	if chromeAutoLaunchEnabled() {
+		t.Fatal("auto launch should be disabled")
+	}
+	if err := launchChrome(context.Background(), "http://127.0.0.1:9222"); err == nil {
+		t.Fatal("launch must refuse when auto launch is disabled")
+	}
+	t.Setenv(chromeAutoLaunchEnv, "")
+	if !chromeAutoLaunchEnabled() {
+		t.Fatal("auto launch should default to enabled")
+	}
+}
+
+func TestChromeExecutableHonoursOverride(t *testing.T) {
+	t.Setenv(chromeExecutableEnv, filepath.Join(t.TempDir(), "does-not-exist"))
+	if _, err := chromeExecutable(); err == nil {
+		t.Fatal("a missing override path should error rather than silently fall through")
+	}
+	// A real file satisfies the override.
+	stub := filepath.Join(t.TempDir(), "chrome")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(chromeExecutableEnv, stub)
+	got, err := chromeExecutable()
+	if err != nil || got != stub {
+		t.Fatalf("executable = %q, err = %v; want the override", got, err)
+	}
+}
+
+func TestChromeCandidatesAreProvidedForThisPlatform(t *testing.T) {
+	if len(chromeCandidates()) == 0 {
+		t.Fatal("no browser candidates for this platform")
 	}
 }

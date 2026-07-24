@@ -102,9 +102,19 @@ func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, er
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	wsURL, err := cdpWebSocketURL(ctx, cdpEndpoint())
+	// Attach to a browser that is already listening, otherwise start one.
+	endpoint := cdpEndpoint()
+	launched := false
+	wsURL, err := cdpWebSocketURL(ctx, endpoint)
 	if err != nil {
-		return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), err)
+		if launchErr := launchChrome(ctx, endpoint); launchErr != nil {
+			return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), launchErr)
+		}
+		launched = true
+		wsURL, err = cdpWebSocketURL(ctx, endpoint)
+		if err != nil {
+			return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), err)
+		}
 	}
 	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(ctx, wsURL)
 	defer cancelAllocator()
@@ -120,16 +130,24 @@ func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, er
 	for _, info := range infos {
 		targets = append(targets, &chromedpTarget{ID: info.TargetID.String(), Type: info.Type, URL: info.URL})
 	}
-	picked, err := pickBoxTarget(targets)
-	if err != nil {
-		return response, err
-	}
-
 	tabCtx, cancelTab := browserCtx, func() {}
-	for _, info := range infos {
-		if info.TargetID.String() == picked {
-			tabCtx, cancelTab = chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(info.TargetID))
-			break
+	if picked, pickErr := pickBoxTarget(targets); pickErr == nil {
+		for _, info := range infos {
+			if info.TargetID.String() == picked {
+				tabCtx, cancelTab = chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(info.TargetID))
+				break
+			}
+		}
+	} else {
+		// No Box tab yet: open one on the tenant host the adapter requires.
+		target := enterpriseBoxURL(ctx)
+		if !strings.Contains(target, boxTabHost) {
+			return response, fmt.Errorf("%w\ncould not determine the enterprise Box host; sign in with the Box CLI first", pickErr)
+		}
+		tabCtx, cancelTab = chromedp.NewContext(allocatorCtx)
+		if navErr := chromedp.Run(tabCtx, chromedp.Navigate(target)); navErr != nil {
+			cancelTab()
+			return response, fmt.Errorf("open %s in the attached browser: %w", target, navErr)
 		}
 	}
 	defer cancelTab()
@@ -157,9 +175,18 @@ func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, er
 		}
 		_ = writeBoxPrivateCapture([]byte(raw))
 		if !response.OK {
-			return response, fmt.Errorf("%s", firstNonEmpty(response.Error, "private Box API request failed"))
+			return response, withSignInHint(fmt.Errorf("%s", firstNonEmpty(response.Error, "private Box API request failed")), launched)
 		}
 		return response, nil
 	}
-	return response, fmt.Errorf("timed out waiting for the attached Box tab")
+	return response, withSignInHint(fmt.Errorf("timed out waiting for the attached Box tab"), launched)
+}
+
+// withSignInHint explains the likely cause when box-dispatch had to start the
+// browser itself: a freshly created profile has no Box session yet.
+func withSignInHint(err error, launched bool) error {
+	if !launched {
+		return err
+	}
+	return fmt.Errorf("%w\nA browser was just started with a new profile. Sign in to Box in that window, then run this again", err)
 }
