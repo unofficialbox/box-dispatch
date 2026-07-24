@@ -137,3 +137,24 @@ func TestPickBoxTargetIgnoresLoginPageWithTenantRedirect(t *testing.T) {
 		t.Fatalf("picked %q (err %v), want the tenant tab", got, err)
 	}
 }
+
+func TestFirstPageTargetIDReusesAnExistingTab(t *testing.T) {
+	// Only a "page" can be navigated; workers and background pages are skipped so a
+	// half-open browser is driven through a tab it already has rather than a fresh
+	// target it cannot create (the CDP -32000 case).
+	targets := []*chromedpTarget{
+		{Type: "service_worker", ID: "sw"},
+		{Type: "background_page", ID: "bg"},
+		{Type: "page", ID: "app-box-tab", URL: "https://app.box.com"},
+		{Type: "page", ID: "second"},
+	}
+	if got := firstPageTargetID(targets); got != "app-box-tab" {
+		t.Fatalf("firstPageTargetID = %q, want the first page tab", got)
+	}
+	if got := firstPageTargetID([]*chromedpTarget{{Type: "service_worker", ID: "x"}}); got != "" {
+		t.Fatalf("no page tab should yield empty, got %q", got)
+	}
+	if got := firstPageTargetID(nil); got != "" {
+		t.Fatalf("empty target list should yield empty, got %q", got)
+	}
+}

@@ -131,6 +131,25 @@ func (s *boxTabSession) close() {
 	}
 }
 
+// firstPageTargetID returns the id of the first real page tab, or "" when the
+// browser exposes none. Background pages and workers are skipped: only a page
+// can be navigated to the tenant host.
+func firstPageTargetID(targets []*chromedpTarget) string {
+	for _, t := range targets {
+		if t.Type == "page" {
+			return t.ID
+		}
+	}
+	return ""
+}
+
+// staleBrowserHint guides recovery when the attached browser accepts a DevTools
+// connection but cannot open a tab — usually a half-exited Chrome still holding
+// its profile. Quitting it lets box-dispatch launch a fresh one.
+func staleBrowserHint() string {
+	return "the attached Chrome accepted a connection but could not open a tab; quit it fully (or close the debugging window) and re-run so a fresh browser launches"
+}
+
 // openBoxTab attaches to a listening browser, starting one if necessary, and
 // returns a context bound to a tab on the tenant Box host. It reports whether
 // the browser had to be launched, which tells the caller a fresh profile may not
@@ -193,17 +212,28 @@ func openBoxTab(ctx context.Context) (*boxTabSession, error) {
 		}
 	}
 
-	// No Box tab yet: open one on the tenant host the adapter requires.
-	target := enterpriseBoxURL(ctx)
-	if !strings.Contains(target, boxTabHost) {
+	// No Box tab yet: reach the tenant host the adapter requires.
+	tenant := enterpriseBoxURL(ctx)
+	if !strings.Contains(tenant, boxTabHost) {
 		session.close()
 		return nil, fmt.Errorf("could not determine the enterprise Box host; sign in with the Box CLI first")
 	}
-	tabCtx, cancelTab := chromedp.NewContext(allocatorCtx)
+	// Prefer navigating a page tab that already exists over creating a new one. On
+	// a browser whose DevTools endpoint is listening but half-open — a stale
+	// profile lock, or the debugging tab having been closed under it — creating a
+	// fresh target fails with CDP "-32000 no browser is open", while navigating an
+	// existing tab succeeds. Only mint a new target when the browser has none.
+	var tabCtx context.Context
+	var cancelTab context.CancelFunc
+	if reuse := firstPageTargetID(targets); reuse != "" {
+		tabCtx, cancelTab = chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(target.ID(reuse)))
+	} else {
+		tabCtx, cancelTab = chromedp.NewContext(allocatorCtx)
+	}
 	session.cancels = append(session.cancels, cancelTab)
-	if navErr := chromedp.Run(tabCtx, chromedp.Navigate(target)); navErr != nil {
+	if navErr := chromedp.Run(tabCtx, chromedp.Navigate(tenant)); navErr != nil {
 		session.close()
-		return nil, fmt.Errorf("open %s in the attached browser: %w", target, navErr)
+		return nil, fmt.Errorf("open %s in the attached browser: %w\n%s", tenant, navErr, staleBrowserHint())
 	}
 	// Box bounces through the login host when a session needs establishing, so
 	// let the redirect chain settle before the caller inspects or scripts the tab.
