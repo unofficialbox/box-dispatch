@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"time"
@@ -257,86 +256,6 @@ func privateFolderID(resources map[string]privateBoxLink, name, fallback string)
 		return resource.ID
 	}
 	return fallback
-}
-
-// executeBoxPrivateBrowser runs the private-surface script in an authenticated
-// Box tab. It prefers the Chrome DevTools Protocol transport, which works on any
-// platform and does not steal focus, and falls back to AppleScript when no
-// attachable Chrome is listening. Both run the same script against the same
-// internal Box application API.
-func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, error) {
-	if boxPrivateChromeAvailable() {
-		return executeBoxPrivateChrome(request)
-	}
-	return executeBoxPrivateAppleScript(request)
-}
-
-func executeBoxPrivateAppleScript(request boxPrivateRequest) (boxPrivateResponse, error) {
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return boxPrivateResponse{}, err
-	}
-	script := boxPrivateBrowserScript(string(payload))
-	tempFile, err := os.CreateTemp("", "box-dispatch-box-private-*.js")
-	if err != nil {
-		return boxPrivateResponse{}, err
-	}
-	tempPath := tempFile.Name()
-	defer os.Remove(tempPath)
-	if _, err := tempFile.WriteString(script); err != nil {
-		tempFile.Close()
-		return boxPrivateResponse{}, err
-	}
-	if err := tempFile.Close(); err != nil {
-		return boxPrivateResponse{}, err
-	}
-	activate := fmt.Sprintf(`
-set foundBoxTab to false
-tell application "Google Chrome"
-  repeat with windowIndex from 1 to count of windows
-    repeat with tabIndex from 1 to count of tabs of window windowIndex
-      set tabURL to URL of tab tabIndex of window windowIndex
-      if tabURL contains ".ent.box.com" then
-        set active tab index of window windowIndex to tabIndex
-        set index of window windowIndex to 1
-        set foundBoxTab to true
-        exit repeat
-      end if
-    end repeat
-    if foundBoxTab then exit repeat
-  end repeat
-  if not foundBoxTab then error "Open an authenticated Box tab before deploying private surfaces"
-  activate
-  set scriptSource to read POSIX file %q
-  execute active tab of front window javascript scriptSource
-end tell
-`, tempPath)
-	if output, runErr := exec.Command("osascript", "-e", activate).CombinedOutput(); runErr != nil {
-		return boxPrivateResponse{}, fmt.Errorf("execute private Box API adapter in authenticated Chrome: %s", summarizeCommandOutput(output, runErr))
-	}
-	var response boxPrivateResponse
-	query := `tell application "Google Chrome"
-repeat with windowIndex from 1 to count of windows
-  repeat with tabIndex from 1 to count of tabs of window windowIndex
-    set tabURL to URL of tab tabIndex of window windowIndex
-    if tabURL contains ".ent.box.com" then return execute tab tabIndex of window windowIndex javascript "JSON.stringify(window.__boxDispatchPrivateResult)"
-  end repeat
-end repeat
-error "Authenticated enterprise Box tab is no longer open"
-end tell`
-	for range 120 {
-		time.Sleep(500 * time.Millisecond)
-		result, readErr := exec.Command("osascript", "-e", query).Output()
-		result = bytes.TrimSpace(result)
-		if readErr == nil && len(result) > 0 && string(result) != "null" && json.Unmarshal(result, &response) == nil {
-			_ = writeBoxPrivateCapture(result)
-			if !response.OK {
-				return response, fmt.Errorf("%s", firstNonEmpty(response.Error, "private Box API request failed"))
-			}
-			return response, nil
-		}
-	}
-	return response, fmt.Errorf("timed out waiting for the authenticated Box tab")
 }
 
 func writeBoxPrivateCapture(result []byte) error {

@@ -18,10 +18,9 @@ import (
 //
 //	Google\ Chrome --remote-debugging-port=9222
 //
-// Compared with the AppleScript transport this works on any platform, does not
-// steal window focus, and waits on the page instead of polling through osascript.
-// It runs the same injected script, so the dependency on Box's internal
-// application API is unchanged.
+// This works identically on macOS, Windows and Linux, does not steal window
+// focus, and waits on the page directly. It runs the same injected script, so
+// the dependency on Box's internal application API is unchanged.
 const (
 	defaultCDPEndpoint = "http://127.0.0.1:9222"
 	cdpEndpointEnv     = "BOX_DISPATCH_CDP_URL"
@@ -37,8 +36,7 @@ func cdpEndpoint() string {
 }
 
 // cdpWebSocketURL resolves the browser-level websocket debugger URL from the
-// DevTools HTTP endpoint. A failure here means Chrome is not listening, which is
-// how the caller decides to fall back to another transport.
+// DevTools HTTP endpoint. A failure here means Chrome is not listening.
 func cdpWebSocketURL(ctx context.Context, endpoint string) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/json/version", nil)
 	if err != nil {
@@ -64,12 +62,12 @@ func cdpWebSocketURL(ctx context.Context, endpoint string) (string, error) {
 	return payload.WebSocketDebuggerURL, nil
 }
 
-// boxPrivateChromeAvailable reports whether an attachable Chrome is listening.
-func boxPrivateChromeAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, err := cdpWebSocketURL(ctx, cdpEndpoint())
-	return err == nil
+// chromeUnavailableMessage explains how to expose the DevTools endpoint, since
+// a normally launched Chrome does not listen for CDP.
+func chromeUnavailableMessage() string {
+	return fmt.Sprintf(
+		"could not attach to Chrome at %s.\nStart Chrome with remote debugging and sign in to Box, then retry:\n  macOS:   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --remote-debugging-port=9222\n  Windows: chrome.exe --remote-debugging-port=9222\n  Linux:   google-chrome --remote-debugging-port=9222\nSet %s to use a different endpoint.",
+		cdpEndpoint(), cdpEndpointEnv)
 }
 
 // pickBoxTarget selects the authenticated enterprise Box tab from the attached
@@ -91,9 +89,10 @@ type chromedpTarget struct {
 	URL  string
 }
 
-// executeBoxPrivateChrome runs the private-surface script in an already
-// authenticated Box tab over the Chrome DevTools Protocol.
-func executeBoxPrivateChrome(request boxPrivateRequest) (boxPrivateResponse, error) {
+// executeBoxPrivateBrowser runs the private-surface script in an already
+// authenticated Box tab over the Chrome DevTools Protocol. This is the only
+// transport: it is the one that works identically on macOS, Windows and Linux.
+func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, error) {
 	var response boxPrivateResponse
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -105,7 +104,7 @@ func executeBoxPrivateChrome(request boxPrivateRequest) (boxPrivateResponse, err
 
 	wsURL, err := cdpWebSocketURL(ctx, cdpEndpoint())
 	if err != nil {
-		return response, fmt.Errorf("attach to Chrome at %s: %w", cdpEndpoint(), err)
+		return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), err)
 	}
 	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(ctx, wsURL)
 	defer cancelAllocator()
