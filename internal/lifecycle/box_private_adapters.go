@@ -259,7 +259,19 @@ func privateFolderID(resources map[string]privateBoxLink, name, fallback string)
 	return fallback
 }
 
+// executeBoxPrivateBrowser runs the private-surface script in an authenticated
+// Box tab. It prefers the Chrome DevTools Protocol transport, which works on any
+// platform and does not steal focus, and falls back to AppleScript when no
+// attachable Chrome is listening. Both run the same script against the same
+// internal Box application API.
 func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, error) {
+	if boxPrivateChromeAvailable() {
+		return executeBoxPrivateChrome(request)
+	}
+	return executeBoxPrivateAppleScript(request)
+}
+
+func executeBoxPrivateAppleScript(request boxPrivateRequest) (boxPrivateResponse, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return boxPrivateResponse{}, err
