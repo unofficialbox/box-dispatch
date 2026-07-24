@@ -133,7 +133,7 @@ func privateAdapterRequest(root string, manifest solution.Manifest, settings sol
 		}
 		component := "Box Form:" + formCapability.DisplayName
 		components["form"] = component
-		if operation == "inspect" || slices.Contains(deployable, component) {
+		if operation == "inspect" || operation == "destroy" || slices.Contains(deployable, component) {
 			form := &boxPrivateFormRequest{Title: formTitle, FolderID: privateFolderID(resources, "01 - Intake", workspaceID)}
 			if operation == "deploy" {
 				data, err := os.ReadFile(filepath.Join(root, "config", "box", filepath.FromSlash(formCapability.Source)))
@@ -160,7 +160,7 @@ func privateAdapterRequest(root string, manifest solution.Manifest, settings sol
 		}
 		component := "Box App:" + appCapability.DisplayName
 		components["app"] = component
-		if operation == "inspect" || slices.Contains(deployable, component) {
+		if operation == "inspect" || operation == "destroy" || slices.Contains(deployable, component) {
 			request.App = &boxPrivateAppRequest{
 				Title: appTitle, Description: "Operational CLM cockpit for governed intake, document risk, approvals, approved clauses, execution, and renewal readiness.",
 				TemplateTitle: firstNonEmpty(appCapability.Template, appCapability.DisplayName), FormTitle: formTitle,
@@ -174,6 +174,72 @@ func privateAdapterRequest(root string, manifest solution.Manifest, settings sol
 		delete(components, "app")
 	}
 	return request, components, nil
+}
+
+// destroyBoxPrivateSurfaces removes the Box Form and Box App through the
+// authenticated browser, the only mechanism that can delete them. It returns an
+// outcome per recorded private resource plus the set it handled, so the API
+// teardown pass can skip them. Browser failures are reported per resource rather
+// than aborting the reset.
+func destroyBoxPrivateSurfaces(root string, box boxContext, resources []ResourceReference) ([]TeardownOutcome, map[string]bool) {
+	handled := map[string]bool{}
+	outcomes := []TeardownOutcome{}
+	pending := []ResourceReference{}
+	for _, resource := range resources {
+		if resource.Kind == "form" || resource.Kind == "app" {
+			pending = append(pending, resource)
+		}
+	}
+	if len(pending) == 0 {
+		return outcomes, handled
+	}
+
+	fail := func(reason string) ([]TeardownOutcome, map[string]bool) {
+		for _, resource := range pending {
+			outcomes = append(outcomes, TeardownOutcome{Resource: resource, Error: reason})
+			handled[resourceKey(resource)] = true
+		}
+		return outcomes, handled
+	}
+
+	request, components, err := privateAdapterRequest(root, box.manifest, box.settings.Box, box.selection, "destroy", nil, "", nil)
+	if err != nil {
+		return fail("build private surface request: " + err.Error())
+	}
+	if len(components) == 0 {
+		return fail("no private surface adapter is configured for this solution")
+	}
+	response, err := executeBoxPrivateBrowser(request)
+	if err != nil {
+		return fail("remove through the authenticated browser: " + err.Error())
+	}
+
+	for _, resource := range pending {
+		outcome := TeardownOutcome{Resource: resource}
+		switch resource.Kind {
+		case "form":
+			switch {
+			case response.Result.Form == nil:
+				outcome.Error = "the browser returned no Box Form result"
+			case response.Result.Form.Present:
+				outcome.Error = firstNonEmpty(response.Result.Form.Outcome, "the Box Form was not removed")
+			default:
+				outcome.Deleted = true
+			}
+		case "app":
+			switch {
+			case response.Result.App == nil:
+				outcome.Error = "the browser returned no Box App result"
+			case response.Result.App.Present:
+				outcome.Error = firstNonEmpty(response.Result.App.Outcome, "the Box App was not removed")
+			default:
+				outcome.Deleted = true
+			}
+		}
+		outcomes = append(outcomes, outcome)
+		handled[resourceKey(resource)] = true
+	}
+	return outcomes, handled
 }
 
 func privateResourceLinks(resources []ResourceReference) map[string]privateBoxLink {
@@ -296,9 +362,11 @@ const stableId=async key=>{const bytes=await crypto.subtle.digest("SHA-256",new 
 const formContent=async(spec,folderId)=>{const items=[],layout=[],components={"group-0":{id:"group-0",type:"group",label:spec.name,description:String(spec.description||""),items}};let y=0;for(const field of spec.fields){const id=await stableId(field.key);const common={required:field.required,label:field.label,id};let component;if(field.type==="shortText")component={type:"textField",textType:"text",...common};else if(field.type==="longText")component={type:"textField",textType:"text",multiline:true,...common};else if(field.type==="email")component={type:"textField",textType:"email",visible:true,...common};else if(field.type==="number")component={type:"numberField",...common};else if(field.type==="dropdown")component={type:"selectField",maximumSelections:0,options:field.options,...common};else if(field.type==="date")component={type:"dateTimeField",dateTimeMode:"date",dateLabel:"",timeLabel:"",...common};else if(field.type==="fileUpload"){if(!folderId)throw new Error("Box Form file upload requires a resolved intake folder ID");component={type:"uploadField",folderId,showFileDescription:false,...common}}else throw new Error("Unsupported Box Form field type: "+field.type);const height={date:151,fileUpload:391,longText:188}[field.type]||148;items.push(id);layout.push({w:2,h:height,x:0,y,i:id,moved:false,static:false});y+=height;components[id]=component}return {root:"group-0",layouts:{"group-0":{layout}},components,theme:null,type:"form"}};
 const findForms=async title=>{const listed=await forms("/file-requests?limit=20&sortDirection=DESC&sortField=modifiedAt&type=form");return formEntries(listed).filter(item=>(item?.title||item?.form?.title)===title)};
 const resolveForm=async title=>{const matches=await findForms(title);if(matches.length>1)throw new Error("Duplicate Box Form title: "+title);if(!matches.length)return null;const summary=matches[0],id=summary?.fileRequestId||summary?.id||summary?.formId;if(!id)throw new Error("Box Form match has no identifier");const detail=await forms("/file-request/"+id);return {summary,detail,id}};
+const destroyForm=async(current,title)=>{if(!current)return {present:false,outcome:"absent",title,id:""};const id=String(current.id);try{await forms("/file-request/"+id,{method:"DELETE"});return {present:false,outcome:"deleted",title,id}}catch(error){return {present:true,outcome:"Box Form delete failed: "+String(error?.message||error),title,id}}};
+const destroyApp=async(summary,title)=>{if(!summary)return {present:false,outcome:"absent",title,id:""};const id=String(summary._id);const attempts=["app.remove","app.delete","app.archive"];let lastError=null;for(const method of attempts){try{await meteor(method,[id]);return {present:false,outcome:"deleted",title,id}}catch(error){lastError=error}}return {present:true,outcome:"Box App delete failed: "+String(lastError?.message||lastError),title,id}};
 const result={};
-if(request.form){let current=await resolveForm(request.form.title);if(request.operation==="inspect")result.form={present:!!current,title:request.form.title,id:current?.id||"",formId:String(current?.detail?.form?.id||current?.summary?.formId||""),fileRequestId:String(current?.id||""),urlId:String(current?.detail?.urlId||current?.detail?.form?.urlId||current?.summary?.urlId||"")};else{const spec={...request.form.definition,name:request.form.title};const desired=await formContent(spec,request.form.folderId);let outcome="unchanged";if(!current){await forms("/form",{method:"POST",body:multipart({title:request.form.title,content:desired})});outcome="created";current=await resolveForm(request.form.title);if(!current)throw new Error("Box Form create verification failed")}else{const raw=current.detail?.form?.content;const existing=typeof raw==="string"?JSON.parse(raw):raw;if(canonical(existing)!==canonical(desired)){const versionId=current.detail?.form?.versionId||current.detail?.formVersion?.id||current.summary?.formVersionId;if(!versionId)throw new Error("Existing Box Form has no version identifier");await forms("/form-version/"+versionId,{method:"POST",body:multipart({fileRequestId:current.id,content:desired})});outcome="updated";current=await resolveForm(request.form.title)}}result.form={present:true,outcome,title:request.form.title,id:String(current.id||""),formId:String(current.detail?.form?.id||current.summary?.formId||""),fileRequestId:String(current.id||""),urlId:String(current.detail?.urlId||current.detail?.form?.urlId||current.summary?.urlId||"")}}}
-if(request.app){const listed=await meteor("app.list",[]);const exact=(listed.apps||[]).filter(app=>app?.name===request.app.title);if(exact.length>1)throw new Error("Duplicate Box App title: "+request.app.title);if(request.operation==="inspect")result.app={present:exact.length===1,title:request.app.title,id:exact[0]?._id||""};else{const templates=(listed.apps||[]).filter(app=>app?.name===request.app.templateTitle);if(!templates.length)throw new Error("Box App template not found: "+request.app.templateTitle);let targetSummary=exact[0],outcome="updated";if(!targetSummary){await meteor("app.create",[{name:request.app.title,initialPageName:"Home"}]);const refreshed=await meteor("app.list",[]);targetSummary=(refreshed.apps||[]).find(app=>app?.name===request.app.title);outcome="created"}if(!targetSummary)throw new Error("Box App create verification failed");const source=await meteor("app.get",[templates[0]._id]);const target=await meteor("app.get",[targetSummary._id]);const randomId=()=>crypto.randomUUID().replaceAll("-","").slice(0,17);const rewriteEnterprise=value=>typeof value==="string"?value.replaceAll(/enterprise_\d+/g,"enterprise_"+target.enterpriseId):Array.isArray(value)?value.map(rewriteEnterprise):(value&&typeof value==="object")?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,rewriteEnterprise(v)])):value;const formRef=request.app.formTitle?await resolveForm(request.app.formTitle):null;const pages=source.pages.map((sourcePage,pageIndex)=>{const pageId=pageIndex===0?(target.pages[0]?._id||randomId()):randomId();const sectionMap=new Map();const sections=sourcePage.sections.map(section=>{const id=randomId();sectionMap.set(section.id,id);return {title:section.title,description:section.description,layout:section.layout,id,position:section.position,size:section.size}});const items=sourcePage.items.map(sourceItem=>{const item=rewriteEnterprise(JSON.parse(JSON.stringify(sourceItem)));for(const key of ["createdAt","createdBy","modifiedAt","modifiedBy","searchFields","savedSearch"])delete item[key];item.id=randomId();item.sectionId=sectionMap.get(sourceItem.sectionId);item.version=2;if(item.type==="fileFolder"){const link=request.resources?.[item.name];if(link)item.erid=link.kind==="file"?"file_"+link.id:link.id}if(item.type==="form"&&formRef){item.erid="form_"+formRef.id;item.data={...item.data,formId:String(formRef.detail?.form?.id||formRef.summary?.formId||""),fileRequestId:String(formRef.id||""),urlId:String(formRef.detail?.urlId||formRef.detail?.form?.urlId||formRef.summary?.urlId||"")}}if(item.type==="shortcut"){const preferred=item.name.includes("Intake")?request.resources?.["01 - Intake"]:item.name.includes("Workspace")?request.resources?.[source.pages[0].items.find(value=>value.type==="fileFolder"&&value.data?.contentType==="folder")?.name]:item.name.includes("Hub")?Object.values(request.resources||{}).find(value=>value.kind==="hub"):null;if(preferred?.url)item.erid=preferred.url}return item});return {_id:pageId,name:sourcePage.name,sections,items}});let locked=false;try{await meteor("app.lock",[target._id]);locked=true;await meteor("app.update.all",[{_id:target._id,name:request.app.title,description:request.app.description,pages,fromVersion:target.versionNumber}])}finally{if(locked)try{await meteor("app.cancelEdit",[target._id])}catch{}}const verified=await meteor("app.get",[target._id]);result.app={present:true,outcome,title:verified.name,id:verified._id,pageCount:verified.pages?.length||0,sectionCount:(verified.pages||[]).reduce((n,p)=>n+(p.sections?.length||0),0),blockCount:(verified.pages||[]).reduce((n,p)=>n+(p.items?.length||0),0)}}}
+if(request.form){let current=await resolveForm(request.form.title);if(request.operation==="destroy")result.form=await destroyForm(current,request.form.title);else if(request.operation==="inspect")result.form={present:!!current,title:request.form.title,id:current?.id||"",formId:String(current?.detail?.form?.id||current?.summary?.formId||""),fileRequestId:String(current?.id||""),urlId:String(current?.detail?.urlId||current?.detail?.form?.urlId||current?.summary?.urlId||"")};else{const spec={...request.form.definition,name:request.form.title};const desired=await formContent(spec,request.form.folderId);let outcome="unchanged";if(!current){await forms("/form",{method:"POST",body:multipart({title:request.form.title,content:desired})});outcome="created";current=await resolveForm(request.form.title);if(!current)throw new Error("Box Form create verification failed")}else{const raw=current.detail?.form?.content;const existing=typeof raw==="string"?JSON.parse(raw):raw;if(canonical(existing)!==canonical(desired)){const versionId=current.detail?.form?.versionId||current.detail?.formVersion?.id||current.summary?.formVersionId;if(!versionId)throw new Error("Existing Box Form has no version identifier");await forms("/form-version/"+versionId,{method:"POST",body:multipart({fileRequestId:current.id,content:desired})});outcome="updated";current=await resolveForm(request.form.title)}}result.form={present:true,outcome,title:request.form.title,id:String(current.id||""),formId:String(current.detail?.form?.id||current.summary?.formId||""),fileRequestId:String(current.id||""),urlId:String(current.detail?.urlId||current.detail?.form?.urlId||current.summary?.urlId||"")}}}
+if(request.app){const listed=await meteor("app.list",[]);const exact=(listed.apps||[]).filter(app=>app?.name===request.app.title);if(exact.length>1)throw new Error("Duplicate Box App title: "+request.app.title);if(request.operation==="destroy")result.app=await destroyApp(exact[0],request.app.title);else if(request.operation==="inspect")result.app={present:exact.length===1,title:request.app.title,id:exact[0]?._id||""};else{const templates=(listed.apps||[]).filter(app=>app?.name===request.app.templateTitle);if(!templates.length)throw new Error("Box App template not found: "+request.app.templateTitle);let targetSummary=exact[0],outcome="updated";if(!targetSummary){await meteor("app.create",[{name:request.app.title,initialPageName:"Home"}]);const refreshed=await meteor("app.list",[]);targetSummary=(refreshed.apps||[]).find(app=>app?.name===request.app.title);outcome="created"}if(!targetSummary)throw new Error("Box App create verification failed");const source=await meteor("app.get",[templates[0]._id]);const target=await meteor("app.get",[targetSummary._id]);const randomId=()=>crypto.randomUUID().replaceAll("-","").slice(0,17);const rewriteEnterprise=value=>typeof value==="string"?value.replaceAll(/enterprise_\d+/g,"enterprise_"+target.enterpriseId):Array.isArray(value)?value.map(rewriteEnterprise):(value&&typeof value==="object")?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,rewriteEnterprise(v)])):value;const formRef=request.app.formTitle?await resolveForm(request.app.formTitle):null;const pages=source.pages.map((sourcePage,pageIndex)=>{const pageId=pageIndex===0?(target.pages[0]?._id||randomId()):randomId();const sectionMap=new Map();const sections=sourcePage.sections.map(section=>{const id=randomId();sectionMap.set(section.id,id);return {title:section.title,description:section.description,layout:section.layout,id,position:section.position,size:section.size}});const items=sourcePage.items.map(sourceItem=>{const item=rewriteEnterprise(JSON.parse(JSON.stringify(sourceItem)));for(const key of ["createdAt","createdBy","modifiedAt","modifiedBy","searchFields","savedSearch"])delete item[key];item.id=randomId();item.sectionId=sectionMap.get(sourceItem.sectionId);item.version=2;if(item.type==="fileFolder"){const link=request.resources?.[item.name];if(link)item.erid=link.kind==="file"?"file_"+link.id:link.id}if(item.type==="form"&&formRef){item.erid="form_"+formRef.id;item.data={...item.data,formId:String(formRef.detail?.form?.id||formRef.summary?.formId||""),fileRequestId:String(formRef.id||""),urlId:String(formRef.detail?.urlId||formRef.detail?.form?.urlId||formRef.summary?.urlId||"")}}if(item.type==="shortcut"){const preferred=item.name.includes("Intake")?request.resources?.["01 - Intake"]:item.name.includes("Workspace")?request.resources?.[source.pages[0].items.find(value=>value.type==="fileFolder"&&value.data?.contentType==="folder")?.name]:item.name.includes("Hub")?Object.values(request.resources||{}).find(value=>value.kind==="hub"):null;if(preferred?.url)item.erid=preferred.url}return item});return {_id:pageId,name:sourcePage.name,sections,items}});let locked=false;try{await meteor("app.lock",[target._id]);locked=true;await meteor("app.update.all",[{_id:target._id,name:request.app.title,description:request.app.description,pages,fromVersion:target.versionNumber}])}finally{if(locked)try{await meteor("app.cancelEdit",[target._id])}catch{}}const verified=await meteor("app.get",[target._id]);result.app={present:true,outcome,title:verified.name,id:verified._id,pageCount:verified.pages?.length||0,sectionCount:(verified.pages||[]).reduce((n,p)=>n+(p.sections?.length||0),0),blockCount:(verified.pages||[]).reduce((n,p)=>n+(p.items?.length||0),0)}}}
 return {ok:true,result,hostname:location.hostname,network};
 })().then(value=>{window.__boxDispatchPrivateResult=value}).catch(error=>{window.__boxDispatchPrivateResult={ok:false,error:String(error?.stack||error),network:window.__boxDispatchPrivateNetwork}});`, payload)
 }

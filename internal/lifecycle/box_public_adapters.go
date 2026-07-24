@@ -112,19 +112,24 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 		if !slices.Contains(deployable, agent.Component) {
 			continue
 		}
-		if err := api.createAIAgent(ctx, agent.Mode, agent.Name, agent.Description, agent.Instructions); err != nil {
+		agentID, err := api.createAIAgent(ctx, agent.Mode, agent.Name, agent.Description, agent.Instructions)
+		if err != nil {
 			return deployed, resources, fmt.Errorf("create %s: %w", agent.Component, err)
 		}
 		deployed = append(deployed, agent.Component)
+		// Recorded so teardown can delete the agent by ID.
+		resources = append(resources, ResourceReference{Provider: "box", Component: agent.Component, Kind: "ai_agent", Name: agent.Name, ID: agentID})
 	}
 	if capability, enabled := enabledCapability(manifest, selection, "Box Hub"); enabled {
 		component := "Box Hub:" + capability.DisplayName
 		if slices.Contains(deployable, component) {
 			description := "Solution hub provisioned by Box Dispatch from " + capability.Source
-			if err := api.createHub(ctx, capability.DisplayName, description); err != nil {
+			hubID, err := api.createHub(ctx, capability.DisplayName, description)
+			if err != nil {
 				return deployed, resources, fmt.Errorf("create %s: %w", component, err)
 			}
 			deployed = append(deployed, component)
+			resources = append(resources, ResourceReference{Provider: "box", Component: component, Kind: "hub", Name: capability.DisplayName, ID: hubID})
 		}
 	}
 	return deployed, resources, nil

@@ -10,6 +10,7 @@ import (
 
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
 	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
+	"github.com/unofficialbox/box-open-go-sdk/managers"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 	"github.com/unofficialbox/box-open-go-sdk/serialization"
 )
@@ -29,10 +30,21 @@ type boxAPI interface {
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
 	createDocgenTemplate(context.Context, string) error
 	aiAgentNames(context.Context) (map[string]bool, error)
-	createAIAgent(context.Context, string, string, string, string) error
+	// createAIAgent and createHub return the created resource ID so the deploy
+	// can record it; teardown deletes strictly by recorded ID.
+	createAIAgent(context.Context, string, string, string, string) (string, error)
 	hubTitles(context.Context) (map[string]bool, error)
-	createHub(context.Context, string, string) error
+	createHub(context.Context, string, string) (string, error)
 	automateWorkflowNames(context.Context, string) (map[string]bool, error)
+
+	// Teardown operations. Each deletes a single resource by ID; a missing
+	// resource is reported by the caller rather than treated as fatal.
+	deleteFolder(context.Context, string) error
+	deleteFile(context.Context, string) error
+	deleteMetadataTemplate(context.Context, string) error
+	deleteDocgenTemplate(context.Context, string) error
+	deleteAIAgent(context.Context, string) error
+	deleteHub(context.Context, string) error
 }
 
 func newBoxAPI() (boxAPI, error) {
@@ -370,15 +382,18 @@ func (sdk *boxSDK) aiAgentNames(ctx context.Context) (map[string]bool, error) {
 	return names, nil
 }
 
-func (sdk *boxSDK) createAIAgent(ctx context.Context, mode, name, description, instructions string) error {
+func (sdk *boxSDK) createAIAgent(ctx context.Context, mode, name, description, instructions string) (string, error) {
 	body := &schemas.CreateAiAgent{Type: schemas.AiSingleAgentResponseTypeAiAgent, Name: name, AccessState: "enabled"}
 	if mode == "extract" {
 		body.Extract = &schemas.AiStudioAgentExtract{Type: schemas.AiAgentExtractTypeAiAgentExtract, AccessState: "enabled", Description: description, CustomInstructions: serialization.Value(instructions)}
 	} else {
 		body.Ask = &schemas.AiStudioAgentAsk{Type: schemas.AiAgentAskTypeAiAgentAsk, AccessState: "enabled", Description: description, CustomInstructions: serialization.Value(instructions)}
 	}
-	_, err := sdk.client.AiStudio.CreateAiAgents(ctx, body)
-	return err
+	agent, err := sdk.client.AiStudio.CreateAiAgents(ctx, body)
+	if err != nil || agent == nil {
+		return "", err
+	}
+	return agent.Id, nil
 }
 
 func (sdk *boxSDK) hubTitles(ctx context.Context) (map[string]bool, error) {
@@ -394,9 +409,40 @@ func (sdk *boxSDK) hubTitles(ctx context.Context) (map[string]bool, error) {
 	return titles, nil
 }
 
-func (sdk *boxSDK) createHub(ctx context.Context, title, description string) error {
-	_, err := sdk.client.Hubs.Create(ctx, &schemas.HubCreateRequest{Title: title, Description: &description})
-	return err
+func (sdk *boxSDK) createHub(ctx context.Context, title, description string) (string, error) {
+	hub, err := sdk.client.Hubs.Create(ctx, &schemas.HubCreateRequest{Title: title, Description: &description})
+	if err != nil || hub == nil {
+		return "", err
+	}
+	return hub.Id, nil
+}
+
+func (sdk *boxSDK) deleteFolder(ctx context.Context, folderID string) error {
+	// Recursive so a workspace folder deletes with its contents.
+	recursive := true
+	return sdk.client.Folders.Delete(ctx, folderID, &managers.FoldersDeleteOptions{Recursive: &recursive})
+}
+
+func (sdk *boxSDK) deleteFile(ctx context.Context, fileID string) error {
+	return sdk.client.Files.Delete(ctx, fileID, nil)
+}
+
+func (sdk *boxSDK) deleteMetadataTemplate(ctx context.Context, templateKey string) error {
+	return sdk.client.MetadataTemplates.DeleteSchema(ctx, schemas.GetFileIdMetadataIdIdScopeEnterprise, templateKey)
+}
+
+// deleteDocgenTemplate takes the template's file ID, which is what
+// docgenTemplateFileIDs collects and what the deploy records.
+func (sdk *boxSDK) deleteDocgenTemplate(ctx context.Context, templateID string) error {
+	return sdk.client.DocgenTemplate.DeleteDocgenTemplate(ctx, templateID)
+}
+
+func (sdk *boxSDK) deleteAIAgent(ctx context.Context, agentID string) error {
+	return sdk.client.AiStudio.DeleteAiAgent(ctx, agentID)
+}
+
+func (sdk *boxSDK) deleteHub(ctx context.Context, hubID string) error {
+	return sdk.client.Hubs.Delete(ctx, hubID)
 }
 
 func (sdk *boxSDK) automateWorkflowNames(ctx context.Context, folderID string) (map[string]bool, error) {
@@ -461,7 +507,7 @@ func (boxCLI) aiAgentNames(ctx context.Context) (map[string]bool, error) {
 	return names, nil
 }
 
-func (boxCLI) createAIAgent(ctx context.Context, mode, name, description, instructions string) error {
+func (boxCLI) createAIAgent(ctx context.Context, mode, name, description, instructions string) (string, error) {
 	capability := map[string]any{"type": "ai_agent_ask", "access_state": "enabled", "description": description, "custom_instructions": instructions}
 	body := map[string]any{"type": "ai_agent", "name": name, "access_state": "enabled", "ask": capability}
 	if mode == "extract" {
@@ -469,8 +515,11 @@ func (boxCLI) createAIAgent(ctx context.Context, mode, name, description, instru
 		delete(body, "ask")
 		body["extract"] = capability
 	}
-	_, err := boxRequest(ctx, "POST", "/ai_agents", body)
-	return err
+	output, err := boxRequest(ctx, "POST", "/ai_agents", body)
+	if err != nil {
+		return "", err
+	}
+	return boxResourceID(output), nil
 }
 
 func (boxCLI) hubTitles(ctx context.Context) (map[string]bool, error) {
@@ -493,9 +542,53 @@ func (boxCLI) hubTitles(ctx context.Context) (map[string]bool, error) {
 	return titles, nil
 }
 
-func (boxCLI) createHub(ctx context.Context, title, description string) error {
-	_, err := boxRequest(ctx, "POST", "/hubs", map[string]string{"title": title, "description": description}, "box-version: 2025.0")
+func (boxCLI) createHub(ctx context.Context, title, description string) (string, error) {
+	output, err := boxRequest(ctx, "POST", "/hubs", map[string]string{"title": title, "description": description}, "box-version: 2025.0")
+	if err != nil {
+		return "", err
+	}
+	return boxResourceID(output), nil
+}
+
+func (boxCLI) deleteFolder(ctx context.Context, folderID string) error {
+	_, err := boxRequest(ctx, "DELETE", "/folders/"+folderID+"?recursive=true", nil)
 	return err
+}
+
+func (boxCLI) deleteFile(ctx context.Context, fileID string) error {
+	_, err := boxRequest(ctx, "DELETE", "/files/"+fileID, nil)
+	return err
+}
+
+func (boxCLI) deleteMetadataTemplate(ctx context.Context, templateKey string) error {
+	_, err := boxRequest(ctx, "DELETE", "/metadata_templates/enterprise/"+templateKey+"/schema", nil)
+	return err
+}
+
+func (boxCLI) deleteDocgenTemplate(ctx context.Context, templateID string) error {
+	_, err := boxRequest(ctx, "DELETE", "/docgen_templates/"+templateID, nil, "box-version: 2025.0")
+	return err
+}
+
+func (boxCLI) deleteAIAgent(ctx context.Context, agentID string) error {
+	_, err := boxRequest(ctx, "DELETE", "/ai_agents/"+agentID, nil)
+	return err
+}
+
+func (boxCLI) deleteHub(ctx context.Context, hubID string) error {
+	_, err := boxRequest(ctx, "DELETE", "/hubs/"+hubID, nil, "box-version: 2025.0")
+	return err
+}
+
+// boxResourceID pulls the id field out of a Box API create response.
+func boxResourceID(output []byte) string {
+	var response struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(output, &response) != nil {
+		return ""
+	}
+	return strings.TrimSpace(response.ID)
 }
 
 func (boxCLI) automateWorkflowNames(ctx context.Context, folderID string) (map[string]bool, error) {

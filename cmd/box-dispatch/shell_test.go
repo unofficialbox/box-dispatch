@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
@@ -388,5 +389,67 @@ func TestEnteringDeployOpensConfirmation(t *testing.T) {
 	model = updated.(rootShellModel)
 	if model.screen != screenDeploy || !model.confirmingDeploy || cmd == nil {
 		t.Fatal("entering Deploy did not open the Huh confirmation")
+	}
+}
+
+func TestTeardownRequiresTypedConfirmationBeforeDeleting(t *testing.T) {
+	model := newSetupOnlyShell()
+	record := deploymentaudit.DeploymentRecord{
+		DeploymentID: "20260101T000000Z",
+		PackageRoot:  "/tmp/box-bedrock-for-clm",
+		Providers: []deploymentaudit.ProviderRecord{{
+			Provider:  "box",
+			Resources: []lifecycle.ResourceReference{{Provider: "box", Kind: "folder", ID: "123", Name: "Workspace"}},
+		}},
+	}
+	updated, _ := model.openTeardown(record)
+	model = updated.(rootShellModel)
+	if model.screen != screenTeardown {
+		t.Fatalf("screen = %v, want teardown", model.screen)
+	}
+	if model.teardownStarted {
+		t.Fatal("opening the reset preview must not start deleting")
+	}
+
+	// Enter opens the confirmation gate rather than running the reset.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if !model.confirmingTeardown || model.teardownConfirmForm == nil {
+		t.Fatal("enter should open the destructive confirmation")
+	}
+	if model.teardownStarted {
+		t.Fatal("the reset must not start before the confirmation is typed")
+	}
+
+	// Escape abandons the reset without deleting anything.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(rootShellModel)
+	if model.confirmingTeardown || model.teardownStarted {
+		t.Fatal("escape should cancel the reset")
+	}
+}
+
+func TestTeardownConfirmationPhraseUsesPackageName(t *testing.T) {
+	record := deploymentaudit.DeploymentRecord{DeploymentID: "id", PackageRoot: "/tmp/box-bedrock-for-clm"}
+	if got := teardownConfirmationPhrase(record); got != "box-bedrock-for-clm" {
+		t.Fatalf("phrase = %q, want the package directory name", got)
+	}
+	// Falls back to the deployment id when there is no usable package name.
+	if got := teardownConfirmationPhrase(deploymentaudit.DeploymentRecord{DeploymentID: "id"}); got != "id" {
+		t.Fatalf("fallback phrase = %q, want the deployment id", got)
+	}
+}
+
+func TestTeardownWithNoRecordedResourcesIsInert(t *testing.T) {
+	model := newSetupOnlyShell()
+	updated, _ := model.openTeardown(deploymentaudit.DeploymentRecord{DeploymentID: "empty"})
+	model = updated.(rootShellModel)
+	if model.teardownError == "" {
+		t.Fatal("a deployment with no resources should explain there is nothing to remove")
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.confirmingTeardown || model.teardownStarted {
+		t.Fatal("there is nothing to confirm or delete")
 	}
 }

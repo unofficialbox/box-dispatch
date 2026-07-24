@@ -30,6 +30,10 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
 
+// welcomeOptions is the home menu; the key handler and the view read the same
+// slice so the cursor range never drifts from what is rendered.
+var welcomeOptions = []string{"Start new deployment", "Show deployment history", "Reset demo environment"}
+
 type shellScreen int
 
 const (
@@ -47,6 +51,7 @@ const (
 	screenPackage
 	screenValidate
 	screenDeploy
+	screenTeardown
 )
 
 type connectionStatus int
@@ -107,6 +112,16 @@ type providerDeployFinishedMsg struct {
 }
 
 type providerDeployProgressMsg struct {
+	provider string
+}
+
+type providerTeardownFinishedMsg struct {
+	provider string
+	result   lifecycle.TeardownResult
+	err      error
+}
+
+type providerTeardownProgressMsg struct {
 	provider string
 }
 
@@ -204,6 +219,21 @@ type rootShellModel struct {
 	historyError          string
 	validationItems       []lifecycle.Item
 	message               string
+
+	// Teardown ("reset the demo environment") state. The record is the resource
+	// inventory the reset deletes from; nothing outside it is ever touched.
+	teardownRecord       *deploymentaudit.DeploymentRecord
+	teardownProviders    []string
+	teardownQueue        []string
+	teardownResults      []lifecycle.TeardownResult
+	teardownProgress     map[string]float64
+	currentTeardown      string
+	teardownStarted      bool
+	teardownDone         bool
+	confirmingTeardown   bool
+	teardownConfirmForm  *huh.Form
+	teardownConfirmation *string
+	teardownError        string
 }
 
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
@@ -768,12 +798,122 @@ func (m rootShellModel) startNextDeployment() (tea.Model, tea.Cmd) {
 	m.deploymentCompletedAt = time.Now().UTC()
 	m.currentDeployment = ""
 	m.message = "Deployment run complete. Review provider results below."
+	// Persist the audit immediately: it is the resource inventory a later reset
+	// deletes from, so it must not depend on the operator pressing a key.
+	if path, err := deploymentaudit.ExportDeployment(m.packagePath, m.deploymentBaseline, m.validationItems, m.deploymentStartedAt, m.deploymentCompletedAt); err == nil {
+		m.deploymentAuditPath = path
+	}
 	return m, nil
 }
 
 func deploymentProgressCmd(provider string) tea.Cmd {
 	return tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
 		return providerDeployProgressMsg{provider: provider}
+	})
+}
+
+// openTeardown loads a recorded deployment and shows what a reset would remove.
+// Nothing is deleted until the confirmation is typed.
+func (m rootShellModel) openTeardown(record deploymentaudit.DeploymentRecord) (tea.Model, tea.Cmd) {
+	m.teardownRecord = &record
+	m.teardownError = ""
+	m.teardownStarted = false
+	m.teardownDone = false
+	m.teardownResults = nil
+	m.teardownProgress = map[string]float64{}
+	m.currentTeardown = ""
+	m.teardownProviders = nil
+	for _, provider := range record.Providers {
+		if len(provider.Resources) > 0 {
+			m.teardownProviders = append(m.teardownProviders, provider.Provider)
+		}
+	}
+	m.screen, m.cursor = screenTeardown, 0
+	if len(m.teardownProviders) == 0 {
+		m.teardownError = "This deployment recorded no resources, so there is nothing to remove."
+		m.message = "Nothing to reset."
+		return m, nil
+	}
+	m.message = "Review what will be removed, then confirm."
+	return m, nil
+}
+
+// requestTeardownConfirmation gates the reset behind typing the package name,
+// so a destructive run cannot happen on a stray keypress.
+func (m rootShellModel) requestTeardownConfirmation() (tea.Model, tea.Cmd) {
+	if m.teardownRecord == nil || len(m.teardownProviders) == 0 {
+		return m, nil
+	}
+	expected := teardownConfirmationPhrase(*m.teardownRecord)
+	typed := ""
+	m.teardownConfirmation = &typed
+	m.confirmingTeardown = true
+	m.teardownConfirmForm = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title(fmt.Sprintf("Permanently delete %d recorded resources?", teardownResourceCount(*m.teardownRecord))).
+				Description("This cannot be undone. Type " + expected + " to confirm.").
+				Value(m.teardownConfirmation).
+				Validate(func(value string) error {
+					if strings.TrimSpace(value) != expected {
+						return fmt.Errorf("type %s to confirm", expected)
+					}
+					return nil
+				}),
+		),
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	m.message = "Type the package name to confirm the reset."
+	return m, m.teardownConfirmForm.Init()
+}
+
+// teardownConfirmationPhrase is the package directory name, which is specific to
+// the environment being reset.
+func teardownConfirmationPhrase(record deploymentaudit.DeploymentRecord) string {
+	if name := strings.TrimSpace(filepath.Base(record.PackageRoot)); name != "" && name != "." && name != string(filepath.Separator) {
+		return name
+	}
+	return record.DeploymentID
+}
+
+func teardownResourceCount(record deploymentaudit.DeploymentRecord) int {
+	return len(record.DeployedResources())
+}
+
+func (m rootShellModel) startTeardown() (tea.Model, tea.Cmd) {
+	m.teardownStarted = true
+	m.teardownDone = false
+	m.teardownResults = nil
+	m.teardownQueue = append([]string(nil), m.teardownProviders...)
+	m.teardownProgress = map[string]float64{}
+	for _, provider := range m.teardownQueue {
+		m.teardownProgress[provider] = 0
+	}
+	m.message = "Removing deployed resources..."
+	return m.startNextTeardown()
+}
+
+func (m rootShellModel) startNextTeardown() (tea.Model, tea.Cmd) {
+	for len(m.teardownQueue) > 0 {
+		provider := m.teardownQueue[0]
+		m.teardownQueue = m.teardownQueue[1:]
+		m.currentTeardown = provider
+		root := m.teardownRecord.PackageRoot
+		resources := m.teardownRecord.DeployedResources()
+		return m, tea.Batch(m.spinner.Tick, teardownProgressCmd(provider), func() tea.Msg {
+			result, err := lifecycle.DestroyProvider(root, provider, resources)
+			return providerTeardownFinishedMsg{provider: provider, result: result, err: err}
+		})
+	}
+	m.teardownStarted = false
+	m.teardownDone = true
+	m.currentTeardown = ""
+	m.message = "Reset complete. Review the results below."
+	return m, nil
+}
+
+func teardownProgressCmd(provider string) tea.Cmd {
+	return tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
+		return providerTeardownProgressMsg{provider: provider}
 	})
 }
 
@@ -795,6 +935,9 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.templateForm != nil {
 			m.templateForm.WithWidth(min(max(msg.Width-16, 44), 90))
+		}
+		if m.teardownConfirmForm != nil {
+			m.teardownConfirmForm.WithWidth(min(max(msg.Width-16, 44), 90))
 		}
 		if m.deployConfirmForm != nil {
 			m.deployConfirmForm.WithWidth(min(max(msg.Width-16, 44), 90))
@@ -887,6 +1030,23 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, deploymentProgressCmd(msg.provider)
 		}
 		return m, nil
+
+	case providerTeardownFinishedMsg:
+		m.teardownProgress[msg.provider] = 1
+		result := msg.result
+		if msg.err != nil {
+			result.Provider = msg.provider
+			result.Detail = msg.err.Error()
+		}
+		m.teardownResults = append(m.teardownResults, result)
+		return m.startNextTeardown()
+
+	case providerTeardownProgressMsg:
+		if m.teardownStarted && m.currentTeardown == msg.provider && m.teardownProgress[msg.provider] < 0.92 {
+			m.teardownProgress[msg.provider] = math.Min(m.teardownProgress[msg.provider]+0.035, 0.92)
+			return m, teardownProgressCmd(msg.provider)
+		}
+		return m, nil
 	}
 
 	if m.screen == screenDatabricksHost {
@@ -897,6 +1057,26 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.screen == screenBoxComponents {
 		return m.updateBoxComponents(msg)
+	}
+	if m.screen == screenTeardown && m.confirmingTeardown && m.teardownConfirmForm != nil {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "q":
+				m.confirmingTeardown = false
+				m.message = "Reset cancelled. Nothing was removed."
+				return m, nil
+			}
+		}
+		form, cmd := m.teardownConfirmForm.Update(msg)
+		m.teardownConfirmForm = form.(*huh.Form)
+		if m.teardownConfirmForm.State == huh.StateCompleted {
+			m.confirmingTeardown = false
+			// The form only completes when the typed phrase validated.
+			return m.startTeardown()
+		}
+		return m, cmd
 	}
 	if m.screen == screenDeploy && m.confirmingDeploy && m.deployConfirmForm != nil {
 		if key, ok := msg.(tea.KeyMsg); ok {
@@ -940,25 +1120,57 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	switch m.screen {
 	case screenWelcome:
-		m.moveCursor(key, 2)
+		m.moveCursor(key, len(welcomeOptions))
 		if key.String() == "enter" || key.String() == "right" {
 			if m.cursor == 0 {
 				m.screen = screenComponents
 				return m, m.componentForm.Init()
 			}
+			resetting := m.cursor == 2
 			history, err := deploymentaudit.ListDeployments()
 			m.deploymentHistory = history
 			m.historyError = ""
 			if err != nil {
 				m.historyError = err.Error()
+			} else if len(history) == 0 {
+				m.historyError = "No deployment has been recorded yet."
 			}
+			// "Reset demo environment" opens the same history list; the reset
+			// acts on whichever deployment is selected there.
 			m.screen, m.cursor = screenHistory, 0
+			if resetting {
+				m.message = "Choose the deployment to reset, then press enter."
+			} else {
+				m.message = ""
+			}
 			return m, nil
 		}
 	case screenHistory:
 		m.moveCursor(key, len(m.deploymentHistory))
 		if key.String() == "left" || key.String() == "esc" {
 			m.screen, m.cursor = screenWelcome, 1
+			return m, nil
+		}
+		// Enter on a recorded deployment opens the reset preview for it.
+		if (key.String() == "enter" || key.String() == "right") && m.cursor < len(m.deploymentHistory) {
+			return m.openTeardown(m.deploymentHistory[m.cursor])
+		}
+	case screenTeardown:
+		if key.String() == "left" || key.String() == "esc" || key.String() == "q" {
+			if m.teardownStarted {
+				return m, nil
+			}
+			m.screen, m.cursor = screenHistory, 0
+			m.message = ""
+			return m, nil
+		}
+		if (key.String() == "enter" || key.String() == "right") && !m.teardownStarted && !m.teardownDone && m.teardownError == "" {
+			return m.requestTeardownConfirmation()
+		}
+		if (key.String() == "enter" || key.String() == "right") && m.teardownDone {
+			m.screen, m.cursor = screenWelcome, 0
+			m.message = ""
+			return m, nil
 		}
 	case screenComponents:
 		if key.String() == "left" {
@@ -1412,6 +1624,8 @@ func (m rootShellModel) View() string {
 		body = m.viewValidate(contentWidth)
 	case screenDeploy:
 		body = m.viewDeploy(contentWidth)
+	case screenTeardown:
+		body = m.viewTeardown(contentWidth)
 	}
 	return lipgloss.NewStyle().Margin(1, 3).Width(contentWidth).Render(m.header(contentWidth) + "\n\n" + body + "\n\n" + m.footer())
 }
@@ -1474,7 +1688,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 	description := dimStyle.Copy().Width(58).Render("Open tools for the builders extending Box, from composable building blocks to industry solution accelerators.")
 	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  AGENTFORCE  /  DATABRICKS  /  AWS BEDROCK AGENTCORE")
 	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", tags)
-	options := []string{"Start new deployment", "Show deployment history"}
+	options := welcomeOptions
 	optionRows := make([]string, len(options))
 	for index, option := range options {
 		style := lipgloss.NewStyle().Width(42).Padding(0, 2).Foreground(ice)
@@ -1862,6 +2076,58 @@ func (m rootShellModel) viewValidate(width int) string {
 	}
 	return m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n" +
 		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + accent.Render("Enter / →  Continue to Deploy    r  Validate again")
+}
+
+// viewTeardown previews exactly what a reset will delete, then reports the
+// outcome per resource once it runs.
+func (m rootShellModel) viewTeardown(width int) string {
+	title := titleStyle.Render("Reset demo environment")
+	if m.teardownRecord == nil {
+		return title + "\n" + dimStyle.Render("No deployment is selected.")
+	}
+	record := *m.teardownRecord
+	subtitle := dimStyle.Render(fmt.Sprintf("Deployment %s  ·  %s", record.DeploymentID, record.PackageRoot))
+
+	if m.teardownError != "" {
+		return title + "\n" + subtitle + "\n\n" + lipgloss.NewStyle().Foreground(gold).Render(m.teardownError)
+	}
+
+	body := []string{}
+	if m.teardownDone || m.teardownStarted {
+		for _, provider := range m.teardownProviders {
+			body = append(body, m.providerProgressRow(provider, m.teardownProgress[provider], nil, provider == m.currentTeardown, "teardown", width-10))
+		}
+		for _, result := range m.teardownResults {
+			body = append(body, "", accent.Render(strings.ToUpper(providerLabel(result.Provider)))+"  "+dimStyle.Render(result.Detail))
+			for _, outcome := range result.Remaining() {
+				marker, style := "×", lipgloss.NewStyle().Foreground(coral)
+				reason := outcome.Error
+				if outcome.Unmanaged {
+					marker, style = "○", lipgloss.NewStyle().Foreground(gold)
+					reason = "no delete API; remove manually"
+				}
+				body = append(body, style.Render(fmt.Sprintf("  %s %s %s", marker, outcome.Resource.Kind, outcome.Resource.Name))+dimStyle.Render("  "+reason))
+			}
+		}
+	} else {
+		// Preview: every resource the reset would delete, by kind and id.
+		body = append(body, lipgloss.NewStyle().Bold(true).Foreground(coral).Render("The following resources will be permanently deleted:"))
+		for _, provider := range record.Providers {
+			if len(provider.Resources) == 0 {
+				continue
+			}
+			body = append(body, "", accent.Render(strings.ToUpper(providerLabel(provider.Provider))))
+			for _, resource := range provider.Resources {
+				body = append(body, dimStyle.Render(fmt.Sprintf("  • %-18s %s", resource.Kind, resource.Name))+lipgloss.NewStyle().Foreground(muted).Render("  "+resource.ID))
+			}
+		}
+	}
+
+	panelBody := panel.Copy().Padding(1, 2).Width(width - 4).Render(strings.Join(body, "\n"))
+	if m.confirmingTeardown && m.teardownConfirmForm != nil {
+		return title + "\n" + subtitle + "\n\n" + panelBody + "\n" + activePane.Copy().Width(width-4).Render(m.teardownConfirmForm.View())
+	}
+	return title + "\n" + subtitle + "\n\n" + panelBody
 }
 
 func (m rootShellModel) viewDeploy(width int) string {

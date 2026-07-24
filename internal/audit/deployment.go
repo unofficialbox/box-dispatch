@@ -113,6 +113,46 @@ func ExportDeployment(root string, before, after []lifecycle.Item, startedAt, co
 	return globalPath, nil
 }
 
+// FindDeployment returns a recorded deployment by its ID.
+func FindDeployment(deploymentID string) (DeploymentRecord, error) {
+	records, err := ListDeployments()
+	if err != nil {
+		return DeploymentRecord{}, err
+	}
+	for _, record := range records {
+		if record.DeploymentID == deploymentID {
+			return record, nil
+		}
+	}
+	return DeploymentRecord{}, fmt.Errorf("no deployment recorded with id %s", deploymentID)
+}
+
+// LatestDeploymentFor returns the most recent deployment recorded for a package
+// root, which is what a "reset this environment" action acts on.
+func LatestDeploymentFor(root string) (DeploymentRecord, error) {
+	records, err := ListDeployments()
+	if err != nil {
+		return DeploymentRecord{}, err
+	}
+	// ListDeployments is newest-first, so the first match is the latest.
+	for _, record := range records {
+		if record.PackageRoot == root {
+			return record, nil
+		}
+	}
+	return DeploymentRecord{}, fmt.Errorf("no deployment has been recorded for %s", root)
+}
+
+// DeployedResources flattens every resource a deployment recorded across all
+// providers — the inventory a teardown deletes from.
+func (r DeploymentRecord) DeployedResources() []lifecycle.ResourceReference {
+	resources := []lifecycle.ResourceReference{}
+	for _, provider := range r.Providers {
+		resources = append(resources, provider.Resources...)
+	}
+	return resources
+}
+
 func ListDeployments() ([]DeploymentRecord, error) {
 	directory, err := globalAuditDirectory()
 	if err != nil {

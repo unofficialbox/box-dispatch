@@ -630,40 +630,17 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings) 
 }
 
 func deployBoxFoundation(root string, item Item) Item {
-	manifest, err := solution.Load(root)
+	// Shared with teardown so both address the same resolved workspace.
+	box, err := loadBoxContext(root)
 	if err != nil {
 		item.Status, item.Detail = StatusFailed, err.Error()
 		return item
 	}
+	manifest, settings, selection := box.manifest, box.settings, box.selection
+	target, api, ctx := box.target, box.api, box.ctx
 	workspace := manifest.Box.Workspace
-	settings, err := solution.ReadDeploymentSettings(root, manifest.DeploymentConfig)
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item
-	}
-	selection := settings.Box.Components
-	target, err := loadBoxTarget(root, workspace.Name)
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item
-	}
-	resolvedWorkspaceName, err := solution.ResolveDeploymentName(target.WorkspaceName, settings.Box)
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item
-	}
-	target.WorkspaceName = resolvedWorkspaceName
-	api, err := newBoxAPI()
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item
-	}
-	ctx := context.Background()
 	deployed := []string{}
 	folderComponent := workspace.ComponentType + ":" + workspace.DisplayName
-	if target.ParentFolderID == "" {
-		target.ParentFolderID = "0"
-	}
 	workspaceID := ""
 	if slices.Contains(item.DeployableComponents, folderComponent) {
 		var createErr error
