@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -11,6 +12,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
 // box-dispatch launches its own Chrome rather than co-opting the operator's:
@@ -105,23 +110,73 @@ func cdpPort(endpoint string) string {
 	return "9222"
 }
 
-// enterpriseBoxURL derives the tenant web host from the authenticated Box CLI
-// user, whose avatar URL is served from it (https://<tenant>.ent.box.com/...).
-// The private adapter needs that host, not the generic app.box.com.
+// enterpriseBoxURL derives the tenant web host (https://<tenant>.ent.box.com)
+// from the acting user's avatar URL, which is served from that host. The private
+// adapter needs the tenant host, not the generic app.box.com.
+//
+// It reads the avatar through the connection box-dispatch actually deploys with:
+// when that is the box-dispatch CCG app, a CCG token is minted and the Box API
+// is queried directly. The box CLI is a separate login that can be broken,
+// expired, or scoped differently — deriving the host from it is what aborted the
+// whole Box provider ("could not determine the enterprise Box host") when the
+// CLI environment went bad even though CCG was healthy. The CLI is used only as
+// the fallback when CCG is not the active connection.
 func enterpriseBoxURL(ctx context.Context) string {
+	if settings, err := shellstate.LoadConnectionSettings(); err == nil && prefersBoxCCG(settings) {
+		if host := enterpriseHostViaCCG(ctx, settings); host != "" {
+			return host
+		}
+	}
 	output, err := exec.CommandContext(ctx, "box", "users:get", "me", "--json", "--fields=id,login,avatar_url").Output()
+	if err == nil {
+		var payload struct {
+			AvatarURL string `json:"avatar_url"`
+		}
+		if json.Unmarshal(output, &payload) == nil {
+			if host := hostFromAvatarURL(payload.AvatarURL); host != "" {
+				return host
+			}
+		}
+	}
+	return boxAppFallbackURL
+}
+
+// enterpriseHostViaCCG mints a CCG token and reads the acting user's avatar_url
+// from the Box API, so the tenant host reflects the CCG connection rather than
+// the CLI login. Returns "" on any failure so the caller can fall back.
+func enterpriseHostViaCCG(ctx context.Context, settings config.ConnectionSettings) string {
+	token, err := boxconn.CCGTokenFromSettings(ctx, settings)
 	if err != nil {
-		return boxAppFallbackURL
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.box.com/2.0/users/me?fields=avatar_url", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
 	}
 	var payload struct {
 		AvatarURL string `json:"avatar_url"`
 	}
-	if json.Unmarshal(output, &payload) != nil {
-		return boxAppFallbackURL
+	if json.NewDecoder(resp.Body).Decode(&payload) != nil {
+		return ""
 	}
-	parsed, err := url.Parse(strings.TrimSpace(payload.AvatarURL))
+	return hostFromAvatarURL(payload.AvatarURL)
+}
+
+// hostFromAvatarURL extracts the tenant web origin from an avatar URL, or "" when
+// it is not a tenant host.
+func hostFromAvatarURL(avatarURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(avatarURL))
 	if err != nil || parsed.Host == "" || !strings.Contains(parsed.Host, boxTabHost) {
-		return boxAppFallbackURL
+		return ""
 	}
 	return parsed.Scheme + "://" + parsed.Host
 }
