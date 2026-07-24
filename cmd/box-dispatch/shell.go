@@ -208,9 +208,11 @@ type rootShellModel struct {
 	currentValidation     string
 	deployStarted         bool
 	deployDone            bool
-	deployApproved        *bool
 	confirmingDeploy      bool
-	deployConfirmForm     *huh.Form
+	deployConfirmCursor   int // 0 = affirmative (Deploy), 1 = Cancel
+	deployConfirmTitle    string
+	deployConfirmDesc     string
+	deployConfirmAffirm   string
 	deploymentQueue       []lifecycle.Item
 	deploymentProgress    map[string]float64
 	currentDeployment     string
@@ -264,7 +266,8 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	host.Prompt = "  Workspace URL  "
 	host.CharLimit = 300
 	bar := progress.New(
-		progress.WithGradient("#0866D9", "#FF6658"),
+		// Blue → red; end deliberately red rather than the pinker coral accent.
+		progress.WithGradient("#0866D9", "#E23A2C"),
 		progress.WithWidth(52),
 	)
 	helpModel := help.New()
@@ -745,29 +748,43 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 			providers = append(providers, providerLabel(item.Provider))
 		}
 	}
-	approved := false
-	m.deployApproved = &approved
 	m.confirmingDeploy = true
-	title := fmt.Sprintf("Deploy %d provider configuration set(s)?", deployable)
-	description := "Box Dispatch will deploy missing configuration to: " + strings.Join(providers, ", ") + ". Existing components will be skipped."
-	affirmative := "Deploy"
+	m.deployConfirmCursor = 1 // default to the safe choice (Cancel)
+	m.deployConfirmTitle = fmt.Sprintf("Deploy %d provider configuration set(s)?", deployable)
+	m.deployConfirmDesc = "Box Dispatch will deploy missing configuration to: " + strings.Join(providers, ", ") + ". Existing components will be skipped."
+	m.deployConfirmAffirm = "Deploy"
 	if deployable == 0 {
-		title = "Complete with no deployment changes?"
-		description = "Validation found no supported missing configuration. No provider commands will run."
-		affirmative = "Complete"
+		m.deployConfirmTitle = "Complete with no deployment changes?"
+		m.deployConfirmDesc = "Validation found no supported missing configuration. No provider commands will run."
+		m.deployConfirmAffirm = "Complete"
 	}
-	m.deployConfirmForm = huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(title).
-				Description(description).
-				Affirmative(affirmative).
-				Negative("Cancel").
-				Value(m.deployApproved),
-		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
 	m.message = "Review and confirm the deployment plan."
-	return m, m.deployConfirmForm.Init()
+	return m, nil
+}
+
+// renderDeployConfirm draws the destructive-confirm prompt: a coral title, the
+// plan description, and two fixed-colour buttons — Deploy always blue, Cancel
+// always coral — with the focused one filled so the choice reads at a glance.
+func (m rootShellModel) renderDeployConfirm(width int) string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(coral).Width(width).Render(m.deployConfirmTitle)
+	desc := dimStyle.Copy().Width(width).Render(m.deployConfirmDesc)
+
+	deploy := confirmButton(m.deployConfirmAffirm, cyan, m.deployConfirmCursor == 0)
+	cancel := confirmButton("Cancel", coral, m.deployConfirmCursor == 1)
+	buttons := lipgloss.JoinHorizontal(lipgloss.Top, deploy, "  ", cancel)
+	hint := dimStyle.Render("←/→ switch · Enter/Space confirm · Esc cancel")
+
+	return title + "\n\n" + desc + "\n\n" + buttons + "\n\n" + hint
+}
+
+// confirmButton renders one confirm button in its fixed hue: filled (white on
+// the hue) when focused, outlined (the hue on the shell ground) otherwise.
+func confirmButton(label string, hue lipgloss.Color, focused bool) string {
+	style := lipgloss.NewStyle().Bold(true).Padding(0, 3)
+	if focused {
+		return style.Foreground(white).Background(hue).Render(label)
+	}
+	return style.Foreground(hue).Background(lipgloss.Color("#172235")).Render(label)
 }
 
 func (m rootShellModel) startNextValidation() (tea.Model, tea.Cmd) {
@@ -963,14 +980,6 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.boxCCGForm != nil {
 			m.boxCCGForm.WithWidth(min(max(msg.Width-16, 44), 90))
 		}
-		if m.deployConfirmForm != nil {
-			m.deployConfirmForm.WithWidth(min(max(msg.Width-16, 44), 90))
-			if m.screen == screenDeploy && m.confirmingDeploy {
-				form, cmd := m.deployConfirmForm.Update(msg)
-				m.deployConfirmForm = form.(*huh.Form)
-				return m, cmd
-			}
-		}
 		m.directoryInput.Width = min(max(msg.Width-34, 30), 72)
 		m.packageInput.Width = min(max(msg.Width-34, 30), 56)
 		m.directoryPicker.Height = min(max(msg.Height-18, 5), 16)
@@ -1120,7 +1129,7 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	if m.screen == screenDeploy && m.confirmingDeploy && m.deployConfirmForm != nil {
+	if m.screen == screenDeploy && m.confirmingDeploy {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
 			case "ctrl+c":
@@ -1133,18 +1142,19 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmingDeploy = false
 				m.message = "Deployment cancelled. No provider configuration was changed."
 				return m, nil
+			case "left", "right", "tab", "h", "l":
+				m.deployConfirmCursor = 1 - m.deployConfirmCursor
+				return m, nil
+			case "enter", " ", "spacebar":
+				m.confirmingDeploy = false
+				if m.deployConfirmCursor == 0 {
+					return m.startDeploy()
+				}
+				m.message = "Deployment cancelled. No provider configuration was changed."
+				return m, nil
 			}
 		}
-		form, cmd := m.deployConfirmForm.Update(msg)
-		m.deployConfirmForm = form.(*huh.Form)
-		if m.deployConfirmForm.State == huh.StateCompleted {
-			m.confirmingDeploy = false
-			if m.deployApproved != nil && *m.deployApproved {
-				return m.startDeploy()
-			}
-			m.message = "Deployment cancelled. No provider configuration was changed."
-		}
-		return m, cmd
+		return m, nil
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -1159,6 +1169,17 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen, m.cursor, m.message = screenWelcome, 0, ""
 		return m, nil
+	}
+	// Spacebar activates the highlighted row on the plain list screens, matching
+	// the Huh-driven screens where space selects — so arrows navigate and
+	// space/enter both select, everywhere. Screens that give space its own
+	// meaning (component toggle, folder choose, strategy cycle) are excluded and
+	// handle it themselves below.
+	if key.String() == " " || key.String() == "spacebar" {
+		switch m.screen {
+		case screenWelcome, screenHistory, screenDashboard, screenProvider, screenOptions, screenBoxSwitch:
+			key = tea.KeyMsg{Type: tea.KeyEnter}
+		}
 	}
 	switch m.screen {
 	case screenWelcome:
@@ -1920,7 +1941,14 @@ func (m rootShellModel) header(width int) string {
 	domain := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("UNOFFICIALBOX.DEV")
 	used := lipgloss.Width(mark + product + tag + domain)
 	gap := max(width-used, 2)
-	return mark + product + tag + strings.Repeat(" ", gap) + domain
+	// Terminals that support OSC 8 make the domain a real clickable link; the rest
+	// just show the styled text, and the escape codes are zero display width.
+	return mark + product + tag + strings.Repeat(" ", gap) + hyperlink("https://unofficialbox.dev", domain)
+}
+
+// hyperlink wraps already-styled text in an OSC 8 terminal hyperlink escape.
+func hyperlink(url, text string) string {
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
 }
 
 func (m rootShellModel) stepper() string {
@@ -1989,7 +2017,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 	route := strings.Join([]string{
 		accent.Render("01  SELECT STACK"),
 		dimStyle.Render("━━"),
-		accent.Render("02  CONNECT"),
+		lipgloss.NewStyle().Bold(true).Foreground(coral).Render("02  CONNECT"),
 		dimStyle.Render("━━"),
 		accent.Render("03  PICK QUICKSTART"),
 		dimStyle.Render("━━"),
@@ -2205,7 +2233,7 @@ func (m rootShellModel) viewConfig(width int) string {
 		nameStyle.Render(titleStyle.Render("2  Package directory name")+"\n"+m.packageInput.View()) + "\n" +
 		strategyStyle.Render(titleStyle.Render("3  Deployment strategy  ")+dimStyle.Render("[←/→ change]")+"\n"+accent.Render(deploymentStrategyLabel(m.answers.deploymentStrategy))+"\n"+dimStyle.Render(m.deploymentNamePreview())) + "\n" +
 		boxStyle.Render(titleStyle.Render("4  Box components  ")+dimStyle.Render("[Enter configure]")+"\n"+accent.Render(strings.ToUpper(m.boxComponentMode))+dimStyle.Render(fmt.Sprintf(" · %d capabilities", len(m.boxCapabilities)))) + "\n" +
-		continueStyle.Render(accent.Render("5  Create package  →")+"\n"+dimStyle.Render(destination))
+		continueStyle.Render(lipgloss.NewStyle().Bold(true).Foreground(coral).Render("5  Create package  →")+"\n"+dimStyle.Render(destination))
 }
 
 func (m *rootShellModel) cycleDeploymentStrategy(delta int) {
@@ -2500,8 +2528,8 @@ func (m rootShellModel) viewDeploy(width int) string {
 		rows = append(rows, dimStyle.Render("Validate the package before deployment."))
 	}
 	action := accent.Render(fmt.Sprintf("Enter / →  Deploy %d supported missing configuration set(s)", deployable))
-	if m.confirmingDeploy && m.deployConfirmForm != nil {
-		action = activePane.Copy().Width(width - 4).Render(m.deployConfirmForm.View())
+	if m.confirmingDeploy {
+		action = activePane.Copy().Width(width - 4).Render(m.renderDeployConfirm(width - 8))
 	}
 	if m.deployStarted {
 		// Box Forms and Apps are provisioned through the browser, which may raise
@@ -2824,7 +2852,7 @@ func (m rootShellModel) footer() string {
 	bindings := contextualHelp{
 		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
 		key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "steps")),
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		key.NewBinding(key.WithKeys("enter", " "), key.WithHelp("enter/space", "select")),
 	}
 	if m.screen == screenConfig {
 		bindings = contextualHelp{

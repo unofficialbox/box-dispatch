@@ -190,10 +190,13 @@ func TestDeployRequiresExplicitConfirmation(t *testing.T) {
 	model.screen = screenDeploy
 	model.validationItems = []lifecycle.Item{{Provider: "salesforce", Status: lifecycle.StatusMissing, Deployable: true}}
 
-	updated, cmd := model.requestDeployConfirmation()
+	updated, _ := model.requestDeployConfirmation()
 	model = updated.(rootShellModel)
-	if cmd == nil || !model.confirmingDeploy || model.deployStarted {
-		t.Fatal("deploy did not stop at the confirmation form")
+	if !model.confirmingDeploy || model.deployStarted {
+		t.Fatal("deploy did not stop at the confirmation prompt")
+	}
+	if model.deployConfirmCursor != 1 {
+		t.Fatalf("confirmation should default to the safe choice (Cancel), got cursor %d", model.deployConfirmCursor)
 	}
 }
 
@@ -382,15 +385,55 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	}
 }
 
+func TestSpacebarSelectsHighlightedRowLikeEnter(t *testing.T) {
+	// Spacebar must activate the highlighted row on the plain list screens, the
+	// same as Enter, so arrows/space/enter behave consistently everywhere.
+	model := newSetupOnlyShell()
+	model.screen = screenWelcome
+	model.cursor = 0
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(rootShellModel)
+	if model.screen != screenComponents {
+		t.Fatalf("space on welcome did not select the highlighted row: screen = %v", model.screen)
+	}
+}
+
+func TestDeployConfirmButtonsAndKeys(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenDeploy
+	model.validationItems = []lifecycle.Item{{Provider: "salesforce", Status: lifecycle.StatusMissing, Deployable: true}}
+	updated, _ := model.requestDeployConfirmation()
+	model = updated.(rootShellModel)
+
+	view := model.renderDeployConfirm(72)
+	for _, want := range []string{"Deploy", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirm view missing %q: %q", want, view)
+		}
+	}
+
+	// Left moves focus onto Deploy; Enter then starts the deployment.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(rootShellModel)
+	if model.deployConfirmCursor != 0 {
+		t.Fatalf("left did not move focus to Deploy: cursor %d", model.deployConfirmCursor)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if !model.deployStarted || model.confirmingDeploy {
+		t.Fatal("enter on the Deploy button did not start the deployment")
+	}
+}
+
 func TestEnteringDeployOpensConfirmation(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.screen = screenValidate
 	model.validateDone = true
 	model.validationItems = []lifecycle.Item{{Provider: "salesforce", Status: lifecycle.StatusMissing, Deployable: true}}
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
 	model = updated.(rootShellModel)
-	if model.screen != screenDeploy || !model.confirmingDeploy || cmd == nil {
-		t.Fatal("entering Deploy did not open the Huh confirmation")
+	if model.screen != screenDeploy || !model.confirmingDeploy {
+		t.Fatal("entering Deploy did not open the confirmation prompt")
 	}
 }
 
