@@ -22,6 +22,11 @@ type ConnectionSettings struct {
 	BoxCCGClientSecret string `json:"boxCcgClientSecret,omitempty"`
 	BoxCCGSubjectType  string `json:"boxCcgSubjectType,omitempty"` // "user" or "enterprise"
 	BoxCCGSubjectID    string `json:"boxCcgSubjectId,omitempty"`
+
+	// BoxDefaultConnection pins which Box connection box-dispatch uses: a CLI
+	// environment name, or the box-dispatch CCG sentinel. Empty means fall back
+	// to precedence (CCG when configured, else the CLI's current environment).
+	BoxDefaultConnection string `json:"boxDefaultConnection,omitempty"`
 }
 
 // HasBoxCCG reports whether a complete CCG credential set has been captured.

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 )
 
 type CheckConfig struct {
@@ -30,6 +32,7 @@ type ProviderDiscovery struct {
 	Host       string   `json:"host,omitempty"`       // Salesforce instance URL, Databricks workspace
 	Region     string   `json:"region,omitempty"`     // AWS region
 	Options    []string `json:"options,omitempty"`    // selectable authenticated profiles/aliases
+	AuthType   string   `json:"auth_type,omitempty"`  // Box auth of the active connection: OAuth2 | CCG | JWT
 }
 
 type ProviderResult struct {
@@ -155,6 +158,7 @@ func mergeDiscovery(dst *ProviderDiscovery, src ProviderDiscovery) {
 		{&dst.Profile, src.Profile},
 		{&dst.Host, src.Host},
 		{&dst.Region, src.Region},
+		{&dst.AuthType, src.AuthType},
 	} {
 		if strings.TrimSpace(field.from) != "" {
 			*field.into = field.from
@@ -200,6 +204,16 @@ func (u boxUser) discovery() ProviderDiscovery {
 // OAuth login (tokens:get requires JWT app auth), so the CLI itself is used as
 // the transport rather than a source of credentials.
 func connectivityBox() (bool, string, ProviderDiscovery) {
+	ok, detail, discovery := connectivityBoxTransport()
+	// Label the auth of the connection box-dispatch will actually deploy with
+	// (a pinned default, the box-dispatch CCG app, or the CLI's current env).
+	if active, found := boxconn.Active(); found {
+		discovery.AuthType = active.AuthType
+	}
+	return ok, detail, discovery
+}
+
+func connectivityBoxTransport() (bool, string, ProviderDiscovery) {
 	if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
 		return connectivityBoxToken()
 	}

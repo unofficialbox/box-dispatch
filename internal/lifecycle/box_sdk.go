@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
 	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
@@ -57,19 +59,36 @@ func newBoxAPI() (boxAPI, error) {
 	if err == nil {
 		return sdk, nil
 	}
-	// A configured CCG app must not silently degrade to the lower-scoped OAuth
-	// CLI path — that hides the real failure and produces confusing 403s later.
-	if settings, sErr := shellstate.LoadConnectionSettings(); sErr == nil && settings.HasBoxCCG() {
+	// A configured CCG app that box-dispatch would use must not silently degrade
+	// to the lower-scoped OAuth CLI path — that hides the real failure and
+	// produces confusing 403s later.
+	if settings, sErr := shellstate.LoadConnectionSettings(); sErr == nil && prefersBoxCCG(settings) {
 		return nil, fmt.Errorf("the configured Box CCG app could not authenticate (check the client id, secret and subject in the Box CCG connection): %w", err)
 	}
 	return boxCLI{}, nil
+}
+
+// prefersBoxCCG reports whether box-dispatch should authenticate with the
+// captured CCG app: it must be complete, and the pinned default must not be a
+// specific CLI environment (which the user chose over CCG). An empty pin or the
+// box-dispatch CCG sentinel both select the CCG app.
+func prefersBoxCCG(settings config.ConnectionSettings) bool {
+	if !settings.HasBoxCCG() {
+		return false
+	}
+	switch settings.BoxDefaultConnection {
+	case "", boxconn.DispatchCCGName:
+		return true
+	default:
+		return false
+	}
 }
 
 func newBoxSDK() (*boxSDK, error) {
 	// A captured Client Credentials Grant app, used as a user, is preferred: it
 	// carries the enterprise scopes (e.g. Doc Gen) the CLI's OAuth token lacks,
 	// while the resources it creates stay owned by that user.
-	if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
+	if settings, err := shellstate.LoadConnectionSettings(); err == nil && prefersBoxCCG(settings) {
 		token, tokenErr := boxCCGToken(context.Background(), settings.BoxCCGClientID, settings.BoxCCGClientSecret, settings.BoxCCGSubjectType, settings.BoxCCGSubjectID)
 		if tokenErr != nil {
 			return nil, tokenErr

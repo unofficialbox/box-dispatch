@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
@@ -53,6 +54,7 @@ const (
 	screenDeploy
 	screenTeardown
 	screenBoxCCG
+	screenBoxSwitch
 )
 
 type connectionStatus int
@@ -242,6 +244,9 @@ type rootShellModel struct {
 	ccgClientSecret string
 	ccgSubjectType  string
 	ccgSubjectID    string
+
+	// Box connection switcher.
+	boxConnections []boxconn.Connection
 }
 
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
@@ -1285,6 +1290,16 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "enter" || key.String() == "right" {
 			return m.runProviderAction(m.cursor)
 		}
+	case screenBoxSwitch:
+		m.moveCursor(key, len(m.boxConnections))
+		if key.String() == "left" || key.String() == "esc" {
+			m.screen, m.cursor = screenProvider, 0
+			m.message = ""
+			return m, nil
+		}
+		if (key.String() == "enter" || key.String() == "right") && m.cursor < len(m.boxConnections) {
+			return m.setBoxDefault(m.boxConnections[m.cursor])
+		}
 	case screenOptions:
 		options := m.results[m.provider].Discovery.Options
 		m.moveCursor(key, len(options))
@@ -1508,6 +1523,8 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ccg":
 		return m.openBoxCCGForm()
+	case "switch":
+		return m.openBoxSwitch()
 	case "connect":
 		if m.provider == "databricks" {
 			m.screen = screenDatabricksHost
@@ -1566,7 +1583,7 @@ func (m rootShellModel) providerActions() []string {
 		actions = append(actions, "choose")
 	}
 	if m.provider == "box" {
-		actions = append(actions, "ccg")
+		actions = append(actions, "ccg", "switch")
 	}
 	actions = append(actions, "connect", "back")
 	return actions
@@ -1628,6 +1645,76 @@ func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
 	m.screen, m.cursor = screenProvider, 0
 	m.boxCCGForm = nil
 	return m, nil
+}
+
+// openBoxSwitch lists every Box connection box-dispatch can use — the box CLI
+// environments (each OAuth2, CCG or JWT) plus the box-dispatch CCG app — so the
+// user can pin which one deploys run against.
+func (m rootShellModel) openBoxSwitch() (tea.Model, tea.Cmd) {
+	m.boxConnections = boxconn.List()
+	m.screen, m.cursor = screenBoxSwitch, 0
+	if len(m.boxConnections) == 0 {
+		m.message = "No Box connection found. Run box login or add a CCG app first."
+	} else {
+		m.message = "Enter pins the highlighted connection as the default. Esc cancels."
+	}
+	return m, nil
+}
+
+// setBoxDefault pins the chosen connection as box-dispatch's default. A CLI
+// connection also becomes the CLI's current environment (the CLI has no
+// per-command selection), so the two never disagree.
+func (m rootShellModel) setBoxDefault(conn boxconn.Connection) (tea.Model, tea.Cmd) {
+	if conn.Source == boxconn.SourceCLI {
+		if err := boxconn.SetCLICurrent(conn.Name); err != nil {
+			m.message = "Could not switch the Box CLI to " + conn.Name + ": " + err.Error()
+			return m, nil
+		}
+	}
+	settings, _ := shellstate.LoadConnectionSettings()
+	settings.BoxDefaultConnection = conn.Name
+	if err := shellstate.SaveConnectionSettings(settings); err != nil {
+		m.message = "Could not save the default Box connection: " + err.Error()
+		return m, nil
+	}
+	m.boxConnections = boxconn.List()
+	m.message = conn.Name + " (" + conn.AuthType + ") is now the default Box connection."
+	return m, nil
+}
+
+func (m rootShellModel) viewBoxSwitch(width int) string {
+	rows := []string{}
+	if len(m.boxConnections) == 0 {
+		rows = append(rows, dimStyle.Render("No Box connection is available."))
+	}
+	for i, conn := range m.boxConnections {
+		tags := []string{}
+		if conn.Default {
+			tags = append(tags, lipgloss.NewStyle().Bold(true).Foreground(green).Render("[default]"))
+		}
+		if conn.Current {
+			tags = append(tags, dimStyle.Render("[CLI current]"))
+		}
+		if conn.Source == boxconn.SourceDispatch {
+			tags = append(tags, dimStyle.Render("[box-dispatch]"))
+		}
+		line := fmt.Sprintf("%-28s %-8s", conn.Name, conn.AuthType)
+		if len(tags) > 0 {
+			line += "  " + strings.Join(tags, " ")
+		}
+		if conn.Detail != "" {
+			line += "\n" + dimStyle.Render("   "+conn.Detail)
+		}
+		style := panel.Copy().Width(width - 4)
+		if i == m.cursor {
+			style = activePane.Copy().Width(width - 4)
+		}
+		rows = append(rows, style.Render(line))
+	}
+	return m.stageHeader() + "\n\n" +
+		titleStyle.Render("Switch Box connection") + "\n" +
+		dimStyle.Render("The default is the connection deploys authenticate with. Selecting a CLI environment also makes it the CLI's current environment.") + "\n\n" +
+		strings.Join(rows, "\n")
 }
 
 func (m rootShellModel) viewBoxCCG(width int) string {
@@ -1731,6 +1818,8 @@ func (m rootShellModel) View() string {
 		body = m.viewTeardown(contentWidth)
 	case screenBoxCCG:
 		body = m.viewBoxCCG(contentWidth)
+	case screenBoxSwitch:
+		body = m.viewBoxSwitch(contentWidth)
 	}
 	return lipgloss.NewStyle().Margin(1, 3).Width(contentWidth).Render(m.header(contentWidth) + "\n\n" + body + "\n\n" + m.footer())
 }
@@ -1935,6 +2024,7 @@ func providerConnectionDetails(result checker.ProviderResult) string {
 	}
 	switch result.Name {
 	case "box":
+		add("auth", result.Discovery.AuthType)
 		add("user", result.Discovery.Identity)
 		add("UID", result.Discovery.Account)
 		add("EID", result.Discovery.Enterprise)
@@ -1961,7 +2051,7 @@ func (m rootShellModel) viewProvider(width int) string {
 		detail = strings.Join(result.Checks, "\n")
 	}
 	actionLabels := map[string]string{
-		"check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+		"check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "connect": "Connect using provider CLI", "back": "Back to launch plan",
 	}
 	rows := []string{}
 	for i, action := range m.providerActions() {
@@ -2489,6 +2579,13 @@ func (m rootShellModel) footer() string {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "browse history")),
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "home")),
+		}
+	}
+	if m.screen == screenBoxSwitch {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set default")),
+			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "back")),
 		}
 	}
 	quitHelp := "home"
