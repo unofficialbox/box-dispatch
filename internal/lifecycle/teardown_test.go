@@ -132,3 +132,23 @@ func TestPrivateDestroyNeverCountsAbsentAsDeleted(t *testing.T) {
 		t.Fatalf("an empty outcome must not be recorded as deleted: %+v", empty)
 	}
 }
+
+func TestBrowserIsOnlyNeededForPrivateSurfaces(t *testing.T) {
+	// A Box deploy of public-API components must never warm a browser.
+	public := []ResourceReference{
+		{Kind: "folder", ID: "1"}, {Kind: "file", ID: "2"},
+		{Kind: "metadata_template", ID: "k"}, {Kind: "hub", ID: "3"},
+		{Kind: "ai_agent", ID: "4"}, {Kind: "docgen_template", ID: "5"},
+	}
+	if boxPrivateResourcesPresent(public) {
+		t.Fatal("public-API resources must not require the browser")
+	}
+	for _, kind := range []string{"form", "app"} {
+		if !boxPrivateResourcesPresent([]ResourceReference{{Kind: kind, ID: "1"}}) {
+			t.Fatalf("%s must require the browser", kind)
+		}
+	}
+	if boxPrivateResourcesPresent(nil) {
+		t.Fatal("no resources must not require the browser")
+	}
+}

@@ -170,7 +170,14 @@ func destroyBoxResources(root string, resources []ResourceReference) (TeardownRe
 	}
 
 	// Private surfaces have no delete API and are removed through the
-	// authenticated browser in one pass before the API-backed resources.
+	// authenticated browser in one pass before the API-backed resources. Verify
+	// that session before deleting anything, so a reset cannot remove the Box
+	// API resources and only then discover it cannot touch the Form or App.
+	if boxPrivateResourcesPresent(resources) {
+		if sessionErr := ensureBoxPrivateSession(); sessionErr != nil {
+			return result, sessionErr
+		}
+	}
 	privateOutcomes, privateHandled := destroyBoxPrivateSurfaces(root, box, resources)
 	result.Outcomes = append(result.Outcomes, privateOutcomes...)
 
@@ -301,6 +308,16 @@ const emptySalesforcePackage = `<?xml version="1.0" encoding="UTF-8"?>
     <version>62.0</version>
 </Package>
 `
+
+// boxPrivateResourcesPresent reports whether a teardown will need the browser.
+func boxPrivateResourcesPresent(resources []ResourceReference) bool {
+	for _, resource := range resources {
+		if resource.Kind == "form" || resource.Kind == "app" {
+			return true
+		}
+	}
+	return false
+}
 
 func resourceKey(resource ResourceReference) string {
 	return resource.Kind + ":" + resource.ID

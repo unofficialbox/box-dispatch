@@ -638,6 +638,16 @@ func deployBoxFoundation(root string, item Item) Item {
 	}
 	manifest, settings, selection := box.manifest, box.settings, box.selection
 	target, api, ctx := box.target, box.api, box.ctx
+	// Box Forms and Apps are provisioned through a browser after the public
+	// components. Check that session up front so an unsigned-in operator is told
+	// before anything is created, rather than half way through the deploy. Only
+	// solutions that actually include those surfaces need a browser at all.
+	if boxPrivateSurfacesPlanned(root, box, item.DeployableComponents) {
+		if sessionErr := ensureBoxPrivateSession(); sessionErr != nil {
+			item.Status, item.Detail = StatusFailed, sessionErr.Error()
+			return item
+		}
+	}
 	workspace := manifest.Box.Workspace
 	deployed := []string{}
 	folderComponent := workspace.ComponentType + ":" + workspace.DisplayName

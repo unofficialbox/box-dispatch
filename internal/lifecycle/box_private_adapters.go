@@ -86,6 +86,13 @@ func validateBoxPrivateAdapters(root string, manifest solution.Manifest, setting
 	return nil
 }
 
+// boxPrivateSurfacesPlanned reports whether an operation will need the browser,
+// so a deploy that has no Box Form or App never launches or warms one.
+func boxPrivateSurfacesPlanned(root string, box boxContext, deployable []string) bool {
+	_, components, err := privateAdapterRequest(root, box.manifest, box.settings.Box, box.selection, "deploy", nil, "", deployable)
+	return err == nil && len(components) > 0
+}
+
 func deployBoxPrivateAdapters(root string, manifest solution.Manifest, settings solution.BoxDeploymentSettings, selection solution.ComponentSelection, deployable []string, workspaceID string, existing []ResourceReference) ([]string, []ResourceReference, error) {
 	resourceLinks := privateResourceLinks(existing)
 	resourceLinks[manifest.Box.Workspace.Name] = privateBoxLink{ID: workspaceID, Kind: "folder"}

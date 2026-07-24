@@ -92,6 +92,109 @@ type chromedpTarget struct {
 // executeBoxPrivateBrowser runs the private-surface script in an already
 // authenticated Box tab over the Chrome DevTools Protocol. This is the only
 // transport: it is the one that works identically on macOS, Windows and Linux.
+// boxTabSession is an attached browser tab sitting on the tenant Box host.
+type boxTabSession struct {
+	ctx      context.Context
+	launched bool
+	cancels  []context.CancelFunc
+}
+
+func (s *boxTabSession) close() {
+	for i := len(s.cancels) - 1; i >= 0; i-- {
+		s.cancels[i]()
+	}
+}
+
+// openBoxTab attaches to a listening browser, starting one if necessary, and
+// returns a context bound to a tab on the tenant Box host. It reports whether
+// the browser had to be launched, which tells the caller a fresh profile may not
+// be signed in yet.
+func openBoxTab(ctx context.Context) (*boxTabSession, error) {
+	session := &boxTabSession{}
+	endpoint := cdpEndpoint()
+	wsURL, err := cdpWebSocketURL(ctx, endpoint)
+	if err != nil {
+		if launchErr := launchChrome(ctx, endpoint); launchErr != nil {
+			return nil, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), launchErr)
+		}
+		session.launched = true
+		wsURL, err = cdpWebSocketURL(ctx, endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), err)
+		}
+	}
+
+	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(ctx, wsURL)
+	session.cancels = append(session.cancels, cancelAllocator)
+
+	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
+	session.cancels = append(session.cancels, cancelBrowser)
+
+	infos, err := chromedp.Targets(browserCtx)
+	if err != nil {
+		session.close()
+		return nil, fmt.Errorf("list Chrome tabs: %w", err)
+	}
+	targets := make([]*chromedpTarget, 0, len(infos))
+	for _, info := range infos {
+		targets = append(targets, &chromedpTarget{ID: info.TargetID.String(), Type: info.Type, URL: info.URL})
+	}
+
+	if picked, pickErr := pickBoxTarget(targets); pickErr == nil {
+		for _, info := range infos {
+			if info.TargetID.String() == picked {
+				tabCtx, cancelTab := chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(info.TargetID))
+				session.cancels = append(session.cancels, cancelTab)
+				session.ctx = tabCtx
+				return session, nil
+			}
+		}
+	}
+
+	// No Box tab yet: open one on the tenant host the adapter requires.
+	target := enterpriseBoxURL(ctx)
+	if !strings.Contains(target, boxTabHost) {
+		session.close()
+		return nil, fmt.Errorf("could not determine the enterprise Box host; sign in with the Box CLI first")
+	}
+	tabCtx, cancelTab := chromedp.NewContext(allocatorCtx)
+	session.cancels = append(session.cancels, cancelTab)
+	if navErr := chromedp.Run(tabCtx, chromedp.Navigate(target)); navErr != nil {
+		session.close()
+		return nil, fmt.Errorf("open %s in the attached browser: %w", target, navErr)
+	}
+	session.ctx = tabCtx
+	return session, nil
+}
+
+// ensureBoxPrivateSession verifies a browser is attached and actually signed in
+// to Box, so a deploy or reset fails before doing any work rather than part way
+// through. An unauthenticated tab lands on the login host instead of the tenant
+// host, which is the signal used here.
+func ensureBoxPrivateSession() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session, err := openBoxTab(ctx)
+	if err != nil {
+		return err
+	}
+	defer session.close()
+
+	var host string
+	if err := chromedp.Run(session.ctx, chromedp.Evaluate("location.hostname", &host)); err != nil {
+		return fmt.Errorf("check the Box browser session: %w", err)
+	}
+	if strings.HasSuffix(host, boxTabHost) {
+		return nil
+	}
+	message := fmt.Sprintf("not signed in to Box: the browser is on %s instead of a %s tab.\nSign in to Box in the box-dispatch browser window, then retry", host, boxTabHost)
+	if session.launched {
+		message += "\n(a browser was just started with a new profile, so it has no Box session yet)"
+	}
+	return fmt.Errorf("%s", message)
+}
+
 func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, error) {
 	var response boxPrivateResponse
 	payload, err := json.Marshal(request)
@@ -102,55 +205,12 @@ func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, er
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Attach to a browser that is already listening, otherwise start one.
-	endpoint := cdpEndpoint()
-	launched := false
-	wsURL, err := cdpWebSocketURL(ctx, endpoint)
+	session, err := openBoxTab(ctx)
 	if err != nil {
-		if launchErr := launchChrome(ctx, endpoint); launchErr != nil {
-			return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), launchErr)
-		}
-		launched = true
-		wsURL, err = cdpWebSocketURL(ctx, endpoint)
-		if err != nil {
-			return response, fmt.Errorf("%s\n%s", chromeUnavailableMessage(), err)
-		}
+		return response, err
 	}
-	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(ctx, wsURL)
-	defer cancelAllocator()
-
-	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
-	defer cancelBrowser()
-
-	infos, err := chromedp.Targets(browserCtx)
-	if err != nil {
-		return response, fmt.Errorf("list Chrome tabs: %w", err)
-	}
-	targets := make([]*chromedpTarget, 0, len(infos))
-	for _, info := range infos {
-		targets = append(targets, &chromedpTarget{ID: info.TargetID.String(), Type: info.Type, URL: info.URL})
-	}
-	tabCtx, cancelTab := browserCtx, func() {}
-	if picked, pickErr := pickBoxTarget(targets); pickErr == nil {
-		for _, info := range infos {
-			if info.TargetID.String() == picked {
-				tabCtx, cancelTab = chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(info.TargetID))
-				break
-			}
-		}
-	} else {
-		// No Box tab yet: open one on the tenant host the adapter requires.
-		target := enterpriseBoxURL(ctx)
-		if !strings.Contains(target, boxTabHost) {
-			return response, fmt.Errorf("%w\ncould not determine the enterprise Box host; sign in with the Box CLI first", pickErr)
-		}
-		tabCtx, cancelTab = chromedp.NewContext(allocatorCtx)
-		if navErr := chromedp.Run(tabCtx, chromedp.Navigate(target)); navErr != nil {
-			cancelTab()
-			return response, fmt.Errorf("open %s in the attached browser: %w", target, navErr)
-		}
-	}
-	defer cancelTab()
+	defer session.close()
+	tabCtx, launched := session.ctx, session.launched
 
 	// The script assigns its result to window.__boxDispatchPrivateResult when its
 	// async work settles; ";true" gives Evaluate a serialisable return value.
