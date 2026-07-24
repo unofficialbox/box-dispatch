@@ -254,3 +254,24 @@ func TestBoxRequestBodyUnwrapsCLIEnvelope(t *testing.T) {
 		t.Fatalf("plain output should pass through, got %q err %v", body, err)
 	}
 }
+
+func TestPrivateSurfaceScriptIsolatesFormAndAppFailures(t *testing.T) {
+	script := boxPrivateBrowserScript(`{"operation":"deploy"}`)
+	// Each surface must catch its own error, so a failing Box App cannot discard
+	// a Box Form that was actually created and leave it unrecorded.
+	for _, want := range []string{
+		`if(request.form){try{`,
+		`if(request.app){try{`,
+		`catch(error){result.form=`,
+		`catch(error){result.app=`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("injected script is missing %q", want)
+		}
+	}
+	// The template error should explain the real limitation rather than implying
+	// the operator should go and create a template app.
+	if !strings.Contains(script, "no portable Box App definition") {
+		t.Fatal("template failure should explain that the solution has no portable app definition")
+	}
+}
