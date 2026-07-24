@@ -82,7 +82,26 @@ express symbolically and re-resolve per environment.
 
 Charts and searches are the only blocks whose binding is not a plain id or URL:
 they point at a `savedSearch` record, which is why that record has to be created
-(or derived) at deploy rather than simply rewritten.
+at deploy rather than simply rewritten.
+
+### savedSearch is required, not derived
+
+Checked across every chart and search block in a live app: **all of them carry a
+`savedSearch`, and in every case `erid === savedSearch._id`.** So the saved
+search is a real backing record that the block points at, not something Box
+derives from `templateKey` at render time. `searchFields` is optional — one
+chart had none — but `savedSearch` was never absent.
+
+This is why cloning "works" and why it cannot be reproduced without a source
+app: the clone deletes `savedSearch` and `searchFields` from each item but keeps
+`erid`, so a cloned chart goes on pointing at the **template app's** saved
+search. A portable definition has no such record to borrow and must create one.
+
+**Still unknown:** the method that creates a saved search — whether
+`app.update.all` accepts an embedded `savedSearch` and persists it, or whether a
+separate call is required. Determining it needs either a write test or a network
+recording taken while adding a chart block in the Box UI. Everything else needed
+to build an app from a definition is captured above.
 
 Note `shortcut` erids are absolute tenant URLs, so they must be rewritten to the
 target tenant host — not just repointed at a new id.
