@@ -601,3 +601,53 @@ func TestDeployedResourcesFlattensEveryProvider(t *testing.T) {
 		t.Fatalf("deployedResources = %d rows, want 3: %+v", len(got), got)
 	}
 }
+
+func TestDeployedAssetsIncludesExistingConfiguration(t *testing.T) {
+	m := rootShellModel{validationItems: []lifecycle.Item{
+		{
+			Provider: "box",
+			Resources: []lifecycle.ResourceReference{
+				{Provider: "box", Component: "Workspace:CLM", Kind: "folder", Name: "CLM", ID: "1"},
+			},
+			// Configuration already in the tenant: created earlier, so the deploy
+			// records no ID, but it must still show as an existing row.
+			Present: []string{"Metadata Template:clmDocument", "Doc Gen Template:contract.docx", "Box App:CLM"},
+		},
+	}}
+	assets := m.deployedAssets()
+	if len(assets) != 4 {
+		t.Fatalf("deployedAssets = %d, want 4 (1 created + 3 existing): %+v", len(assets), assets)
+	}
+	var created, existing int
+	kinds := map[string]string{}
+	for _, a := range assets {
+		if a.created {
+			created++
+		} else {
+			existing++
+		}
+		kinds[a.ref.Component] = a.ref.Kind
+	}
+	if created != 1 || existing != 3 {
+		t.Fatalf("created=%d existing=%d, want 1 and 3", created, existing)
+	}
+	if kinds["Metadata Template:clmDocument"] != "metadata_template" {
+		t.Fatalf("existing metadata kind = %q, want metadata_template", kinds["Metadata Template:clmDocument"])
+	}
+	if kinds["Box App:CLM"] != "app" {
+		t.Fatalf("existing app kind = %q, want app", kinds["Box App:CLM"])
+	}
+}
+
+func TestDeployedAssetsDoesNotDuplicateCreatedComponents(t *testing.T) {
+	// A component recorded as created must not also appear as an existing row,
+	// even if it lingers in the Present list.
+	m := rootShellModel{validationItems: []lifecycle.Item{{
+		Provider:  "box",
+		Resources: []lifecycle.ResourceReference{{Provider: "box", Component: "Box Hub:CLM", Kind: "hub", Name: "CLM", ID: "9"}},
+		Present:   []string{"Box Hub:CLM"},
+	}}}
+	if got := m.deployedAssets(); len(got) != 1 || !got[0].created {
+		t.Fatalf("deployedAssets = %+v, want a single created row", got)
+	}
+}

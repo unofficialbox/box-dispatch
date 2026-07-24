@@ -1471,7 +1471,7 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.deployDone {
 			switch key.String() {
 			case "down", "j":
-				total := len(m.deployedResources())
+				total := len(m.deployedAssets())
 				if maxScroll := total - m.deployAssetsVisibleRows(); m.deployAssetsScroll < maxScroll {
 					m.deployAssetsScroll++
 				}
@@ -2565,6 +2565,79 @@ func (m rootShellModel) deployedResources() []lifecycle.ResourceReference {
 	return out
 }
 
+// deployedAsset pairs a resource reference with whether this run created it. The
+// deploy adapters only record IDs for components they create, so already-present
+// configuration (metadata templates, Doc Gen templates, AI agents, hubs, the
+// Box Form/App) carries no ID — but the operator still wants to see it in the
+// post-deploy table. Those are surfaced from the validation Present list as
+// "existing" rows so the table reflects the whole solution, not just new files.
+type deployedAsset struct {
+	ref     lifecycle.ResourceReference
+	created bool
+}
+
+func (m rootShellModel) deployedAssets() []deployedAsset {
+	assets := []deployedAsset{}
+	// Component keys already represented by a created resource, so an existing
+	// row is not also emitted for the same thing.
+	covered := map[string]bool{}
+	for _, item := range m.validationItems {
+		for _, r := range item.Resources {
+			assets = append(assets, deployedAsset{ref: r, created: true})
+			covered[r.Provider+"|"+r.Component] = true
+		}
+	}
+	for _, item := range m.validationItems {
+		for _, component := range item.Present {
+			if covered[item.Provider+"|"+component] {
+				continue
+			}
+			assets = append(assets, deployedAsset{ref: lifecycle.ResourceReference{
+				Provider:  item.Provider,
+				Component: component,
+				Kind:      kindForComponent(component),
+				Name:      componentName(component),
+			}})
+		}
+	}
+	return assets
+}
+
+// componentName returns the display name half of a "Type:Name" component key.
+func componentName(component string) string {
+	if i := strings.Index(component, ":"); i >= 0 {
+		return component[i+1:]
+	}
+	return component
+}
+
+// kindForComponent maps a component's "Type:" prefix onto the same kind label
+// the deploy adapters record for created resources, so existing and created rows
+// read consistently. Unknown types fall back to a snake_case of the prefix.
+func kindForComponent(component string) string {
+	switch componentType(component) {
+	case "Metadata Template":
+		return "metadata_template"
+	case "Doc Gen Template":
+		return "docgen_template"
+	case "AI Agent":
+		return "ai_agent"
+	case "Extract Configuration":
+		return "extract"
+	case "Box Hub":
+		return "hub"
+	case "Box Form":
+		return "form"
+	case "Box App":
+		return "app"
+	case "Automate Workflow":
+		return "automate_workflow"
+	case "HTTPS Connector":
+		return "https_connector"
+	}
+	return strings.ReplaceAll(strings.ToLower(componentType(component)), " ", "_")
+}
+
 // deployAssetsVisibleRows is how many table rows fit under the provider progress
 // panel on the current terminal.
 func (m rootShellModel) deployAssetsVisibleRows() int {
@@ -2580,12 +2653,12 @@ func (m rootShellModel) deployAssetsVisibleRows() int {
 // list is windowed by deployAssetsScroll (↑/↓) so a large deployment stays on
 // screen.
 func (m rootShellModel) renderDeployedAssetsTable(width int) string {
-	resources := m.deployedResources()
-	if len(resources) == 0 {
+	assets := m.deployedAssets()
+	if len(assets) == 0 {
 		return ""
 	}
 	inner := width - 8
-	wStatus, wSource, wComp, wKind := 2, 10, 20, 16
+	wStatus, wSource, wComp, wKind := 8, 10, 20, 16
 	rest := inner - wStatus - wSource - wComp - wKind - 5 // 5 single-space gaps
 	if rest < 30 {
 		rest = 30
@@ -2600,20 +2673,30 @@ func (m rootShellModel) renderDeployedAssetsTable(width int) string {
 		return style.Render(truncateCell(s, n))
 	}
 	head := dimStyle.Render(strings.Join([]string{
-		cellPlain("", wStatus), cellPlain("SOURCE", wSource), cellPlain("COMPONENT", wComp),
+		cellPlain("STATUS", wStatus), cellPlain("SOURCE", wSource), cellPlain("COMPONENT", wComp),
 		cellPlain("KIND", wKind), cellPlain("NAME", wName), cellPlain("ID", wID),
 	}, " "))
-	rowsAll := make([]string, 0, len(resources))
-	for _, r := range resources {
+	created := 0
+	rowsAll := make([]string, 0, len(assets))
+	for _, a := range assets {
+		status, tone, id := "existing", muted, a.ref.ID
+		if a.created {
+			created++
+			status, tone = "✓ new", green
+		}
+		if strings.TrimSpace(id) == "" {
+			id = "—"
+		}
 		rowsAll = append(rowsAll, strings.Join([]string{
-			cell("✓", wStatus, green),
-			cell(providerLabel(r.Provider), wSource, white),
-			cell(componentType(r.Component), wComp, ""),
-			cell(r.Kind, wKind, ""),
-			cell(r.Name, wName, ""),
-			cell(r.ID, wID, muted),
+			cell(status, wStatus, tone),
+			cell(providerLabel(a.ref.Provider), wSource, white),
+			cell(componentType(a.ref.Component), wComp, ""),
+			cell(a.ref.Kind, wKind, ""),
+			cell(a.ref.Name, wName, ""),
+			cell(id, wID, muted),
 		}, " "))
 	}
+	existing := len(rowsAll) - created
 	visible := m.deployAssetsVisibleRows()
 	scroll := m.deployAssetsScroll
 	if maxScroll := len(rowsAll) - visible; scroll > maxScroll {
@@ -2634,8 +2717,12 @@ func (m rootShellModel) renderDeployedAssetsTable(width int) string {
 		}
 		footer = "\n" + dimStyle.Render(fmt.Sprintf("%s%s rows %d–%d of %d · ↑/↓ scroll", up, down, scroll+1, scroll+len(shown), len(rowsAll)))
 	}
-	heading := lipgloss.NewStyle().Bold(true).Foreground(green).Render(fmt.Sprintf("✓  %d assets deployed", len(rowsAll)))
-	body := heading + "\n" + head + "\n" + strings.Join(shown, "\n") + footer
+	heading := lipgloss.NewStyle().Bold(true).Foreground(green).Render(fmt.Sprintf("✓  %d deployed", created))
+	if existing > 0 {
+		heading += dimStyle.Render(fmt.Sprintf("   ·   %d already present", existing))
+	}
+	legend := dimStyle.Render("✓ new = created this run · existing = configuration already in the tenant")
+	body := heading + "\n" + legend + "\n\n" + head + "\n" + strings.Join(shown, "\n") + footer
 	return panel.Copy().Width(width-4).Padding(1, 2).Render(body)
 }
 
