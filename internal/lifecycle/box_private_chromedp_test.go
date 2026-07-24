@@ -119,3 +119,21 @@ func TestChromeCandidatesAreProvidedForThisPlatform(t *testing.T) {
 		t.Fatal("no browser candidates for this platform")
 	}
 }
+
+func TestPickBoxTargetIgnoresLoginPageWithTenantRedirect(t *testing.T) {
+	// The Box login URL carries the tenant address in its redirect query, so a
+	// substring match would select the login tab and script an unauthenticated page.
+	login := "https://kadams.account.box.com/login?redirect_url=https%3A%2F%2Fkadams.ent.box.com%2F"
+	if _, err := pickBoxTarget([]*chromedpTarget{{ID: "login", Type: "page", URL: login}}); err == nil {
+		t.Fatal("a login page must never be selected as the authenticated Box tab")
+	}
+	// The real tenant tab is still selected when both are open.
+	targets := []*chromedpTarget{
+		{ID: "login", Type: "page", URL: login},
+		{ID: "tenant", Type: "page", URL: "https://kadams.ent.box.com/folder/0"},
+	}
+	got, err := pickBoxTarget(targets)
+	if err != nil || got != "tenant" {
+		t.Fatalf("picked %q (err %v), want the tenant tab", got, err)
+	}
+}

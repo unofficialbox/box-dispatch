@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -89,10 +90,21 @@ func chromeUnavailableMessage() string {
 
 // pickBoxTarget selects the authenticated enterprise Box tab from the attached
 // browser's targets.
+// It matches on the tab's host, not on the raw URL: a Box login page carries the
+// tenant address in its redirect query
+// (account.box.com/login?redirect_url=...ent.box.com...), so a substring match
+// would select the login tab and run the adapter against an unauthenticated page.
 func pickBoxTarget(targets []*chromedpTarget) (string, error) {
-	for _, target := range targets {
-		if target.Type == "page" && strings.Contains(target.URL, boxTabHost) {
-			return target.ID, nil
+	for _, candidate := range targets {
+		if candidate.Type != "page" {
+			continue
+		}
+		parsed, err := url.Parse(candidate.URL)
+		if err != nil {
+			continue
+		}
+		if strings.HasSuffix(parsed.Hostname(), boxTabHost) {
+			return candidate.ID, nil
 		}
 	}
 	return "", fmt.Errorf("no authenticated %s tab is open in the attached Chrome", boxTabHost)
@@ -193,8 +205,30 @@ func openBoxTab(ctx context.Context) (*boxTabSession, error) {
 		session.close()
 		return nil, fmt.Errorf("open %s in the attached browser: %w", target, navErr)
 	}
+	// Box bounces through the login host when a session needs establishing, so
+	// let the redirect chain settle before the caller inspects or scripts the tab.
+	waitForTenantHost(tabCtx, 15*time.Second)
 	session.ctx = tabCtx
 	return session, nil
+}
+
+// waitForTenantHost waits for a redirect chain to land on the tenant host,
+// returning the last host seen if it never does.
+func waitForTenantHost(tabCtx context.Context, limit time.Duration) string {
+	deadline := time.Now().Add(limit)
+	last := ""
+	for {
+		if host, err := currentHostname(tabCtx); err == nil && host != "" {
+			last = host
+			if strings.HasSuffix(host, boxTabHost) {
+				return host
+			}
+		}
+		if time.Now().After(deadline) {
+			return last
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // ensureBoxPrivateSession verifies a browser is attached and actually signed in
