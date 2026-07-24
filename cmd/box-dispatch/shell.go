@@ -218,6 +218,7 @@ type rootShellModel struct {
 	deploymentStartedAt   time.Time
 	deploymentCompletedAt time.Time
 	deploymentAuditPath   string
+	deployAssetsScroll    int // first visible row of the deployed-assets table
 	deploymentHistory     []deploymentaudit.DeploymentRecord
 	historyError          string
 	validationItems       []lifecycle.Item
@@ -722,6 +723,7 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
 	m.deployStarted = true
 	m.deployDone = false
+	m.deployAssetsScroll = 0
 	m.deploymentBaseline = append([]lifecycle.Item(nil), m.validationItems...)
 	m.deploymentStartedAt = time.Now().UTC()
 	m.deploymentCompletedAt = time.Time{}
@@ -1445,6 +1447,21 @@ func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startValidation()
 		}
 	case screenDeploy:
+		if m.deployDone {
+			switch key.String() {
+			case "down", "j":
+				total := len(m.deployedResources())
+				if maxScroll := total - m.deployAssetsVisibleRows(); m.deployAssetsScroll < maxScroll {
+					m.deployAssetsScroll++
+				}
+				return m, nil
+			case "up", "k":
+				if m.deployAssetsScroll > 0 {
+					m.deployAssetsScroll--
+				}
+				return m, nil
+			}
+		}
 		if key.String() == "left" {
 			m.screen = screenValidate
 			return m, nil
@@ -2501,8 +2518,125 @@ func (m rootShellModel) viewDeploy(width int) string {
 			action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
 		}
 	}
+	assets := ""
+	if m.deployDone {
+		if table := m.renderDeployedAssetsTable(width); table != "" {
+			assets = "\n" + table
+		}
+	}
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + action
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + assets + "\n" + action
+}
+
+// deployedResources flattens every asset recorded across providers this run.
+func (m rootShellModel) deployedResources() []lifecycle.ResourceReference {
+	out := []lifecycle.ResourceReference{}
+	for _, item := range m.validationItems {
+		out = append(out, item.Resources...)
+	}
+	return out
+}
+
+// deployAssetsVisibleRows is how many table rows fit under the provider progress
+// panel on the current terminal.
+func (m rootShellModel) deployAssetsVisibleRows() int {
+	n := m.height - 24
+	if n < 5 {
+		n = 5
+	}
+	return n
+}
+
+// renderDeployedAssetsTable lists what a successful run actually created — one row
+// per asset with its status, source system, component, kind, name, and id. The
+// list is windowed by deployAssetsScroll (↑/↓) so a large deployment stays on
+// screen.
+func (m rootShellModel) renderDeployedAssetsTable(width int) string {
+	resources := m.deployedResources()
+	if len(resources) == 0 {
+		return ""
+	}
+	inner := width - 8
+	wStatus, wSource, wComp, wKind := 2, 10, 20, 16
+	rest := inner - wStatus - wSource - wComp - wKind - 5 // 5 single-space gaps
+	if rest < 30 {
+		rest = 30
+	}
+	wName := rest * 3 / 5
+	wID := rest - wName
+	cell := func(s string, n int, tone lipgloss.Color) string {
+		style := lipgloss.NewStyle().Width(n)
+		if tone != "" {
+			style = style.Foreground(tone)
+		}
+		return style.Render(truncateCell(s, n))
+	}
+	head := dimStyle.Render(strings.Join([]string{
+		cellPlain("", wStatus), cellPlain("SOURCE", wSource), cellPlain("COMPONENT", wComp),
+		cellPlain("KIND", wKind), cellPlain("NAME", wName), cellPlain("ID", wID),
+	}, " "))
+	rowsAll := make([]string, 0, len(resources))
+	for _, r := range resources {
+		rowsAll = append(rowsAll, strings.Join([]string{
+			cell("✓", wStatus, green),
+			cell(providerLabel(r.Provider), wSource, white),
+			cell(componentType(r.Component), wComp, ""),
+			cell(r.Kind, wKind, ""),
+			cell(r.Name, wName, ""),
+			cell(r.ID, wID, muted),
+		}, " "))
+	}
+	visible := m.deployAssetsVisibleRows()
+	scroll := m.deployAssetsScroll
+	if maxScroll := len(rowsAll) - visible; scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	shown, footer := rowsAll, ""
+	if len(rowsAll) > visible {
+		shown = rowsAll[scroll:min(scroll+visible, len(rowsAll))]
+		up, down := "  ", "  "
+		if scroll > 0 {
+			up = "↑ "
+		}
+		if scroll+visible < len(rowsAll) {
+			down = "↓ "
+		}
+		footer = "\n" + dimStyle.Render(fmt.Sprintf("%s%s rows %d–%d of %d · ↑/↓ scroll", up, down, scroll+1, scroll+len(shown), len(rowsAll)))
+	}
+	heading := lipgloss.NewStyle().Bold(true).Foreground(green).Render(fmt.Sprintf("✓  %d assets deployed", len(rowsAll)))
+	body := heading + "\n" + head + "\n" + strings.Join(shown, "\n") + footer
+	return panel.Copy().Width(width-4).Padding(1, 2).Render(body)
+}
+
+// cellPlain pads a header label to a fixed display width without colour.
+func cellPlain(s string, n int) string {
+	return lipgloss.NewStyle().Width(n).Render(truncateCell(s, n))
+}
+
+// truncateCell shortens a value to at most n display cells, adding an ellipsis.
+func truncateCell(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// componentType strips the display-name suffix from a "Type:Name" component key.
+func componentType(component string) string {
+	if i := strings.Index(component, ":"); i >= 0 {
+		return component[:i]
+	}
+	return component
 }
 
 func (m rootShellModel) providerProgressRow(provider string, value float64, item *lifecycle.Item, active bool, phase string, width int) string {

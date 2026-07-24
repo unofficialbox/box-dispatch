@@ -514,3 +514,47 @@ func containsStr(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestTruncateCellShortensToDisplayWidth(t *testing.T) {
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"hello", 10, "hello"},
+		{"hello world", 5, "hell…"},
+		{"exact", 5, "exact"},
+		{"x", 0, ""},
+		{"abc", 1, "…"},
+	}
+	for _, c := range cases {
+		if got := truncateCell(c.in, c.n); got != c.want {
+			t.Fatalf("truncateCell(%q,%d) = %q, want %q", c.in, c.n, got, c.want)
+		}
+	}
+}
+
+func TestComponentTypeStripsDisplayName(t *testing.T) {
+	if got := componentType("Folder Structure:CLM Contract Workspace"); got != "Folder Structure" {
+		t.Fatalf("componentType = %q", got)
+	}
+	if got := componentType("Metadata Template"); got != "Metadata Template" {
+		t.Fatalf("componentType passthrough = %q", got)
+	}
+}
+
+func TestDeployedResourcesFlattensEveryProvider(t *testing.T) {
+	m := rootShellModel{validationItems: []lifecycle.Item{
+		{Provider: "box", Resources: []lifecycle.ResourceReference{
+			{Provider: "box", Kind: "folder", Name: "Workspace", ID: "1"},
+			{Provider: "box", Kind: "file", Name: "doc.pdf", ID: "2"},
+		}},
+		{Provider: "salesforce", Resources: []lifecycle.ResourceReference{
+			{Provider: "salesforce", Kind: "apex_class", Name: "Router", ID: "3"},
+		}},
+		{Provider: "aws"}, // no resources
+	}}
+	if got := m.deployedResources(); len(got) != 3 {
+		t.Fatalf("deployedResources = %d rows, want 3: %+v", len(got), got)
+	}
+}
