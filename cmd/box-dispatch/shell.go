@@ -1995,20 +1995,28 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 	rows := make([]string, 0, len(m.boxCapabilities))
 	for i, capability := range m.boxCapabilities {
 		enabled := m.boxCapabilitySelected(capability)
-		marker := "[ ]"
-		if enabled {
-			marker = "[x]"
-		}
 		status := strings.ToUpper(capability.API)
 		if capability.Handler != "" {
 			status = "READY"
 		} else if capability.API == "public" {
 			status = "ADAPTER PENDING"
 		}
+		// Same marker vocabulary and colours the validate and deploy checklists
+		// use: green tick for what will be deployed, gold ring for anything left
+		// manual, dim ring for what is not selected.
+		marker, tone := "○", muted
+		switch {
+		case !enabled:
+			status = "EXCLUDED"
+		case capability.Handler != "":
+			marker, tone = "✓", green
+		default:
+			tone = gold
+		}
 		line := fmt.Sprintf("%s  %-25s %s", marker, capability.ComponentType, status)
-		style := lipgloss.NewStyle().Width(width - 10).Foreground(ice)
+		style := lipgloss.NewStyle().Width(width - 10).Foreground(tone)
 		if i == m.cursor {
-			style = style.Copy().Bold(true).Foreground(white).Background(lipgloss.Color("#12384A"))
+			style = style.Copy().Bold(true).Background(lipgloss.Color("#12384A"))
 		}
 		rows = append(rows, style.Render(line))
 	}
@@ -2164,9 +2172,14 @@ func (m rootShellModel) viewDeploy(width int) string {
 
 func (m rootShellModel) providerProgressRow(provider string, value float64, item *lifecycle.Item, active bool, phase string, width int) string {
 	state := dimStyle.Render("PENDING")
-	if active {
+	switch {
+	case active:
 		state = lipgloss.NewStyle().Bold(true).Foreground(gold).Render(m.spinner.View() + " IN PROGRESS")
-	} else if value >= 1 {
+	case item != nil && item.Status == lifecycle.StatusFailed:
+		// A finished run that failed is not complete; saying so contradicted the
+		// failure reported directly underneath it.
+		state = lipgloss.NewStyle().Bold(true).Foreground(coral).Render("FAILED")
+	case value >= 1:
 		state = lipgloss.NewStyle().Bold(true).Foreground(green).Render("COMPLETE")
 	}
 	header := titleStyle.Render(providerLabel(provider)) + "  " + state

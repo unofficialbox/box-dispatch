@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -89,9 +90,6 @@ type chromedpTarget struct {
 	URL  string
 }
 
-// executeBoxPrivateBrowser runs the private-surface script in an already
-// authenticated Box tab over the Chrome DevTools Protocol. This is the only
-// transport: it is the one that works identically on macOS, Windows and Linux.
 // boxTabSession is an attached browser tab sitting on the tenant Box host.
 type boxTabSession struct {
 	ctx      context.Context
@@ -130,14 +128,30 @@ func openBoxTab(ctx context.Context) (*boxTabSession, error) {
 	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
 	session.cancels = append(session.cancels, cancelBrowser)
 
-	infos, err := chromedp.Targets(browserCtx)
-	if err != nil {
-		session.close()
-		return nil, fmt.Errorf("list Chrome tabs: %w", err)
+	// A browser we just started has not registered its opening tab yet, so give
+	// it a moment before concluding there is no Box tab and opening another.
+	attempts := 1
+	if session.launched {
+		attempts = 20
 	}
-	targets := make([]*chromedpTarget, 0, len(infos))
-	for _, info := range infos {
-		targets = append(targets, &chromedpTarget{ID: info.TargetID.String(), Type: info.Type, URL: info.URL})
+	var infos []*target.Info
+	var targets []*chromedpTarget
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
+		infos, err = chromedp.Targets(browserCtx)
+		if err != nil {
+			session.close()
+			return nil, fmt.Errorf("list Chrome tabs: %w", err)
+		}
+		targets = targets[:0]
+		for _, info := range infos {
+			targets = append(targets, &chromedpTarget{ID: info.TargetID.String(), Type: info.Type, URL: info.URL})
+		}
+		if _, pickErr := pickBoxTarget(targets); pickErr == nil {
+			break
+		}
 	}
 
 	if picked, pickErr := pickBoxTarget(targets); pickErr == nil {
@@ -181,20 +195,47 @@ func ensureBoxPrivateSession() error {
 	}
 	defer session.close()
 
-	var host string
-	if err := chromedp.Run(session.ctx, chromedp.Evaluate("location.hostname", &host)); err != nil {
+	host, err := tabHostname(session.ctx)
+	if err != nil {
 		return fmt.Errorf("check the Box browser session: %w", err)
 	}
 	if strings.HasSuffix(host, boxTabHost) {
 		return nil
 	}
-	message := fmt.Sprintf("not signed in to Box: the browser is on %s instead of a %s tab.\nSign in to Box in the box-dispatch browser window, then retry", host, boxTabHost)
+	where := "is on " + host
+	if strings.TrimSpace(host) == "" {
+		where = "has not finished loading Box"
+	}
+	message := fmt.Sprintf("not signed in to Box: the browser %s instead of a %s tab.\nSign in to Box in the box-dispatch browser window, then retry", where, boxTabHost)
 	if session.launched {
 		message += "\n(a browser was just started with a new profile, so it has no Box session yet)"
 	}
 	return fmt.Errorf("%s", message)
 }
 
+// tabHostname reads the tab's hostname, waiting for a freshly opened tab to
+// finish navigating. Without the wait a tab is judged while it is still
+// about:blank and reports an empty host.
+func tabHostname(tabCtx context.Context) (string, error) {
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var host string
+		if err := chromedp.Run(tabCtx, chromedp.Evaluate("location.hostname", &host)); err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(host) != "" {
+			return host, nil
+		}
+		if time.Now().After(deadline) {
+			return "", nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// executeBoxPrivateBrowser runs the private-surface script in an already
+// authenticated Box tab over the Chrome DevTools Protocol. This is the only
+// transport: it works identically on macOS, Windows and Linux.
 func executeBoxPrivateBrowser(request boxPrivateRequest) (boxPrivateResponse, error) {
 	var response boxPrivateResponse
 	payload, err := json.Marshal(request)
