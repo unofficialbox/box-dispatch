@@ -2254,12 +2254,12 @@ func (m rootShellModel) viewWelcome(width int) string {
 func (m rootShellModel) routeStrip() string {
 	steps := []struct {
 		num, label string
-		tone       lipgloss.Color
+		tone, text lipgloss.Color
 	}{
-		{"01", "SELECT STACK", cyan},
-		{"02", "CONNECT", cyan},
-		{"03", "PICK QUICKSTART", cyan},
-		{"04", "SHIP", green},
+		{"01", "SELECT STACK", cyan, white},
+		{"02", "CONNECT", cyan, white},
+		{"03", "PICK QUICKSTART", cyan, white},
+		{"04", "SHIP", green, navy},
 	}
 	label := lipgloss.NewStyle().Foreground(muted).Bold(true).Render("YOUR ROUTE")
 	chevron := lipgloss.NewStyle().Foreground(divider).Render(" › ")
@@ -2268,7 +2268,7 @@ func (m rootShellModel) routeStrip() string {
 		if i > 0 {
 			parts = append(parts, chevron)
 		}
-		chip := lipgloss.NewStyle().Bold(true).Foreground(navy).Background(s.tone).Padding(0, 1).Render(s.num)
+		chip := lipgloss.NewStyle().Bold(true).Foreground(s.text).Background(s.tone).Padding(0, 1).Render(s.num)
 		parts = append(parts, chip+lipgloss.NewStyle().Foreground(ice).Render(" "+s.label))
 	}
 	return label + "\n" + strings.Join(parts, "")
