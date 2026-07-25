@@ -174,6 +174,7 @@ var (
 	green      = lipgloss.Color("#67C587")
 	muted      = lipgloss.Color("#8A9AAF")
 	white      = lipgloss.Color("#FFFEFA")
+	divider    = lipgloss.Color("#25384F") // subtle rule between chrome and content
 	panel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#52637A")).Padding(1, 2)
 	activePane = panel.Copy().BorderForeground(coral).Background(navy)
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(white)
@@ -2050,13 +2051,16 @@ func (m rootShellModel) View() string {
 }
 
 func (m rootShellModel) header(width int) string {
-	mark := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("B/")
+	// A filled brand chip reads as a small logo rather than loose glyphs.
+	mark := lipgloss.NewStyle().Bold(true).Foreground(navy).Background(cyan).Render(" B/ ")
 	product := lipgloss.NewStyle().Bold(true).Foreground(white).Render("  DISPATCH")
-	tag := dimStyle.Render("  SOLUTION ASSEMBLY")
+	tag := lipgloss.NewStyle().Foreground(muted).Render("  SOLUTION ASSEMBLY")
 	domain := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("UNOFFICIALBOX.DEV")
 	used := lipgloss.Width(mark + product + tag + domain)
 	gap := max(width-used, 2)
-	return mark + product + tag + strings.Repeat(" ", gap) + domain
+	row := mark + product + tag + strings.Repeat(" ", gap) + domain
+	// A hairline rule frames the chrome and separates it from the content below.
+	return lipgloss.NewStyle().Width(width).BorderStyle(lipgloss.NormalBorder()).BorderTop(false).BorderBottom(true).BorderLeft(false).BorderRight(false).BorderForeground(divider).Render(row)
 }
 
 // taskRunning reports whether a long-running lifecycle task is in progress, so
@@ -2131,18 +2135,26 @@ func (m rootShellModel) stepper() string {
 	if m.width < 100 {
 		labels = []string{"BUILD", "LINK", "TPL", "CONFIG", "PACK", "CHECK", "SHIP"}
 	}
-	parts := make([]string, len(labels))
+	// Interleave each step with a connector so the row reads as a single track:
+	// the traveled path (up to the current step) is green, the road ahead muted.
+	out := make([]string, 0, len(labels)*2-1)
 	for i, label := range labels {
-		color := muted
-		icon := "○"
+		if i > 0 {
+			seg := muted
+			if i <= current {
+				seg = green
+			}
+			out = append(out, lipgloss.NewStyle().Foreground(seg).Render(" ── "))
+		}
+		color, icon := muted, "○"
 		if i < current {
 			color, icon = green, "●"
 		} else if i == current {
 			color, icon = coral, "◆"
 		}
-		parts[i] = lipgloss.NewStyle().Bold(i == current).Foreground(color).Render(icon + " " + label)
+		out = append(out, lipgloss.NewStyle().Bold(i == current).Foreground(color).Render(icon+" "+label))
 	}
-	return strings.Join(parts, dimStyle.Render(" ━ "))
+	return strings.Join(out, "")
 }
 
 func (m rootShellModel) viewWelcome(width int) string {
@@ -2169,16 +2181,17 @@ func (m rootShellModel) viewWelcome(width int) string {
 	heroContent := lipgloss.JoinVertical(lipgloss.Left, copy, "", strings.Join(optionRows, "\n"))
 	hero := panel.Copy().BorderForeground(white).BorderLeftForeground(coral).Width(width-4).Padding(2, 3).Render(heroContent)
 
-	routeLabel := dimStyle.Render("YOUR ROUTE")
+	routeLabel := lipgloss.NewStyle().Foreground(muted).Render("YOUR ROUTE")
+	sep := lipgloss.NewStyle().Foreground(divider).Render(" ──── ")
 	route := strings.Join([]string{
 		accent.Render("01  SELECT STACK"),
-		dimStyle.Render("━━"),
+		sep,
 		lipgloss.NewStyle().Bold(true).Foreground(coral).Render("02  CONNECT"),
-		dimStyle.Render("━━"),
+		sep,
 		accent.Render("03  PICK QUICKSTART"),
-		dimStyle.Render("━━"),
+		sep,
 		lipgloss.NewStyle().Bold(true).Foreground(green).Render("04  SHIP"),
-	}, " ")
+	}, "")
 	return hero + "\n\n" + routeLabel + "\n" + route
 }
 
@@ -3251,12 +3264,15 @@ func (m rootShellModel) footer() string {
 		bindings = append(bindings, key.NewBinding(key.WithKeys("q"), key.WithHelp("q", quitHelp)))
 	}
 	helpView := m.help.View(bindings)
+	content := helpView
 	// While the activity feed is live it owns the status area; showing m.message
 	// too would duplicate a line at the bottom of the screen.
 	if m.message != "" && !(m.taskRunning() && len(m.activityLog) > 0) {
-		return lipgloss.NewStyle().Foreground(gold).Render(m.message) + "\n" + helpView
+		content = lipgloss.NewStyle().Foreground(gold).Render(m.message) + "\n" + helpView
 	}
-	return helpView
+	// A hairline rule mirrors the header and anchors the help line to the frame.
+	width := min(max(m.width-8, 64), 112)
+	return lipgloss.NewStyle().Width(width).BorderStyle(lipgloss.NormalBorder()).BorderTop(true).BorderBottom(false).BorderLeft(false).BorderRight(false).BorderForeground(divider).Render(content)
 }
 
 func providerLabel(provider string) string {

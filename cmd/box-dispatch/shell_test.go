@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
@@ -527,6 +528,32 @@ func TestTeardownResultRowsSummary(t *testing.T) {
 	for _, want := range []string{"1 deleted", "2 remaining", "STATUS", "TYPE", "✓ deleted", "○ manual", "× failed", "boom"} {
 		if !strings.Contains(rows, want) {
 			t.Errorf("teardown result table missing %q:\n%s", want, rows)
+		}
+	}
+}
+
+func TestChromeFramingAndStepperFit(t *testing.T) {
+	for _, w := range []int{80, 100, 112, 140} {
+		m := newSetupOnlyShell()
+		m.screen, m.width, m.height = screenDeploy, w, 50
+		content := min(max(w-8, 64), 112)
+
+		// The stepper track must never exceed the content width (else it wraps and
+		// breaks the frame).
+		if got := lipgloss.Width(m.stepper()); got > content {
+			t.Errorf("width=%d: stepper %d cols > content %d", w, got, content)
+		}
+		// Header is a row plus a hairline rule spanning the content width.
+		hl := strings.Split(m.header(content), "\n")
+		if len(hl) != 2 || lipgloss.Width(hl[1]) != content {
+			t.Errorf("width=%d: header not framed to content width: %d lines, rule %d cols", w, len(hl), lipgloss.Width(hl[len(hl)-1]))
+		}
+		if !strings.Contains(m.header(content), "UNOFFICIALBOX.DEV") {
+			t.Errorf("width=%d: header lost its wordmark", w)
+		}
+		// Footer carries a matching top rule.
+		if fl := strings.Split(m.footer(), "\n"); lipgloss.Width(fl[0]) != content {
+			t.Errorf("width=%d: footer rule %d cols, want %d", w, lipgloss.Width(fl[0]), content)
 		}
 	}
 }
