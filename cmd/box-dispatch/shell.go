@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
@@ -186,6 +187,10 @@ type rootShellModel struct {
 	spinner               spinner.Model
 	hostInput             textinput.Model
 	progress              progress.Model
+	journeySpring         harmonica.Spring
+	journeyValue          float64
+	journeyVel            float64
+	journeyAnimating      bool
 	help                  help.Model
 	answers               *wizardAnswers
 	componentForm         *huh.Form
@@ -333,8 +338,11 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 		spinner:            spin,
 		hostInput:          host,
 		progress:           bar,
-		help:               helpModel,
-		answers:            answers,
+		// Critically damped (ratio 1.0) so the overall-progress bar eases toward
+		// each step without ever springing backward past its target.
+		journeySpring: harmonica.NewSpring(harmonica.FPS(60), 6.0, 1.0),
+		help:          helpModel,
+		answers:       answers,
 	}
 	m.rebuildComponentForm()
 	m.rebuildTemplateForm()
@@ -962,7 +970,58 @@ func (m rootShellModel) Init() tea.Cmd {
 	return m.componentForm.Init()
 }
 
+// journeyFrameMsg drives one frame of the overall-progress spring.
+type journeyFrameMsg time.Time
+
+// journeyFrame schedules the next animation frame at ~60fps.
+func journeyFrame() tea.Cmd {
+	return tea.Tick(time.Second/60, func(t time.Time) tea.Msg { return journeyFrameMsg(t) })
+}
+
+// Update wraps the main message router with the overall-progress animation: it
+// advances the spring on frame messages, and after every other message kicks a
+// frame loop when the journey target has moved. The loop stops itself once the
+// motion settles, so the shell does no animation work while at rest.
 func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if frame, ok := msg.(journeyFrameMsg); ok {
+		return m.advanceJourney(frame)
+	}
+	updated, cmd := m.route(msg)
+	next := updated.(rootShellModel)
+	if kick := next.kickJourney(); kick != nil {
+		return next, tea.Batch(cmd, kick)
+	}
+	return next, cmd
+}
+
+// kickJourney starts the spring toward the current journey target when the
+// rendered value has drifted from it and no frame loop is already running.
+func (m *rootShellModel) kickJourney() tea.Cmd {
+	if m.journeyAnimating {
+		return nil
+	}
+	target := m.overallJourneyProgress()
+	if math.Abs(target-m.journeyValue) < 0.001 {
+		m.journeyValue = target
+		return nil
+	}
+	m.journeyAnimating = true
+	return journeyFrame()
+}
+
+// advanceJourney steps the spring one frame toward its (possibly moving) target
+// and re-schedules until the motion settles, then goes idle.
+func (m rootShellModel) advanceJourney(_ journeyFrameMsg) (tea.Model, tea.Cmd) {
+	target := m.overallJourneyProgress()
+	m.journeyValue, m.journeyVel = m.journeySpring.Update(m.journeyValue, m.journeyVel, target)
+	if math.Abs(target-m.journeyValue) < 0.002 && math.Abs(m.journeyVel) < 0.002 {
+		m.journeyValue, m.journeyVel, m.journeyAnimating = target, 0, false
+		return m, nil
+	}
+	return m, journeyFrame()
+}
+
+func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -3022,7 +3081,9 @@ func (m rootShellModel) stageHeader() string {
 	if m.screen == screenDashboard {
 		return m.stepper()
 	}
-	value := m.overallJourneyProgress()
+	// The spring-eased value glides between steps; percent tracks it so the
+	// number counts up in step with the bar.
+	value := m.journeyValue
 	percent := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(fmt.Sprintf("%3.0f%%", value*100))
 	return m.stepper() + "\n\n" + dimStyle.Render("OVERALL PROGRESS") + "  " + percent + "\n" + m.progress.ViewAs(value)
 }

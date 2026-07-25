@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -382,6 +383,38 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	// Product branding lives in the shared header rather than the welcome body.
 	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {
 		t.Fatalf("header does not carry product branding: %q", header)
+	}
+}
+
+func TestOverallProgressSpringConvergesAndSettles(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen = screenValidate // journey target 0.72
+
+	// The value starts adrift from the target, so a kick must arm a frame loop.
+	if cmd := m.kickJourney(); cmd == nil || !m.journeyAnimating {
+		t.Fatal("kickJourney did not start the animation when value drifted from target")
+	}
+
+	var model tea.Model = m
+	settled := false
+	for i := 0; i < 600; i++ { // ~10s of frames — far more than needed
+		updated, _ := model.(rootShellModel).advanceJourney(journeyFrameMsg{})
+		model = updated
+		if !model.(rootShellModel).journeyAnimating {
+			settled = true
+			break
+		}
+	}
+	rm := model.(rootShellModel)
+	if !settled {
+		t.Fatal("spring never settled")
+	}
+	if math.Abs(rm.journeyValue-0.72) > 0.005 {
+		t.Fatalf("settled journeyValue = %f, want ~0.72", rm.journeyValue)
+	}
+	// Once settled, a re-kick at the same target must not restart the loop.
+	if cmd := rm.kickJourney(); cmd != nil {
+		t.Fatal("kickJourney restarted animation despite already being at target")
 	}
 }
 
