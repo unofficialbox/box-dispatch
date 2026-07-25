@@ -376,10 +376,16 @@ func TestProviderConnectionDetailsRendersDiscoveredIdentity(t *testing.T) {
 func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	model := newSetupOnlyShell()
 	view := model.viewWelcome(112)
-	for _, expected := range []string{"Community-built. Open source. Punk Rock. 🤘", "BOX ", "DISPATCH", "SELECT STACK", "PICK QUICKSTART", "🚀"} {
+	// Wide terminals render DISPATCH as an ANSI-shadow banner (block glyphs), so
+	// assert the branding, the wordmark banner, the menu, and the route strip.
+	for _, expected := range []string{"COMMUNITY-BUILT", "BOX", "██", "Start new deployment", "SELECT STACK", "PICK QUICKSTART", "🚀"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("welcome view does not contain %q", expected)
 		}
+	}
+	// Narrow terminals fall back to a one-line DISPATCH headline.
+	if narrow := model.viewWelcome(70); !strings.Contains(narrow, "DISPATCH") {
+		t.Fatalf("narrow welcome lost the DISPATCH headline fallback")
 	}
 	// Product branding lives in the shared header rather than the welcome body.
 	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {

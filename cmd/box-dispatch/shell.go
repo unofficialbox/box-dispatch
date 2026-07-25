@@ -36,6 +36,17 @@ import (
 // slice so the cursor range never drifts from what is rendered.
 var welcomeOptions = []string{"Start new deployment", "Show deployment history", "Reset demo environment"}
 
+// dispatchBanner is the ANSI-shadow wordmark shown in the welcome hero on wide
+// terminals (60 cols); narrow terminals fall back to a one-line headline.
+var dispatchBanner = []string{
+	"██████╗ ██╗███████╗██████╗  █████╗ ████████╗ ██████╗██╗  ██╗",
+	"██╔══██╗██║██╔════╝██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ██║",
+	"██║  ██║██║███████╗██████╔╝███████║   ██║   ██║     ███████║",
+	"██║  ██║██║╚════██║██╔═══╝ ██╔══██║   ██║   ██║     ██╔══██║",
+	"██████╔╝██║███████║██║     ██║  ██║   ██║   ╚██████╗██║  ██║",
+	"╚═════╝ ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝",
+}
+
 type shellScreen int
 
 const (
@@ -2158,28 +2169,49 @@ func (m rootShellModel) stepper() string {
 }
 
 func (m rootShellModel) viewWelcome(width int) string {
-	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Community-built. Open source. Punk Rock. 🤘")
-	headline := lipgloss.JoinHorizontal(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX "),
-		lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH"),
-		lipgloss.NewStyle().Foreground(coral).Render("  🚀"),
-	)
-	description := dimStyle.Copy().Width(58).Render("Open tools for the builders extending Box, from composable building blocks to industry solution accelerators.")
-	tags := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX  /  AGENTFORCE  /  DATABRICKS  /  AWS BEDROCK AGENTCORE")
-	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", tags)
+	inner := width - 12 // panel border (2) + horizontal padding (2*5)
+	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
+
+	// The big wordmark carries the hero on wide terminals; a one-line headline
+	// stands in when there isn't room for the 60-col banner.
+	var wordmark string
+	if inner >= 60 {
+		banner := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(strings.Join(dispatchBanner, "\n"))
+		kicker := lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX") +
+			lipgloss.NewStyle().Foreground(coral).Render("  🚀")
+		wordmark = kicker + "\n" + banner
+	} else {
+		wordmark = lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX ") +
+			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") +
+			lipgloss.NewStyle().Foreground(coral).Render("  🚀")
+	}
+
+	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
+	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
+
 	options := welcomeOptions
 	optionRows := make([]string, len(options))
+	rowWidth := min(inner, 48)
 	for index, option := range options {
-		style := lipgloss.NewStyle().Width(42).Padding(0, 2).Foreground(ice)
-		marker := "  "
+		// A coral left rail + faint surface marks the selection instead of a heavy
+		// full-coral block; the rail keeps every row aligned.
+		base := lipgloss.NewStyle().Width(rowWidth).Padding(0, 2).Border(lipgloss.NormalBorder(), false, false, false, true)
 		if index == m.cursor {
-			style = style.Bold(true).Foreground(navy).Background(coral)
-			marker = "→ "
+			optionRows[index] = base.BorderForeground(coral).Background(lipgloss.Color("#14263F")).Foreground(white).Bold(true).Render("▸ " + option)
+		} else {
+			optionRows[index] = base.BorderForeground(divider).Foreground(ice).Render("  " + option)
 		}
-		optionRows[index] = style.Render(marker + option)
 	}
-	heroContent := lipgloss.JoinVertical(lipgloss.Left, copy, "", strings.Join(optionRows, "\n"))
-	hero := panel.Copy().BorderForeground(white).BorderLeftForeground(coral).Width(width-4).Padding(2, 3).Render(heroContent)
+
+	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", wordmark, "", description, "", tags)
+	heroContent := lipgloss.JoinVertical(lipgloss.Left, copy, "", "", strings.Join(optionRows, "\n"))
+	hero := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#2E4B6E")).
+		BorderLeftForeground(coral).
+		Width(width-4).
+		Padding(2, 5).
+		Render(heroContent)
 
 	routeLabel := lipgloss.NewStyle().Foreground(muted).Render("YOUR ROUTE")
 	sep := lipgloss.NewStyle().Foreground(divider).Render(" ──── ")
