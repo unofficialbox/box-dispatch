@@ -219,6 +219,23 @@ func dispatchHuhTheme() *huh.Theme {
 	theme.Focused.Next = focusedButton
 	theme.Blurred.FocusedButton = focusedButton
 	theme.Blurred.BlurredButton = blurredButton
+
+	// ThemeCharm titles are indigo and its select cursors/indicators fuchsia —
+	// both hard to read on our navy panes. Remap onto our scheme: titles white,
+	// pointers coral, prompts cyan.
+	theme.Focused.Title = theme.Focused.Title.Foreground(white).Bold(true)
+	theme.Focused.NoteTitle = theme.Focused.NoteTitle.Foreground(white).Bold(true)
+	theme.Blurred.Title = theme.Blurred.Title.Foreground(muted).Bold(true)
+	theme.Blurred.NoteTitle = theme.Blurred.NoteTitle.Foreground(muted).Bold(true)
+	theme.Group.Title = theme.Focused.Title
+	for _, sel := range []*lipgloss.Style{
+		&theme.Focused.SelectSelector, &theme.Focused.MultiSelectSelector,
+		&theme.Focused.NextIndicator, &theme.Focused.PrevIndicator,
+	} {
+		*sel = sel.Foreground(coral)
+	}
+	theme.Focused.TextInput.Prompt = theme.Focused.TextInput.Prompt.Foreground(cyan)
+	theme.Focused.TextInput.Cursor = theme.Focused.TextInput.Cursor.Foreground(coral)
 	return theme
 }
 
