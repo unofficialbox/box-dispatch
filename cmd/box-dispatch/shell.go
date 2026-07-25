@@ -2080,7 +2080,7 @@ func (m rootShellModel) View() string {
 
 func (m rootShellModel) header(width int) string {
 	// A filled brand chip reads as a small logo rather than loose glyphs.
-	mark := lipgloss.NewStyle().Bold(true).Foreground(navy).Background(cyan).Render(" B/ ")
+	mark := lipgloss.NewStyle().Bold(true).Foreground(white).Background(cyan).Render(" B/ ")
 	product := lipgloss.NewStyle().Bold(true).Foreground(white).Render("  DISPATCH")
 	tag := lipgloss.NewStyle().Foreground(muted).Render("  SOLUTION ASSEMBLY")
 	domain := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("UNOFFICIALBOX.DEV")
