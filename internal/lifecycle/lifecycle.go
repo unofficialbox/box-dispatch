@@ -414,10 +414,21 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 					return item, nil
 				}
 				if found {
-					present, inspectErr = api.fileExists(ctx, folderID, filepath.Base(file.Source))
+					_, remoteSHA, exists, inspectErr := api.fileDigest(ctx, folderID, filepath.Base(file.Source))
 					if inspectErr != nil {
 						item.Status, item.Detail = StatusFailed, "Unable to inspect Box sample content: "+inspectErr.Error()
 						return item, nil
+					}
+					// A file already in Box counts as present only when its content
+					// matches the package. When the SHA-1 differs it is treated as
+					// deployable so the deploy step uploads a new version; when Box
+					// reports no hash, fall back to presence alone.
+					present = exists
+					if exists && remoteSHA != "" {
+						if localSHA, shaErr := localFileSHA1(source); shaErr == nil && localSHA != remoteSHA {
+							present = false
+							report.step("Detected changed sample content " + filepath.Base(file.Source))
+						}
 					}
 				}
 			}
@@ -757,17 +768,33 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 				item.Status, item.Detail = StatusFailed, "Prepare sample content folder: "+createErr.Error()
 				return item
 			}
-			exists, inspectErr := api.fileExists(ctx, folderID, filepath.Base(file.Source))
+			_, remoteSHA, exists, inspectErr := api.fileDigest(ctx, folderID, filepath.Base(file.Source))
 			if inspectErr != nil {
 				item.Status, item.Detail = StatusFailed, "Inspect "+component+": "+inspectErr.Error()
 				return item
 			}
-			if !exists {
+			localSHA, shaErr := localFileSHA1(source)
+			if shaErr != nil {
+				item.Status, item.Detail = StatusFailed, "Hash "+component+": "+shaErr.Error()
+				return item
+			}
+			switch {
+			case !exists:
 				report.step("Uploading sample content " + filepath.Base(file.Source))
 				if uploadErr := api.uploadFile(ctx, folderID, source); uploadErr != nil {
 					item.Status, item.Detail = StatusFailed, "Deploy "+component+": "+uploadErr.Error()
 					return item
 				}
+			case remoteSHA != "" && remoteSHA != localSHA:
+				// The packaged file differs from the one in Box: replace it with a
+				// new version rather than leaving stale content or failing.
+				report.step("Updating changed sample content " + filepath.Base(file.Source))
+				if uploadErr := api.uploadFileVersion(ctx, folderID, source); uploadErr != nil {
+					item.Status, item.Detail = StatusFailed, "Update "+component+": "+uploadErr.Error()
+					return item
+				}
+			default:
+				report.step("Sample content unchanged " + filepath.Base(file.Source))
 			}
 			fileID, found, fileErr := api.findFile(ctx, folderID, filepath.Base(file.Source))
 			if fileErr != nil || !found {

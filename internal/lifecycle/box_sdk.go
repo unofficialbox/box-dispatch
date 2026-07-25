@@ -2,8 +2,12 @@ package lifecycle
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -27,7 +31,12 @@ type boxAPI interface {
 	ensureFolder(context.Context, string, string) (string, error)
 	findFile(context.Context, string, string) (string, bool, error)
 	fileExists(context.Context, string, string) (bool, error)
+	// fileDigest returns a file's id and its Box-side SHA-1 content hash, so the
+	// caller can tell an unchanged file from one that needs a new version.
+	fileDigest(context.Context, string, string) (id, sha1 string, found bool, err error)
 	uploadFile(context.Context, string, string) error
+	// uploadFileVersion replaces an existing same-named file with a new version.
+	uploadFileVersion(context.Context, string, string) error
 	metadataTemplateKeys(context.Context, []string) (map[string]bool, error)
 	createMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
@@ -205,8 +214,16 @@ func (sdk *boxSDK) fileExists(ctx context.Context, folderID, name string) (bool,
 	return found, err
 }
 
+func (sdk *boxSDK) fileDigest(_ context.Context, folderID, name string) (string, string, bool, error) {
+	return fileDigestViaCLI(folderID, name)
+}
+
 func (sdk *boxSDK) uploadFile(_ context.Context, folderID, source string) error {
-	return uploadFileWithCLI(folderID, source)
+	return uploadFileWithCLI(folderID, source, false)
+}
+
+func (sdk *boxSDK) uploadFileVersion(_ context.Context, folderID, source string) error {
+	return uploadFileWithCLI(folderID, source, true)
 }
 
 func (sdk *boxSDK) metadataTemplateKeys(ctx context.Context, _ []string) (map[string]bool, error) {
@@ -360,16 +377,78 @@ func (cli boxCLI) fileExists(ctx context.Context, folderID, name string) (bool, 
 	return found, err
 }
 
-func (boxCLI) uploadFile(_ context.Context, folderID, source string) error {
-	return uploadFileWithCLI(folderID, source)
+func (boxCLI) fileDigest(_ context.Context, folderID, name string) (string, string, bool, error) {
+	return fileDigestViaCLI(folderID, name)
 }
 
-func uploadFileWithCLI(folderID, source string) error {
-	output, err := exec.Command("box", "files:upload", source, "--parent-id", folderID, "--json", "--yes").CombinedOutput()
+func (boxCLI) uploadFile(_ context.Context, folderID, source string) error {
+	return uploadFileWithCLI(folderID, source, false)
+}
+
+func (boxCLI) uploadFileVersion(_ context.Context, folderID, source string) error {
+	return uploadFileWithCLI(folderID, source, true)
+}
+
+// fileDigestViaCLI lists a folder's items with their SHA-1 and returns the id and
+// hash of the named file. Used by both backends since the box CLI is the shared
+// transport for these calls.
+func fileDigestViaCLI(folderID, name string) (string, string, bool, error) {
+	output, err := exec.Command("box", "folders:items", folderID, "--fields", "id,type,name,sha1", "--max-items", "1000", "--json").CombinedOutput()
+	if err != nil {
+		return "", "", false, fmt.Errorf("list folder %s: %s", folderID, summarizeCommandOutput(output, err))
+	}
+	type entry struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		Name string `json:"name"`
+		Sha1 string `json:"sha1"`
+	}
+	var entries []entry
+	if json.Unmarshal(output, &entries) != nil {
+		var collection struct {
+			Entries []entry `json:"entries"`
+		}
+		if err := json.Unmarshal(output, &collection); err != nil {
+			return "", "", false, fmt.Errorf("parse Box folder listing: %w", err)
+		}
+		entries = collection.Entries
+	}
+	for _, entry := range entries {
+		if entry.Type == "file" && entry.Name == name {
+			return entry.ID, strings.ToLower(strings.TrimSpace(entry.Sha1)), true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+// uploadFileWithCLI uploads source into folderID. With overwrite, an existing
+// same-named file is replaced by a new version instead of failing on the name
+// conflict.
+func uploadFileWithCLI(folderID, source string, overwrite bool) error {
+	args := []string{"files:upload", source, "--parent-id", folderID, "--json", "--yes"}
+	if overwrite {
+		args = append(args, "--overwrite")
+	}
+	output, err := exec.Command("box", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("upload %s: %s", filepath.Base(source), summarizeCommandOutput(output, err))
 	}
 	return nil
+}
+
+// localFileSHA1 computes the hex SHA-1 of a local file, matching the hash Box
+// stores server-side, so the two can be compared to detect content changes.
+func localFileSHA1(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha1.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (boxCLI) metadataTemplateKeys(_ context.Context, requested []string) (map[string]bool, error) {

@@ -194,6 +194,24 @@ func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
 	}
 }
 
+func TestLocalFileSHA1MatchesBoxFormat(t *testing.T) {
+	// Box stores a lowercase hex SHA-1 of the file content; localFileSHA1 must
+	// produce the same string so the two can be compared for change detection.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("hello box\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := localFileSHA1(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "59330051bc28538fb1927469d166b9cbe55b0a50"
+	if got != want {
+		t.Fatalf("localFileSHA1 = %q, want %q", got, want)
+	}
+}
+
 func testCLMPackage(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
