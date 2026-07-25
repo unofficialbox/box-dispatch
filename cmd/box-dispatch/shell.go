@@ -36,8 +36,9 @@ import (
 // slice so the cursor range never drifts from what is rendered.
 var welcomeOptions = []string{"Start new deployment", "Show deployment history", "Reset demo environment"}
 
-// dispatchBanner is the ANSI-shadow wordmark shown in the welcome hero on wide
-// terminals (60 cols); narrow terminals fall back to a one-line headline.
+// dispatchBanner is the big ANSI-shadow product wordmark (6 rows, 60 cols) shown
+// in the welcome hero on wide terminals; narrow terminals fall back to a one-line
+// headline. boxBanner is the half-height BOX kicker above it.
 var dispatchBanner = []string{
 	"██████╗ ██╗███████╗██████╗  █████╗ ████████╗ ██████╗██╗  ██╗",
 	"██╔══██╗██║██╔════╝██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ██║",
@@ -45,6 +46,12 @@ var dispatchBanner = []string{
 	"██║  ██║██║╚════██║██╔═══╝ ██╔══██║   ██║   ██║     ██╔══██║",
 	"██████╔╝██║███████║██║     ██║  ██║   ██║   ╚██████╗██║  ██║",
 	"╚═════╝ ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝",
+}
+
+var boxBanner = []string{
+	"█▀▄ █▀█ █ █",
+	"█▀▄ █ █ ▄▀▄",
+	"▀▀  ▀▀▀ ▀ ▀",
 }
 
 type shellScreen int
@@ -2169,25 +2176,23 @@ func (m rootShellModel) stepper() string {
 }
 
 func (m rootShellModel) viewWelcome(width int) string {
-	inner := width - 12 // panel border (2) + horizontal padding (2*5)
-	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
+	inner := width - 16 // panel border (2) + horizontal padding (2*5), rounded up
 
-	// The big wordmark carries the hero on wide terminals; a one-line headline
-	// stands in when there isn't room for the 60-col banner.
+	// Wordmark: a half-height BOX kicker with a coral » accent, over the big
+	// DISPATCH banner. Narrow or short terminals fall back to a one-line headline
+	// so the 9-row banner never overruns the frame.
+	accentMark := lipgloss.NewStyle().Bold(true).Foreground(coral).Render(" »")
 	var wordmark string
-	if inner >= 60 {
-		banner := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(strings.Join(dispatchBanner, "\n"))
-		kicker := lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX") +
-			lipgloss.NewStyle().Foreground(coral).Render("  🚀")
-		wordmark = kicker + "\n" + banner
+	if inner >= 60 && m.height >= 42 {
+		box := lipgloss.JoinHorizontal(lipgloss.Bottom,
+			lipgloss.NewStyle().Bold(true).Foreground(ice).Render(strings.Join(boxBanner, "\n")),
+			accentMark)
+		dispatch := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(strings.Join(dispatchBanner, "\n"))
+		wordmark = box + "\n" + dispatch
 	} else {
-		wordmark = lipgloss.NewStyle().Bold(true).Foreground(white).Render("BOX ") +
-			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") +
-			lipgloss.NewStyle().Foreground(coral).Render("  🚀")
+		wordmark = lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX ") +
+			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") + accentMark
 	}
-
-	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
-	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
 
 	options := welcomeOptions
 	optionRows := make([]string, len(options))
@@ -2203,8 +2208,21 @@ func (m rootShellModel) viewWelcome(width int) string {
 		}
 	}
 
-	copy := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", wordmark, "", description, "", tags)
-	heroContent := lipgloss.JoinVertical(lipgloss.Left, copy, "", "", strings.Join(optionRows, "\n"))
+	// Top: wordmark + menu right beneath it. Bottom: the prose, pushed to the
+	// foot of the panel by a flexible spacer sized from the terminal height.
+	top := lipgloss.JoinVertical(lipgloss.Left, wordmark, "", strings.Join(optionRows, "\n"))
+	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
+	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
+	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
+	bottom := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", description, "", tags)
+
+	th, bh := lipgloss.Height(top), lipgloss.Height(bottom)
+	// Fill the panel to just under the terminal height (chrome around the hero is
+	// ~17 rows); a floor keeps a gap even when there's little room.
+	target := max(m.height-18, th+bh+2)
+	spacer := max(target-th-bh, 1)
+	heroContent := top + strings.Repeat("\n", spacer+1) + bottom
+
 	hero := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#2E4B6E")).
