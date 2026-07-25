@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,70 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
+
+// TestReadBoxConfigObjectPrefersBCL confirms the migrated BCL artifact wins over
+// a legacy JSON file of the same stem, and that its envelope fields are stripped.
+func TestReadBoxConfigObjectPrefersBCL(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "metadata-templates.json"), []byte(`{"templates":[{"templateKey":"from-json"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bclSrc := `locals {
+  bcl = {
+    "resources" = [
+      {
+        "config" = {
+          "artifact_type" = "config"
+          "templates" = [
+            { "templateKey" = "from-bcl" },
+          ]
+        }
+      },
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata-templates.bcl"), []byte(bclSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := readBoxConfigObject(dir, "metadata-templates")
+	if err != nil {
+		t.Fatalf("readBoxConfigObject: %v", err)
+	}
+	if _, ok := obj["artifact_type"]; ok {
+		t.Error("envelope key artifact_type was not stripped")
+	}
+	var tmpls []struct {
+		TemplateKey string `json:"templateKey"`
+	}
+	if err := json.Unmarshal(obj["templates"], &tmpls); err != nil {
+		t.Fatal(err)
+	}
+	if len(tmpls) != 1 || tmpls[0].TemplateKey != "from-bcl" {
+		t.Fatalf("expected the BCL payload to win, got %+v", tmpls)
+	}
+}
+
+// TestReadBoxConfigObjectFallsBackToJSON confirms older JSON-only packages still
+// read when no BCL artifact is present.
+func TestReadBoxConfigObjectFallsBackToJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "metadata-templates.json"), []byte(`{"templates":[{"templateKey":"legacy"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := readBoxConfigObject(dir, "metadata-templates")
+	if err != nil {
+		t.Fatalf("readBoxConfigObject: %v", err)
+	}
+	var tmpls []struct {
+		TemplateKey string `json:"templateKey"`
+	}
+	if err := json.Unmarshal(obj["templates"], &tmpls); err != nil {
+		t.Fatal(err)
+	}
+	if len(tmpls) != 1 || tmpls[0].TemplateKey != "legacy" {
+		t.Fatalf("expected the JSON payload, got %+v", tmpls)
+	}
+}
 
 func TestBoxAccessTokenParsesCLIJSONWithoutPersistingIt(t *testing.T) {
 	want := strings.Repeat("a", 32)

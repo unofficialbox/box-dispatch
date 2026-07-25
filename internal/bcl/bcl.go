@@ -160,6 +160,48 @@ func WriteDeploymentBundle(path string, tfPath string, tfJSONPath string, doc BC
 	return nil
 }
 
+// configEnvelopeKeys are the artifact-envelope fields stamped onto every
+// resource Config when a config file is packaged as BCL. They are stripped when
+// reading the artifact back so callers see only the original payload.
+var configEnvelopeKeys = map[string]bool{
+	"provider":           true,
+	"artifact_type":      true,
+	"artifact_name":      true,
+	"provider_object_id": true,
+	"enterprise_id":      true,
+	"created_at":         true,
+}
+
+// ConfigObject reads a Box Dispatch config artifact and returns its payload as a
+// JSON object. The payload is the first resource's config block with the
+// artifact-envelope fields removed, so it matches the original pre-BCL JSON that
+// consumers unmarshal.
+func ConfigObject(path string) (map[string]json.RawMessage, error) {
+	doc, err := LoadBCL(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(doc.Resources) == 0 || doc.Resources[0].Config == nil {
+		return nil, fmt.Errorf("%s: BCL config artifact has no resource config payload", path)
+	}
+	payload := map[string]any{}
+	for key, value := range doc.Resources[0].Config {
+		if configEnvelopeKeys[key] {
+			continue
+		}
+		payload[key] = value
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func LoadBCL(path string) (BCLDocument, error) {
 	var doc BCLDocument
 	raw, err := os.ReadFile(path)

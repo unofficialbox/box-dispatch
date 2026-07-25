@@ -1,9 +1,53 @@
 package bcl
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+// TestConfigObjectStripsEnvelope verifies that reading a packaged config artifact
+// returns the original payload with the artifact-envelope fields removed.
+func TestConfigObjectStripsEnvelope(t *testing.T) {
+	src := `# Box Dispatch BCL config artifact.
+locals {
+  bcl = {
+    "provider" = "generic"
+    "resources" = [
+      {
+        "config" = {
+          "provider" = "generic"
+          "artifact_type" = "config"
+          "artifact_name" = "ai-agent-specs"
+          "provider_object_id" = "box/ai-agent-specs"
+          "enterprise_id" = ""
+          "created_at" = "2026-07-23T00:00:00Z"
+          "agents" = [
+            { "name" = "Risk Agent" },
+          ]
+        }
+      },
+    ]
+  }
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai-agent-specs.bcl")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := ConfigObject(path)
+	if err != nil {
+		t.Fatalf("ConfigObject: %v", err)
+	}
+	for _, envelope := range []string{"provider", "artifact_type", "artifact_name", "provider_object_id", "enterprise_id", "created_at"} {
+		if _, ok := obj[envelope]; ok {
+			t.Errorf("envelope key %q was not stripped from payload", envelope)
+		}
+	}
+	if _, ok := obj["agents"]; !ok {
+		t.Fatalf("payload key 'agents' missing: %v", obj)
+	}
+}
 
 // TestParseBCLLocalsTolerance pins the parser leniency the HCL examples rely on:
 // a bare (unquoted) bcl key, newline-separated object entries with no commas,

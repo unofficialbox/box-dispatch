@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/unofficialbox/box-dispatch/internal/bcl"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
@@ -196,16 +197,16 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 	arrays := []struct {
 		file, key, componentType string
 	}{
-		{"ai-agent-specs.json", "agents", "AI Agent"},
-		{"automate-workflows.json", "workflows", "Automate Workflow"},
-		{"https-connectors.json", "connectors", "HTTPS Connector"},
-		{"metadata-templates.json", "templates", "Metadata Template"},
+		{"ai-agent-specs", "agents", "AI Agent"},
+		{"automate-workflows", "workflows", "Automate Workflow"},
+		{"https-connectors", "connectors", "HTTPS Connector"},
+		{"metadata-templates", "templates", "Metadata Template"},
 	}
 	for _, spec := range arrays {
 		if !manifest.CapabilityEnabled(spec.componentType, selection) {
 			continue
 		}
-		data, err := readJSONObject(filepath.Join(root, spec.file))
+		data, err := readBoxConfigObject(root, spec.file)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +227,7 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 	objects := []struct {
 		file, componentType string
 	}{
-		{"extract-field-prompts.json", "Extract Configuration"},
+		{"extract-field-prompts", "Extract Configuration"},
 	}
 	if manifest.CapabilityEnabled("Doc Gen Template", selection) {
 		for _, file := range manifest.Box.SampleContent {
@@ -239,7 +240,7 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 		if !manifest.CapabilityEnabled(spec.componentType, selection) {
 			continue
 		}
-		data, err := readJSONObject(filepath.Join(root, spec.file))
+		data, err := readBoxConfigObject(root, spec.file)
 		if err != nil {
 			return nil, err
 		}
@@ -512,13 +513,13 @@ func boxFolderStructureExists(ctx context.Context, api boxAPI, target boxTarget,
 }
 
 func readBoxMetadataTemplates(root string) ([]boxMetadataTemplate, error) {
-	data, err := readJSONObject(filepath.Join(root, "config", "box", "metadata-templates.json"))
+	data, err := readBoxConfigObject(filepath.Join(root, "config", "box"), "metadata-templates")
 	if err != nil {
 		return nil, err
 	}
 	var templates []boxMetadataTemplate
 	if err := json.Unmarshal(data["templates"], &templates); err != nil {
-		return nil, fmt.Errorf("parse metadata-templates.json: %w", err)
+		return nil, fmt.Errorf("parse metadata-templates: %w", err)
 	}
 	return templates, nil
 }
@@ -533,6 +534,18 @@ func readJSONObject(path string) (map[string]json.RawMessage, error) {
 		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
 	}
 	return object, nil
+}
+
+// readBoxConfigObject reads a Box config payload, preferring the migrated BCL
+// artifact (<base>.bcl) and falling back to legacy JSON (<base>.json). base is
+// the file stem, e.g. "ai-agent-specs". BCL is the packaged format now; the JSON
+// fallback keeps older packages and test fixtures working.
+func readBoxConfigObject(dir, base string) (map[string]json.RawMessage, error) {
+	bclPath := filepath.Join(dir, base+".bcl")
+	if _, err := os.Stat(bclPath); err == nil {
+		return bcl.ConfigObject(bclPath)
+	}
+	return readJSONObject(filepath.Join(dir, base+".json"))
 }
 
 func firstNonEmpty(values ...string) string {

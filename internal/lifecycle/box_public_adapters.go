@@ -158,30 +158,26 @@ func readBoxAIResources(root string, manifest solution.Manifest, selection solut
 	resources := []boxAIResource{}
 	configRoot := filepath.Join(root, "config", "box")
 	if manifest.CapabilityEnabled("AI Agent", selection) {
-		data, err := os.ReadFile(filepath.Join(configRoot, "ai-agent-specs.json"))
+		object, err := readBoxConfigObject(configRoot, "ai-agent-specs")
 		if err != nil {
 			return nil, err
 		}
-		var document struct {
-			Agents []struct {
-				Name         string `json:"name"`
-				Instructions string `json:"instructions"`
-			} `json:"agents"`
+		var agents []struct {
+			Name         string `json:"name"`
+			Instructions string `json:"instructions"`
 		}
-		if err := json.Unmarshal(data, &document); err != nil {
-			return nil, err
+		if raw := object["agents"]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &agents); err != nil {
+				return nil, fmt.Errorf("parse ai-agent-specs: %w", err)
+			}
 		}
-		for _, agent := range document.Agents {
+		for _, agent := range agents {
 			resources = append(resources, boxAIResource{Component: "AI Agent:" + agent.Name, Mode: "ask", Name: agent.Name, Description: agent.Name, Instructions: agent.Instructions})
 		}
 	}
 	if manifest.CapabilityEnabled("Extract Configuration", selection) {
-		data, err := os.ReadFile(filepath.Join(configRoot, "extract-field-prompts.json"))
+		document, err := readBoxConfigObject(configRoot, "extract-field-prompts")
 		if err != nil {
-			return nil, err
-		}
-		var document map[string]json.RawMessage
-		if err := json.Unmarshal(data, &document); err != nil {
 			return nil, err
 		}
 		keys := make([]string, 0, len(document))
