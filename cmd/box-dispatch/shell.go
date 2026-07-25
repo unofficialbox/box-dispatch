@@ -1094,7 +1094,9 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.activityLog) > activityLogCap {
 			m.activityLog = m.activityLog[len(m.activityLog)-activityLogCap:]
 		}
-		m.message = msg.line
+		// The activity feed already shows the latest step; don't also push it into
+		// m.message, which the footer renders — that duplicated the line at the
+		// bottom of the screen.
 		return m, waitForActivity(m.activityCh)
 	case checkFinishedMsg:
 		if msg.err != nil {
@@ -2059,9 +2061,12 @@ func (m rootShellModel) header(width int) string {
 	return mark + product + tag + strings.Repeat(" ", gap) + hyperlink("https://unofficialbox.dev", domain)
 }
 
-// hyperlink wraps already-styled text in an OSC 8 terminal hyperlink escape.
+// hyperlink wraps already-styled text in an OSC 8 terminal hyperlink escape,
+// terminated with BEL (\a) rather than ST (ESC \). BEL is the more widely
+// supported OSC terminator; the ST form rendered as stray glyphs and broke
+// clickability in some terminals (e.g. Warp).
 func hyperlink(url, text string) string {
-	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+	return "\x1b]8;;" + url + "\x07" + text + "\x1b]8;;\x07"
 }
 
 // taskRunning reports whether a long-running lifecycle task is in progress, so
@@ -3290,7 +3295,9 @@ func (m rootShellModel) footer() string {
 		bindings = append(bindings, key.NewBinding(key.WithKeys("q"), key.WithHelp("q", quitHelp)))
 	}
 	helpView := m.help.View(bindings)
-	if m.message != "" {
+	// While the activity feed is live it owns the status area; showing m.message
+	// too would duplicate a line at the bottom of the screen.
+	if m.message != "" && !(m.taskRunning() && len(m.activityLog) > 0) {
 		return lipgloss.NewStyle().Foreground(gold).Render(m.message) + "\n" + helpView
 	}
 	return helpView

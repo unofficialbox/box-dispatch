@@ -487,6 +487,13 @@ func TestActivityFeedStreamsAndExpands(t *testing.T) {
 		t.Fatalf("activityLog = %d, want 3", len(rm.activityLog))
 	}
 
+	// The footer must not echo a step line while the feed is live (that was the
+	// duplicate output at the bottom of the deploy/reset screens).
+	rm.message = "Creating AI agent Risk Triage"
+	if strings.Contains(rm.footer(), "Creating AI agent Risk Triage") {
+		t.Fatalf("footer duplicated the activity line while the feed is active:\n%s", rm.footer())
+	}
+
 	// Collapsed: shows the tail (last two) and an expand hint, not the first line.
 	collapsed := rm.renderActivity(100)
 	if !strings.Contains(collapsed, "Creating AI agent Risk Triage") || !strings.Contains(collapsed, "e to expand") {
