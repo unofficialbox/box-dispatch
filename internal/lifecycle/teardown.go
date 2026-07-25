@@ -136,7 +136,7 @@ func loadBoxContext(root string) (boxContext, error) {
 // provider. It deletes strictly by recorded ID, never by name, so it can only
 // remove what box-dispatch created. Failures are collected per resource rather
 // than aborting, so one stuck resource cannot strand the rest of the reset.
-func DestroyProvider(root, provider string, resources []ResourceReference) (TeardownResult, error) {
+func DestroyProvider(root, provider string, resources []ResourceReference, report Reporter) (TeardownResult, error) {
 	result := TeardownResult{Provider: provider}
 	scoped := []ResourceReference{}
 	for _, resource := range resources {
@@ -150,7 +150,7 @@ func DestroyProvider(root, provider string, resources []ResourceReference) (Tear
 	}
 	switch provider {
 	case "box":
-		return destroyBoxResources(root, scoped)
+		return destroyBoxResources(root, scoped, report)
 	case "salesforce":
 		return destroySalesforceMetadata(root, scoped)
 	default:
@@ -162,7 +162,7 @@ func DestroyProvider(root, provider string, resources []ResourceReference) (Tear
 	}
 }
 
-func destroyBoxResources(root string, resources []ResourceReference) (TeardownResult, error) {
+func destroyBoxResources(root string, resources []ResourceReference, report Reporter) (TeardownResult, error) {
 	result := TeardownResult{Provider: "box"}
 	box, err := loadBoxContext(root)
 	if err != nil {
@@ -185,6 +185,7 @@ func destroyBoxResources(root string, resources []ResourceReference) (TeardownRe
 		if privateHandled[resourceKey(resource)] {
 			continue
 		}
+		report.step("Deleting " + resource.Kind + " " + resource.Name)
 		result.Outcomes = append(result.Outcomes, deleteBoxResource(box, resource))
 	}
 	result.Detail = teardownDetail(result)

@@ -99,6 +99,29 @@ type packageFinishedMsg struct {
 	err      error
 }
 
+// activityMsg is one live progress line emitted by a running lifecycle task.
+type activityMsg struct {
+	provider string
+	line     string
+}
+
+// activityLogCap bounds the retained step history so a very long run cannot grow
+// memory without limit; the collapsed feed only shows the tail anyway.
+const activityLogCap = 200
+
+// waitForActivity blocks on the task channel and surfaces the next message —
+// either an activityMsg step or the task's final provider*FinishedMsg — as a
+// tea.Msg. A closed channel yields nil, ending the read loop.
+func waitForActivity(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 type providerValidationFinishedMsg struct {
 	provider string
 	item     lifecycle.Item
@@ -191,6 +214,9 @@ type rootShellModel struct {
 	journeyValue          float64
 	journeyVel            float64
 	journeyAnimating      bool
+	activityLog           []string     // live step lines for the running task
+	activityExpanded      bool         // whether the activity feed is expanded
+	activityCh            chan tea.Msg // steps + final result from the running task
 	help                  help.Model
 	answers               *wizardAnswers
 	componentForm         *huh.Form
@@ -712,6 +738,7 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 	m.validateStarted = true
 	m.validateRunning = true
 	m.validateDone = false
+	m.activityLog, m.activityExpanded = nil, false
 	m.validationItems = nil
 	m.validationQueue = append([]string(nil), m.selectedProviders()...)
 	m.validationProgress = map[string]float64{}
@@ -734,6 +761,7 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
 	m.deployStarted = true
 	m.deployDone = false
+	m.activityLog, m.activityExpanded = nil, false
 	m.deployAssetsScroll = 0
 	m.deploymentBaseline = append([]lifecycle.Item(nil), m.validationItems...)
 	m.deploymentStartedAt = time.Now().UTC()
@@ -809,10 +837,14 @@ func (m rootShellModel) startNextValidation() (tea.Model, tea.Cmd) {
 	m.validationProgress[provider] = 0.05
 	m.message = "Validating " + providerLabel(provider) + " configuration..."
 	root := m.packagePath
-	return m, tea.Batch(m.spinner.Tick, validationProgressCmd(provider), func() tea.Msg {
-		item, err := lifecycle.ValidateProvider(root, provider)
-		return providerValidationFinishedMsg{provider: provider, item: item, err: err}
-	})
+	ch := make(chan tea.Msg, 64)
+	m.activityCh = ch
+	go func() {
+		report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: provider, line: line} })
+		item, err := lifecycle.ValidateProvider(root, provider, report)
+		ch <- providerValidationFinishedMsg{provider: provider, item: item, err: err}
+	}()
+	return m, tea.Batch(m.spinner.Tick, validationProgressCmd(provider), waitForActivity(ch))
 }
 
 func validationProgressCmd(provider string) tea.Cmd {
@@ -833,10 +865,15 @@ func (m rootShellModel) startNextDeployment() (tea.Model, tea.Cmd) {
 		m.deploymentProgress[item.Provider] = 0.05
 		m.message = "Deploying " + providerLabel(item.Provider) + " configuration..."
 		root := m.packagePath
-		return m, tea.Batch(m.spinner.Tick, deploymentProgressCmd(item.Provider), func() tea.Msg {
-			result, err := lifecycle.DeployProvider(root, item)
-			return providerDeployFinishedMsg{provider: item.Provider, item: result, err: err}
-		})
+		deployItem := item
+		ch := make(chan tea.Msg, 64)
+		m.activityCh = ch
+		go func() {
+			report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: deployItem.Provider, line: line} })
+			result, err := lifecycle.DeployProvider(root, deployItem, report)
+			ch <- providerDeployFinishedMsg{provider: deployItem.Provider, item: result, err: err}
+		}()
+		return m, tea.Batch(m.spinner.Tick, deploymentProgressCmd(item.Provider), waitForActivity(ch))
 	}
 	m.deployStarted = false
 	m.deployDone = true
@@ -928,6 +965,7 @@ func teardownResourceCount(record deploymentaudit.DeploymentRecord) int {
 func (m rootShellModel) startTeardown() (tea.Model, tea.Cmd) {
 	m.teardownStarted = true
 	m.teardownDone = false
+	m.activityLog, m.activityExpanded = nil, false
 	m.teardownResults = nil
 	m.teardownQueue = append([]string(nil), m.teardownProviders...)
 	m.teardownProgress = map[string]float64{}
@@ -945,10 +983,14 @@ func (m rootShellModel) startNextTeardown() (tea.Model, tea.Cmd) {
 		m.currentTeardown = provider
 		root := m.teardownRecord.PackageRoot
 		resources := m.teardownRecord.DeployedResources()
-		return m, tea.Batch(m.spinner.Tick, teardownProgressCmd(provider), func() tea.Msg {
-			result, err := lifecycle.DestroyProvider(root, provider, resources)
-			return providerTeardownFinishedMsg{provider: provider, result: result, err: err}
-		})
+		ch := make(chan tea.Msg, 64)
+		m.activityCh = ch
+		go func() {
+			report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: provider, line: line} })
+			result, err := lifecycle.DestroyProvider(root, provider, resources, report)
+			ch <- providerTeardownFinishedMsg{provider: provider, result: result, err: err}
+		}()
+		return m, tea.Batch(m.spinner.Tick, teardownProgressCmd(provider), waitForActivity(ch))
 	}
 	m.teardownStarted = false
 	m.teardownDone = true
@@ -1047,6 +1089,13 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	case activityMsg:
+		m.activityLog = append(m.activityLog, msg.line)
+		if len(m.activityLog) > activityLogCap {
+			m.activityLog = m.activityLog[len(m.activityLog)-activityLogCap:]
+		}
+		m.message = msg.line
+		return m, waitForActivity(m.activityCh)
 	case checkFinishedMsg:
 		if msg.err != nil {
 			m.statuses[msg.provider] = connectionFailed
@@ -1221,6 +1270,11 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if key.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	// While a long task runs, `e` expands/collapses the live activity feed.
+	if key.String() == "e" && m.taskRunning() && len(m.activityLog) > 0 {
+		m.activityExpanded = !m.activityExpanded
+		return m, nil
 	}
 	if key.String() == "q" && !(m.screen == screenConfig && m.configFocus < 2) {
 		if m.screen == screenWelcome {
@@ -2010,6 +2064,54 @@ func hyperlink(url, text string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
 }
 
+// taskRunning reports whether a long-running lifecycle task is in progress, so
+// the activity feed and its expand key are only active while there is work.
+func (m rootShellModel) taskRunning() bool {
+	return m.validateRunning || m.deployStarted || m.teardownStarted
+}
+
+// renderActivity draws the live "still working" feed: a spinner header and, by
+// default, the last two step lines (the most recent brightened) — like the
+// collapsed thinking view in Claude/Codex/Cursor. Pressing `e` expands it to the
+// recent history. It renders nothing until the running task emits its first step.
+func (m rootShellModel) renderActivity(width int) string {
+	if len(m.activityLog) == 0 {
+		return ""
+	}
+	total := len(m.activityLog)
+	header := lipgloss.NewStyle().Bold(true).Foreground(gold).Render(m.spinner.View() + " Working")
+	line := func(text string, recent bool) string {
+		style := dimStyle
+		if recent {
+			style = lipgloss.NewStyle().Foreground(ice)
+		}
+		return style.Render("  " + truncateCell(text, max(width-4, 20)))
+	}
+	if m.activityExpanded {
+		shown := m.activityLog
+		const window = 12
+		if len(shown) > window {
+			shown = shown[len(shown)-window:]
+		}
+		body := make([]string, len(shown))
+		for i, l := range shown {
+			body[i] = line(l, i == len(shown)-1)
+		}
+		hint := dimStyle.Render(fmt.Sprintf("  (%d steps · e to collapse)", total))
+		return header + "\n" + strings.Join(body, "\n") + "\n" + hint
+	}
+	shown := m.activityLog
+	if len(shown) > 2 {
+		shown = shown[len(shown)-2:]
+	}
+	body := make([]string, len(shown))
+	for i, l := range shown {
+		body[i] = line(l, i == len(shown)-1)
+	}
+	hint := dimStyle.Render(fmt.Sprintf("  e to expand · %d steps", total))
+	return header + "\n" + strings.Join(body, "\n") + "\n" + hint
+}
+
 func (m rootShellModel) stepper() string {
 	current := 0
 	switch m.screen {
@@ -2461,8 +2563,14 @@ func (m rootShellModel) viewValidate(width int) string {
 	if m.validateRunning {
 		status = m.spinner.View() + " VALIDATING PACKAGE AND PROVIDERS"
 	}
+	footer := accent.Render("Enter / →  Continue to Deploy    r  Validate again")
+	if m.validateRunning {
+		if activity := m.renderActivity(width - 4); activity != "" {
+			footer = activity
+		}
+	}
 	return m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + accent.Render("Enter / →  Continue to Deploy    r  Validate again")
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + footer
 }
 
 // viewTeardown previews exactly what a reset will delete, then reports the
@@ -2502,7 +2610,13 @@ func (m rootShellModel) viewTeardown(width int) string {
 	if m.confirmingTeardown && m.teardownConfirmForm != nil {
 		return title + "\n" + subtitle + "\n\n" + panelBody + "\n" + activePane.Copy().Width(width-4).Render(m.teardownConfirmForm.View())
 	}
-	return title + "\n" + subtitle + "\n\n" + panelBody
+	view := title + "\n" + subtitle + "\n\n" + panelBody
+	if m.teardownStarted && !m.teardownDone {
+		if activity := m.renderActivity(width - 4); activity != "" {
+			view += "\n" + activity
+		}
+	}
+	return view
 }
 
 // teardownBodyRows builds every line of the reset preview / result view. It is
@@ -2673,8 +2787,11 @@ func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 	if m.deployStarted {
 		// Box Apps are provisioned through the browser, which may raise a Box
 		// sign-in window and wait for it before the deploy continues.
-		action = m.spinner.View() + " Deploying provider configuration...\n" +
-			dimStyle.Render("   If a Box sign-in window opens, complete it and the deployment continues.")
+		activity := m.renderActivity(width - 4)
+		if activity == "" {
+			activity = m.spinner.View() + " Deploying provider configuration..."
+		}
+		action = activity + "\n" + dimStyle.Render("If a Box sign-in window opens, complete it and the deployment continues.")
 	} else if m.deployDone {
 		action = lipgloss.NewStyle().Bold(true).Foreground(green).Render("Deployment run complete")
 		if m.deploymentAuditPath == "" {

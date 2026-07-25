@@ -77,7 +77,7 @@ func TestDestroyProviderIgnoresOtherProvidersResources(t *testing.T) {
 	// Only the requested provider's resources are ever considered.
 	result, err := DestroyProvider(t.TempDir(), "databricks", []ResourceReference{
 		{Provider: "box", Kind: "folder", ID: "1"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDestroyProviderIgnoresOtherProvidersResources(t *testing.T) {
 func TestDestroyProviderReportsUnsupportedProvider(t *testing.T) {
 	result, err := DestroyProvider(t.TempDir(), "databricks", []ResourceReference{
 		{Provider: "databricks", Kind: "cluster", ID: "abc", Name: "demo"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

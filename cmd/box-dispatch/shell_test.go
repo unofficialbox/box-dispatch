@@ -472,6 +472,41 @@ func TestDeployedAssetsTableHeaderAndFileLink(t *testing.T) {
 	}
 }
 
+func TestActivityFeedStreamsAndExpands(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.deployStarted, m.width, m.height = screenDeploy, true, 120, 50
+	m.activityCh = make(chan tea.Msg, 8)
+
+	// Each streamed step appends to the log and becomes the latest line.
+	var model tea.Model = m
+	for _, step := range []string{"Ensuring the Box workspace folder tree", "Uploading sample content msa.pdf", "Creating AI agent Risk Triage"} {
+		model, _ = model.Update(activityMsg{provider: "box", line: step})
+	}
+	rm := model.(rootShellModel)
+	if len(rm.activityLog) != 3 {
+		t.Fatalf("activityLog = %d, want 3", len(rm.activityLog))
+	}
+
+	// Collapsed: shows the tail (last two) and an expand hint, not the first line.
+	collapsed := rm.renderActivity(100)
+	if !strings.Contains(collapsed, "Creating AI agent Risk Triage") || !strings.Contains(collapsed, "e to expand") {
+		t.Fatalf("collapsed feed missing latest line or hint:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "Ensuring the Box workspace folder tree") {
+		t.Fatalf("collapsed feed should not show the first (scrolled-off) line:\n%s", collapsed)
+	}
+
+	// `e` expands to the full recent history.
+	model, _ = rm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	rm = model.(rootShellModel)
+	if !rm.activityExpanded {
+		t.Fatal("e did not expand the activity feed")
+	}
+	if expanded := rm.renderActivity(100); !strings.Contains(expanded, "Ensuring the Box workspace folder tree") || !strings.Contains(expanded, "e to collapse") {
+		t.Fatalf("expanded feed missing earlier line or collapse hint:\n%s", expanded)
+	}
+}
+
 func TestTeardownResultRowsSummary(t *testing.T) {
 	m := newSetupOnlyShell()
 	m.width, m.height = 120, 50

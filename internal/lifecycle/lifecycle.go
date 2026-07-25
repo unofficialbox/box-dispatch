@@ -68,6 +68,17 @@ func addResource(item *Item, component, kind, name, id, resourceURL string) {
 	})
 }
 
+// Reporter receives human-readable progress lines from a long-running lifecycle
+// operation so the caller can surface live activity. The nil Reporter is safe
+// and simply discards messages.
+type Reporter func(message string)
+
+func (r Reporter) step(message string) {
+	if r != nil {
+		r(message)
+	}
+}
+
 type receiptFile struct {
 	Receipts []struct {
 		Platform string `json:"platform"`
@@ -81,7 +92,7 @@ func Validate(root string, components []string) ([]Item, error) {
 	}
 	items := make([]Item, 0, len(components))
 	for _, provider := range components {
-		item, err := ValidateProvider(root, provider)
+		item, err := ValidateProvider(root, provider, nil)
 		if err != nil {
 			return items, err
 		}
@@ -90,10 +101,11 @@ func Validate(root string, components []string) ([]Item, error) {
 	return items, nil
 }
 
-func ValidateProvider(root, provider string) (Item, error) {
+func ValidateProvider(root, provider string, report Reporter) (Item, error) {
 	if root == "" {
 		return Item{}, fmt.Errorf("package directory is required")
 	}
+	report.step("Reading packaged " + providerName(provider) + " configuration")
 	paths := providerPaths(root, provider)
 	count := countFiles(paths)
 	item := Item{Provider: provider, Name: providerName(provider), Source: strings.Join(relativePaths(root, paths), ", ")}
@@ -115,7 +127,8 @@ func ValidateProvider(root, provider string) (Item, error) {
 		return validateSalesforce(root, item)
 	}
 	if provider == "box" {
-		return validateBox(root, item, components)
+		report.step("Inspecting existing Box configuration in the tenant")
+		return validateBox(root, item, components, report)
 	}
 	item.Status = StatusManual
 	item.Detail = fmt.Sprintf("%d packaged configuration files require provider validation. A native Box Dispatch deploy adapter is not available yet.", count)
@@ -290,7 +303,7 @@ type boxMetadataTemplate struct {
 	Fields      []boxMetadataField `json:"fields"`
 }
 
-func validateBox(root string, item Item, components []string) (Item, error) {
+func validateBox(root string, item Item, components []string, report Reporter) (Item, error) {
 	item.Missing = append([]string(nil), components...)
 	manifest, err := solution.Load(root)
 	if err != nil {
@@ -567,25 +580,25 @@ func DeployMissing(root string, items []Item) ([]Item, error) {
 		if results[i].Status != StatusMissing || !results[i].Deployable {
 			continue
 		}
-		results[i] = deployProvider(root, results[i], settings)
+		results[i] = deployProvider(root, results[i], settings, nil)
 	}
 	return results, nil
 }
 
-func DeployProvider(root string, item Item) (Item, error) {
+func DeployProvider(root string, item Item, report Reporter) (Item, error) {
 	settings, err := shellstate.LoadConnectionSettings()
 	if err != nil {
 		return item, err
 	}
-	return deployProvider(root, item, settings), nil
+	return deployProvider(root, item, settings, report), nil
 }
 
-func deployProvider(root string, item Item, settings config.ConnectionSettings) Item {
+func deployProvider(root string, item Item, settings config.ConnectionSettings, report Reporter) Item {
 	if item.Status != StatusMissing || !item.Deployable {
 		return item
 	}
 	if item.Provider == "box" {
-		return deployBoxFoundation(root, item)
+		return deployBoxFoundation(root, item, report)
 	}
 	if item.Provider != "salesforce" {
 		return item
@@ -595,10 +608,12 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings) 
 		item.Status, item.Detail = StatusFailed, "No Salesforce alias is selected."
 		return item
 	}
+	report.step("Building Salesforce UI bundles")
 	if buildErr := buildSalesforceUIBundles(project); buildErr != nil {
 		item.Status, item.Detail = StatusFailed, buildErr.Error()
 		return item
 	}
+	report.step("Deploying Salesforce metadata with sf project deploy")
 	cmd := exec.Command("sf", "project", "deploy", "start", "--source-dir", "force-app", "--target-org", settings.SalesforceAlias, "--json")
 	cmd.Dir = project
 	output, runErr := cmd.CombinedOutput()
@@ -642,7 +657,7 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings) 
 	return item
 }
 
-func deployBoxFoundation(root string, item Item) Item {
+func deployBoxFoundation(root string, item Item, report Reporter) Item {
 	// Shared with teardown so both address the same resolved workspace.
 	box, err := loadBoxContext(root)
 	if err != nil {
@@ -666,6 +681,7 @@ func deployBoxFoundation(root string, item Item) Item {
 	folderComponent := workspace.ComponentType + ":" + workspace.DisplayName
 	workspaceID := ""
 	if slices.Contains(item.DeployableComponents, folderComponent) {
+		report.step("Ensuring the Box workspace folder tree")
 		var createErr error
 		workspaceID, createErr = api.ensureFolder(ctx, target.ParentFolderID, target.WorkspaceName)
 		if createErr != nil {
@@ -716,6 +732,7 @@ func deployBoxFoundation(root string, item Item) Item {
 			if !slices.Contains(item.DeployableComponents, component) {
 				continue
 			}
+			report.step("Applying metadata template " + firstNonEmpty(template.DisplayName, template.TemplateKey))
 			if createErr := api.createMetadataTemplate(ctx, template); createErr != nil {
 				item.Status, item.Detail = StatusFailed, "Create "+component+": "+createErr.Error()
 				return item
@@ -746,6 +763,7 @@ func deployBoxFoundation(root string, item Item) Item {
 				return item
 			}
 			if !exists {
+				report.step("Uploading sample content " + filepath.Base(file.Source))
 				if uploadErr := api.uploadFile(ctx, folderID, source); uploadErr != nil {
 					item.Status, item.Detail = StatusFailed, "Deploy "+component+": "+uploadErr.Error()
 					return item
@@ -773,13 +791,16 @@ func deployBoxFoundation(root string, item Item) Item {
 			addResource(&item, "Sample Content:"+filepath.Base(file.Source), "file", filepath.Base(file.Source), fileID, "https://app.box.com/file/"+fileID)
 		}
 	}
-	publicDeployed, publicResources, publicErr := deployBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, item.DeployableComponents)
+	publicDeployed, publicResources, publicErr := deployBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, item.DeployableComponents, report)
 	if publicErr != nil {
 		item.Status, item.Detail = StatusFailed, publicErr.Error()
 		return item
 	}
 	deployed = append(deployed, publicDeployed...)
 	item.Resources = append(item.Resources, publicResources...)
+	if boxPrivateSurfacesPlanned(root, box, item.DeployableComponents) {
+		report.step("Provisioning Box App through the authenticated browser")
+	}
 	privateDeployed, privateResources, privateErr := deployBoxPrivateAdapters(root, manifest, settings.Box, selection, item.DeployableComponents, workspaceID, item.Resources)
 	deployed = append(deployed, privateDeployed...)
 	item.Resources = append(item.Resources, privateResources...)

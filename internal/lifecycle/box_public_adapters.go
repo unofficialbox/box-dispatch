@@ -92,7 +92,7 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 	return nil
 }
 
-func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, deployable []string) ([]string, []ResourceReference, error) {
+func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, deployable []string, report Reporter) ([]string, []ResourceReference, error) {
 	deployed := []string{}
 	resources := []ResourceReference{}
 	if manifest.CapabilityEnabled("Doc Gen Template", selection) {
@@ -105,6 +105,7 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 			if err != nil || !found {
 				return deployed, resources, fmt.Errorf("locate %s before Doc Gen registration: %w", component, err)
 			}
+			report.step("Registering Doc Gen template " + filepath.Base(file.Source))
 			if err := api.createDocgenTemplate(ctx, fileID); err != nil {
 				return deployed, resources, fmt.Errorf("register %s: %w", component, err)
 			}
@@ -120,6 +121,7 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 		if !slices.Contains(deployable, agent.Component) {
 			continue
 		}
+		report.step("Creating AI agent " + agent.Name)
 		agentID, err := api.createAIAgent(ctx, agent.Mode, agent.Name, agent.Description, agent.Instructions)
 		if err != nil {
 			return deployed, resources, fmt.Errorf("create %s: %w", agent.Component, err)
@@ -131,6 +133,7 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 	if capability, enabled := enabledCapability(manifest, selection, "Box Hub"); enabled {
 		component := "Box Hub:" + capability.DisplayName
 		if slices.Contains(deployable, component) {
+			report.step("Creating Box hub " + capability.DisplayName)
 			description := "Solution hub provisioned by Box Dispatch from " + capability.Source
 			hubID, err := api.createHub(ctx, capability.DisplayName, description)
 			if err != nil {
