@@ -1,0 +1,94 @@
+# Managed by box-dispatch
+#
+# Example Box artifact inventory in the Terraform-style HCL "locals" syntax that
+# `box-dispatch export` emits. `box-dispatch import` reads the `bcl` inventory
+# block below; the companion `resource "null_resource"` blocks are the Terraform
+# projection of the same data and are ignored on import.
+#
+# The IDs here are illustrative — replace them with the folder and enterprise IDs
+# from your own tenant.
+locals {
+  bcl = {
+    "version"     = "1.0"
+    "scenario"    = "clm"
+    "provider"    = "box"
+    "context"     = "environment"
+    "generatedAt" = "2026-07-24T12:00:00Z"
+    "metadata" = {
+      "source" = "environment"
+    }
+    "resources" = [
+      {
+        "name"          = "box_folder_123456789012"
+        "type"          = "box.folder"
+        "provider"      = "box"
+        "terraformType" = "null_resource"
+        "config" = {
+          "provider_object_id" = "123456789012"
+          "enterprise_id"      = "987654321"
+        }
+        "metadata" = {
+          "artifactType"     = "box.folder"
+          "providerObjectId" = "123456789012"
+          "enterpriseId"     = "987654321"
+          "artifactName"     = "CLM Workspace"
+          "scenario"         = "clm"
+          "createdAt"        = "2026-07-24T12:00:00Z"
+          "source"           = "environment"
+        }
+      },
+      {
+        "name"          = "box_enterprise_987654321"
+        "type"          = "box.enterprise"
+        "provider"      = "box"
+        "terraformType" = "null_resource"
+        "config" = {
+          "provider_object_id" = "987654321"
+        }
+        "metadata" = {
+          "artifactType"     = "box.enterprise"
+          "providerObjectId" = "987654321"
+          "enterpriseId"     = "987654321"
+          "artifactName"     = "Box enterprise"
+          "scenario"         = "clm"
+          "createdAt"        = "2026-07-24T12:00:00Z"
+          "source"           = "environment"
+        }
+      },
+    ]
+    "ext" = {
+      "box" = {
+        "version" = "1.0"
+        "artifacts" = [
+          {
+            "name"             = "box_folder_123456789012"
+            "artifactType"     = "box.folder"
+            "providerObjectId" = "123456789012"
+            "enterpriseId"     = "987654321"
+          },
+        ]
+      }
+    }
+  }
+}
+
+resource "null_resource" "box_folder_123456789012" {
+  triggers = {
+    "provider"           = "box"
+    "artifact_type"      = "box.folder"
+    "provider_object_id" = "123456789012"
+    "enterprise_id"      = "987654321"
+    "artifact_name"      = "CLM Workspace"
+    "created_at"         = "2026-07-24T12:00:00Z"
+  }
+}
+
+resource "null_resource" "box_enterprise_987654321" {
+  triggers = {
+    "provider"           = "box"
+    "artifact_type"      = "box.enterprise"
+    "provider_object_id" = "987654321"
+    "artifact_name"      = "Box enterprise"
+    "created_at"         = "2026-07-24T12:00:00Z"
+  }
+}

@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"unicode"
 	"strings"
+	"unicode"
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
 )
@@ -356,15 +356,23 @@ func ExtractArtifactsFromBCL(doc BCLDocument) []config.DeployedArtifact {
 	return artifacts
 }
 
+// bclKeyPattern locates the inventory assignment, tolerating both the quoted
+// "bcl" = { ... } form and the bare bcl = { ... } identifier the HCL emitter
+// writes, so a file produced by WriteBCL can be read back by LoadBCL.
+var bclKeyPattern = regexp.MustCompile(`"?bcl"?\s*=`)
+
 func parseBCLLocals(raw []byte) (map[string]any, error) {
 	text := string(raw)
-	key := strings.Index(text, "\"bcl\"")
-	if key < 0 {
+	loc := bclKeyPattern.FindStringIndex(text)
+	if loc == nil {
 		return nil, fmt.Errorf("missing bcl inventory block")
 	}
-	p := &hclLikeParser{src: text, pos: key}
-	if err := p.expectToken(`"bcl"`); err != nil {
-		return nil, err
+	p := &hclLikeParser{src: text, pos: loc[0]}
+	p.skipSpaceAndComments()
+	if strings.HasPrefix(p.src[p.pos:], `"bcl"`) {
+		p.pos += len(`"bcl"`)
+	} else {
+		p.pos += len("bcl")
 	}
 	p.skipSpaceAndComments()
 	if err := p.expectChar('='); err != nil {
@@ -438,11 +446,11 @@ func (p *hclLikeParser) parseValue() (any, error) {
 	case '"':
 		return p.parseString()
 	default:
-			starts := p.src[p.pos:]
-			if strings.HasPrefix(starts, "true") {
-				p.pos += 4
-				return true, nil
-			}
+		starts := p.src[p.pos:]
+		if strings.HasPrefix(starts, "true") {
+			p.pos += 4
+			return true, nil
+		}
 		if strings.HasPrefix(starts, "false") {
 			p.pos += 5
 			return false, nil
@@ -545,18 +553,20 @@ func (p *hclLikeParser) parseArray() ([]any, error) {
 			return nil, err
 		}
 		out = append(out, item)
+		// Separators are lenient: entries may be comma- or newline-separated, and
+		// a trailing comma before the closing bracket is allowed. This matches
+		// both hand-written HCL and the comma-terminated lists WriteBCL emits.
 		p.skipSpaceAndComments()
+		if p.pos < len(p.src) && p.src[p.pos] == ',' {
+			p.pos++
+			p.skipSpaceAndComments()
+		}
 		if p.pos >= len(p.src) {
 			return nil, fmt.Errorf("unterminated array")
 		}
-		switch p.src[p.pos] {
-		case ',':
-			p.pos++
-		case ']':
+		if p.src[p.pos] == ']' {
 			p.pos++
 			return out, nil
-		default:
-			return nil, fmt.Errorf("expected , or ] in array at %d", p.pos)
 		}
 	}
 }
@@ -585,18 +595,19 @@ func (p *hclLikeParser) parseObject() (map[string]any, error) {
 			return nil, err
 		}
 		out[key] = value
+		// Separators are lenient: HCL objects separate entries with newlines and
+		// no commas, while JSON uses commas — accept either, plus a trailing comma.
 		p.skipSpaceAndComments()
+		if p.pos < len(p.src) && p.src[p.pos] == ',' {
+			p.pos++
+			p.skipSpaceAndComments()
+		}
 		if p.pos >= len(p.src) {
 			return nil, fmt.Errorf("unterminated object")
 		}
-		switch p.src[p.pos] {
-		case ',':
-			p.pos++
-		case '}':
+		if p.src[p.pos] == '}' {
 			p.pos++
 			return out, nil
-		default:
-			return nil, fmt.Errorf("expected , or } in object at %d", p.pos)
 		}
 	}
 }

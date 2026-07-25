@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "scenario": "clm",
+  "provider": "salesforce-agentforce",
+  "context": "environment",
+  "generatedAt": "2026-07-24T12:00:00Z",
+  "metadata": {
+    "source": "environment"
+  },
+  "resources": [
+    {
+      "name": "salesforce_org_00dxx0000004c2xmae",
+      "type": "salesforce.org",
+      "provider": "salesforce-agentforce",
+      "terraformType": "null_resource",
+      "config": {
+        "provider_object_id": "00DXX0000004C2xMAE"
+      },
+      "metadata": {
+        "artifactType": "salesforce.org",
+        "providerObjectId": "00DXX0000004C2xMAE",
+        "artifactName": "Salesforce org",
+        "scenario": "clm",
+        "createdAt": "2026-07-24T12:00:00Z",
+        "source": "environment"
+      }
+    }
+  ]
+}
