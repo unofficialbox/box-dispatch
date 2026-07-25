@@ -377,17 +377,21 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.height = 48 // tall enough for the big banner
 	view := model.viewWelcome(112)
-	// Wide, tall terminals render DISPATCH as an ANSI-shadow banner (block glyphs),
-	// so assert the branding, the wordmark banner, the menu, the route strip, and
-	// the coral accent / punk-rock mark.
-	for _, expected := range []string{"COMMUNITY-BUILT", "🤘", "██", "»", "Start new deployment", "SELECT STACK", "PICK QUICKSTART"} {
+	// Wide, tall terminals render DISPATCH as an ANSI-shadow banner (block glyphs)
+	// with a large chevron accent, so assert the branding, the wordmark banner,
+	// the menu, the route strip, and the punk-rock mark.
+	for _, expected := range []string{"COMMUNITY-BUILT", "🤘", "██", "Start new deployment", "SELECT STACK", "PICK QUICKSTART"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("welcome view does not contain %q", expected)
 		}
 	}
-	// Narrow or short terminals fall back to a one-line DISPATCH headline.
-	if narrow := model.viewWelcome(70); !strings.Contains(narrow, "DISPATCH") {
-		t.Fatalf("narrow welcome lost the DISPATCH headline fallback")
+	// Narrow or short terminals fall back to a one-line DISPATCH headline with the
+	// small » accent.
+	narrow := model.viewWelcome(70)
+	for _, expected := range []string{"DISPATCH", "»"} {
+		if !strings.Contains(narrow, expected) {
+			t.Fatalf("narrow welcome fallback missing %q", expected)
+		}
 	}
 	// Product branding lives in the shared header rather than the welcome body.
 	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {

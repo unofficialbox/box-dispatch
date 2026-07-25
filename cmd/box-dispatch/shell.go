@@ -36,9 +36,10 @@ import (
 // slice so the cursor range never drifts from what is rendered.
 var welcomeOptions = []string{"Start new deployment", "Show deployment history", "Reset demo environment"}
 
-// dispatchBanner is the big ANSI-shadow product wordmark (6 rows, 60 cols) shown
-// in the welcome hero on wide terminals; narrow terminals fall back to a one-line
-// headline. boxBanner is the half-height BOX kicker above it.
+// dispatchBanner is the ANSI-shadow product wordmark (6 rows, 60 cols) shown in
+// the welcome hero on wide terminals; smaller terminals fall back to a one-line
+// headline. boxBanner is the half-height BOX kicker above it, and chevronBanner
+// is the large coral » accent shown to the right of DISPATCH on wide terminals.
 var dispatchBanner = []string{
 	"██████╗ ██╗███████╗██████╗  █████╗ ████████╗ ██████╗██╗  ██╗",
 	"██╔══██╗██║██╔════╝██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ██║",
@@ -52,6 +53,15 @@ var boxBanner = []string{
 	"█▀▄ █▀█ █ █",
 	"█▀▄ █ █ ▄▀▄",
 	"▀▀  ▀▀▀ ▀ ▀",
+}
+
+var chevronBanner = []string{
+	"██╗ ██╗  ",
+	"╚██╗╚██╗ ",
+	" ╚██╗╚██╗",
+	" ██╔╝██╔╝",
+	"██╔╝██╔╝ ",
+	"╚═╝ ╚═╝  ",
 }
 
 type shellScreen int
@@ -2178,21 +2188,10 @@ func (m rootShellModel) stepper() string {
 func (m rootShellModel) viewWelcome(width int) string {
 	inner := width - 16 // panel border (2) + horizontal padding (2*5), rounded up
 
-	// Wordmark: a half-height BOX kicker with a coral » accent, over the big
-	// DISPATCH banner. Narrow or short terminals fall back to a one-line headline
-	// so the 9-row banner never overruns the frame.
 	accentMark := lipgloss.NewStyle().Bold(true).Foreground(coral).Render(" »")
-	var wordmark string
-	if inner >= 60 && m.height >= 42 {
-		box := lipgloss.JoinHorizontal(lipgloss.Bottom,
-			lipgloss.NewStyle().Bold(true).Foreground(ice).Render(strings.Join(boxBanner, "\n")),
-			accentMark)
-		dispatch := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(strings.Join(dispatchBanner, "\n"))
-		wordmark = box + "\n" + dispatch
-	} else {
-		wordmark = lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX ") +
-			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") + accentMark
-	}
+	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
+	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
+	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
 
 	options := welcomeOptions
 	optionRows := make([]string, len(options))
@@ -2207,14 +2206,29 @@ func (m rootShellModel) viewWelcome(width int) string {
 			optionRows[index] = base.BorderForeground(divider).Foreground(ice).Render("  " + option)
 		}
 	}
+	menu := strings.Join(optionRows, "\n")
 
-	// Top: wordmark + menu right beneath it. Bottom: the prose, pushed to the
-	// foot of the panel by a flexible spacer sized from the terminal height.
-	top := lipgloss.JoinVertical(lipgloss.Left, wordmark, "", strings.Join(optionRows, "\n"))
-	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
-	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
-	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
-	bottom := lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", description, "", tags)
+	// The big wordmark (BOX kicker over the DISPATCH banner) needs a wide, tall
+	// terminal; otherwise fall back to a one-line headline so the block art never
+	// overruns the frame. Layout top-to-bottom: eyebrow, wordmark, the
+	// description, then the menu. The tag line is anchored to the panel foot.
+	var top string
+	if inner >= 60 && m.height >= 42 {
+		box := lipgloss.NewStyle().Bold(true).Foreground(ice).Render(strings.Join(boxBanner, "\n"))
+		dispatch := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(strings.Join(dispatchBanner, "\n"))
+		wordmark := lipgloss.JoinVertical(lipgloss.Left, box, dispatch)
+		// A large coral chevron sits to the right of DISPATCH when there's room.
+		if inner >= 72 {
+			chev := lipgloss.NewStyle().Bold(true).Foreground(coral).Render(strings.Join(chevronBanner, "\n"))
+			wordmark = lipgloss.JoinHorizontal(lipgloss.Bottom, wordmark, "  ", chev)
+		}
+		top = lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", wordmark, "", description, "", menu)
+	} else {
+		headline := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX ") +
+			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") + accentMark
+		top = lipgloss.JoinVertical(lipgloss.Left, eyebrow, "", headline, "", description, "", menu)
+	}
+	bottom := tags
 
 	th, bh := lipgloss.Height(top), lipgloss.Height(bottom)
 	// Fill the panel to just under the terminal height (chrome around the hero is
