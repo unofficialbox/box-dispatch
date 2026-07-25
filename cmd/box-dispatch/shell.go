@@ -2056,17 +2056,7 @@ func (m rootShellModel) header(width int) string {
 	domain := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("UNOFFICIALBOX.DEV")
 	used := lipgloss.Width(mark + product + tag + domain)
 	gap := max(width-used, 2)
-	// Terminals that support OSC 8 make the domain a real clickable link; the rest
-	// just show the styled text, and the escape codes are zero display width.
-	return mark + product + tag + strings.Repeat(" ", gap) + hyperlink("https://unofficialbox.dev", domain)
-}
-
-// hyperlink wraps already-styled text in an OSC 8 terminal hyperlink escape,
-// terminated with BEL (\a) rather than ST (ESC \). BEL is the more widely
-// supported OSC terminator; the ST form rendered as stray glyphs and broke
-// clickability in some terminals (e.g. Warp).
-func hyperlink(url, text string) string {
-	return "\x1b]8;;" + url + "\x07" + text + "\x1b]8;;\x07"
+	return mark + product + tag + strings.Repeat(" ", gap) + domain
 }
 
 // taskRunning reports whether a long-running lifecycle task is in progress, so
@@ -2912,40 +2902,6 @@ func kindForComponent(component string) string {
 	return strings.ReplaceAll(strings.ToLower(componentType(component)), " ", "_")
 }
 
-// assetLink returns the app.box.com URL a deployed asset's name should link to,
-// or "" when the asset has no addressable Box object (e.g. existing config with
-// no recorded ID). Files use the /files/<id> deep link the operator expects.
-func assetLink(ref lifecycle.ResourceReference) string {
-	if strings.TrimSpace(ref.ID) == "" {
-		return ""
-	}
-	switch ref.Kind {
-	case "file":
-		return "https://app.box.com/files/" + ref.ID
-	case "folder":
-		return "https://app.box.com/folder/" + ref.ID
-	}
-	return ref.URL
-}
-
-// linkCell renders a fixed-width table cell whose text is an OSC 8 terminal
-// hyperlink when url is non-empty. Linked text is underlined and coloured like a
-// link so it reads as clickable even in terminals that show no hover affordance.
-// The escape codes carry no display width, so padding is computed from the plain
-// text and the cell aligns like any other.
-func linkCell(text, url string, width int) string {
-	plain := truncateCell(text, width)
-	pad := width - lipgloss.Width(plain)
-	if pad < 0 {
-		pad = 0
-	}
-	if url == "" {
-		return plain + strings.Repeat(" ", pad)
-	}
-	styled := lipgloss.NewStyle().Foreground(cyan).Underline(true).Render(plain)
-	return hyperlink(url, styled) + strings.Repeat(" ", pad)
-}
-
 // renderDeployedAssetsTable lists what a successful run actually created — one row
 // per asset with its status, source system, component, kind, name, and id. The
 // list is windowed by deployAssetsScroll (↑/↓) so a large deployment stays on
@@ -2990,7 +2946,7 @@ func (m rootShellModel) renderDeployedAssetsTable(width, visible int) string {
 			cell(providerLabel(a.ref.Provider), wSource, white),
 			cell(componentType(a.ref.Component), wComp, ""),
 			cell(a.ref.Kind, wType, ""),
-			linkCell(a.ref.Name, assetLink(a.ref), wName),
+			cell(a.ref.Name, wName, ""),
 			cell(id, wID, muted),
 		}, " "))
 	}

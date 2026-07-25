@@ -453,7 +453,7 @@ func TestDeployViewFitsAndScrollReverses(t *testing.T) {
 	}
 }
 
-func TestDeployedAssetsTableHeaderAndFileLink(t *testing.T) {
+func TestDeployedAssetsTableHeader(t *testing.T) {
 	m := newSetupOnlyShell()
 	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 50
 	m.validationItems = []lifecycle.Item{{Provider: "box", Resources: []lifecycle.ResourceReference{
@@ -466,9 +466,8 @@ func TestDeployedAssetsTableHeaderAndFileLink(t *testing.T) {
 	if !strings.Contains(table, "TYPE") {
 		t.Error("expected TYPE column header")
 	}
-	// The file name should carry an OSC 8 hyperlink to the /files/<id> deep link.
-	if !strings.Contains(table, "https://app.box.com/files/999") {
-		t.Errorf("file name is not linked to its Box file URL:\n%s", table)
+	if !strings.Contains(table, "msa.pdf") {
+		t.Errorf("file name missing from table:\n%s", table)
 	}
 }
 
@@ -528,23 +527,6 @@ func TestTeardownResultRowsSummary(t *testing.T) {
 	for _, want := range []string{"1 deleted", "2 remaining", "STATUS", "TYPE", "✓ deleted", "○ manual", "× failed", "boom"} {
 		if !strings.Contains(rows, want) {
 			t.Errorf("teardown result table missing %q:\n%s", want, rows)
-		}
-	}
-}
-
-func TestAssetLinkByKind(t *testing.T) {
-	cases := []struct {
-		ref  lifecycle.ResourceReference
-		want string
-	}{
-		{lifecycle.ResourceReference{Kind: "file", ID: "12"}, "https://app.box.com/files/12"},
-		{lifecycle.ResourceReference{Kind: "folder", ID: "7"}, "https://app.box.com/folder/7"},
-		{lifecycle.ResourceReference{Kind: "file", ID: ""}, ""}, // no ID → no link
-		{lifecycle.ResourceReference{Kind: "hub", ID: "5", URL: "https://app.box.com/hubs/5"}, "https://app.box.com/hubs/5"},
-	}
-	for _, tc := range cases {
-		if got := assetLink(tc.ref); got != tc.want {
-			t.Errorf("assetLink(%+v) = %q, want %q", tc.ref, got, tc.want)
 		}
 	}
 }
