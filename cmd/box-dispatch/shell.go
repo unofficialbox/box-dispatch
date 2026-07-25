@@ -1531,7 +1531,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch key.String() {
 			case "down", "j":
 				total := len(m.deployedAssets())
-				if maxScroll := total - m.deployAssetsVisibleRows(); m.deployAssetsScroll < maxScroll {
+				if maxScroll := total - m.deployTableCapacity(); m.deployAssetsScroll < maxScroll {
 					m.deployAssetsScroll++
 				}
 				return m, nil
@@ -2575,24 +2575,47 @@ func (m rootShellModel) clampedTeardownScroll(total, visible int) int {
 }
 
 func (m rootShellModel) viewDeploy(width int) string {
+	head, action := m.deployHeadAction(width)
+	assets := ""
+	if m.deployDone {
+		if table := m.renderDeployedAssetsTable(width, m.deployTableCapacity()); table != "" {
+			assets = "\n" + table
+		}
+	}
+	return head + assets + "\n" + action
+}
+
+// deployHeadAction builds the two fixed parts of the deploy screen — everything
+// above the assets table (stage header, title, and the provider progress panel)
+// and the action block below it. Keeping them separate lets deployTableCapacity
+// measure the surrounding chrome so the assets table is sized to fit the screen.
+func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 	rows := []string{}
 	deployable := 0
+	rowSep := "\n\n"
 	for _, item := range m.validationItems {
 		if item.Status == lifecycle.StatusMissing && item.Deployable {
 			deployable++
+		}
+		if m.deployDone {
+			// One line per provider once the run is done; the results live in the
+			// deployed-assets table below.
+			rows = append(rows, m.providerSummaryLine(item, width-10))
+			rowSep = "\n"
+			continue
 		}
 		rows = append(rows, m.providerProgressRow(item.Provider, m.deploymentProgress[item.Provider], &item, item.Provider == m.currentDeployment, "deploy", width-10))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, dimStyle.Render("Validate the package before deployment."))
 	}
-	action := accent.Render(fmt.Sprintf("Enter / →  Deploy %d supported missing configuration set(s)", deployable))
+	action = accent.Render(fmt.Sprintf("Enter / →  Deploy %d supported missing configuration set(s)", deployable))
 	if m.confirmingDeploy {
 		action = activePane.Copy().Width(width - 4).Render(m.renderDeployConfirm(width - 8))
 	}
 	if m.deployStarted {
-		// Box Forms and Apps are provisioned through the browser, which may raise
-		// a Box sign-in window and wait for it before the deploy continues.
+		// Box Apps are provisioned through the browser, which may raise a Box
+		// sign-in window and wait for it before the deploy continues.
 		action = m.spinner.View() + " Deploying provider configuration...\n" +
 			dimStyle.Render("   If a Box sign-in window opens, complete it and the deployment continues.")
 	} else if m.deployDone {
@@ -2605,14 +2628,27 @@ func (m rootShellModel) viewDeploy(width int) string {
 			action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
 		}
 	}
-	assets := ""
-	if m.deployDone {
-		if table := m.renderDeployedAssetsTable(width); table != "" {
-			assets = "\n" + table
-		}
+	head = m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, rowSep))
+	return head, action
+}
+
+// deployTableCapacity returns how many asset rows fit beneath the deploy chrome
+// on the current terminal, so the whole screen (chrome + table) stays within the
+// viewport and the table remains scrollable in both directions.
+func (m rootShellModel) deployTableCapacity() int {
+	width := min(max(m.width-8, 64), 112) // same content width the View() wrapper uses
+	head, action := m.deployHeadAction(width)
+	// View() wraps body with the header, two blank separators and the footer,
+	// inside a one-row top/bottom margin (~8 rows); the table panel adds its
+	// heading, legend, blank, column header and footer plus border and padding
+	// (~9 rows).
+	const viewFrame, tableFrame = 8, 9
+	used := lipgloss.Height(head) + lipgloss.Height(action) + viewFrame + tableFrame
+	if n := m.height - used; n >= 3 {
+		return n
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + assets + "\n" + action
+	return 3
 }
 
 // deployedResources flattens every asset recorded across providers this run.
@@ -2697,28 +2733,50 @@ func kindForComponent(component string) string {
 	return strings.ReplaceAll(strings.ToLower(componentType(component)), " ", "_")
 }
 
-// deployAssetsVisibleRows is how many table rows fit under the provider progress
-// panel on the current terminal.
-func (m rootShellModel) deployAssetsVisibleRows() int {
-	n := m.height - 24
-	if n < 5 {
-		n = 5
+// assetLink returns the app.box.com URL a deployed asset's name should link to,
+// or "" when the asset has no addressable Box object (e.g. existing config with
+// no recorded ID). Files use the /files/<id> deep link the operator expects.
+func assetLink(ref lifecycle.ResourceReference) string {
+	if strings.TrimSpace(ref.ID) == "" {
+		return ""
 	}
-	return n
+	switch ref.Kind {
+	case "file":
+		return "https://app.box.com/files/" + ref.ID
+	case "folder":
+		return "https://app.box.com/folder/" + ref.ID
+	}
+	return ref.URL
+}
+
+// linkCell renders a fixed-width table cell whose text is an OSC 8 terminal
+// hyperlink when url is non-empty. The escape codes carry no display width, so
+// padding is computed from the plain text and the cell aligns like any other.
+func linkCell(text, url string, width int) string {
+	plain := truncateCell(text, width)
+	pad := width - lipgloss.Width(plain)
+	if pad < 0 {
+		pad = 0
+	}
+	rendered := plain
+	if url != "" {
+		rendered = hyperlink(url, plain)
+	}
+	return rendered + strings.Repeat(" ", pad)
 }
 
 // renderDeployedAssetsTable lists what a successful run actually created — one row
 // per asset with its status, source system, component, kind, name, and id. The
 // list is windowed by deployAssetsScroll (↑/↓) so a large deployment stays on
 // screen.
-func (m rootShellModel) renderDeployedAssetsTable(width int) string {
+func (m rootShellModel) renderDeployedAssetsTable(width, visible int) string {
 	assets := m.deployedAssets()
 	if len(assets) == 0 {
 		return ""
 	}
 	inner := width - 8
-	wStatus, wSource, wComp, wKind := 8, 10, 20, 16
-	rest := inner - wStatus - wSource - wComp - wKind - 5 // 5 single-space gaps
+	wStatus, wSource, wComp, wType := 8, 10, 20, 16
+	rest := inner - wStatus - wSource - wComp - wType - 5 // 5 single-space gaps
 	if rest < 30 {
 		rest = 30
 	}
@@ -2733,7 +2791,7 @@ func (m rootShellModel) renderDeployedAssetsTable(width int) string {
 	}
 	head := dimStyle.Render(strings.Join([]string{
 		cellPlain("STATUS", wStatus), cellPlain("SOURCE", wSource), cellPlain("COMPONENT", wComp),
-		cellPlain("KIND", wKind), cellPlain("NAME", wName), cellPlain("ID", wID),
+		cellPlain("TYPE", wType), cellPlain("NAME", wName), cellPlain("ID", wID),
 	}, " "))
 	created := 0
 	rowsAll := make([]string, 0, len(assets))
@@ -2750,13 +2808,12 @@ func (m rootShellModel) renderDeployedAssetsTable(width int) string {
 			cell(status, wStatus, tone),
 			cell(providerLabel(a.ref.Provider), wSource, white),
 			cell(componentType(a.ref.Component), wComp, ""),
-			cell(a.ref.Kind, wKind, ""),
-			cell(a.ref.Name, wName, ""),
+			cell(a.ref.Kind, wType, ""),
+			linkCell(a.ref.Name, assetLink(a.ref), wName),
 			cell(id, wID, muted),
 		}, " "))
 	}
 	existing := len(rowsAll) - created
-	visible := m.deployAssetsVisibleRows()
 	scroll := m.deployAssetsScroll
 	if maxScroll := len(rowsAll) - visible; scroll > maxScroll {
 		scroll = maxScroll
@@ -2834,6 +2891,21 @@ func (m rootShellModel) providerProgressRow(provider string, value float64, item
 		row += "\n" + renderComponentChecklist(*item, phase, active, value, m.spinner.View(), width)
 	}
 	return row
+}
+
+// providerSummaryLine is the compact one-line provider state shown on the
+// post-deploy screen in place of the full progress row, so the deployed-assets
+// table has room and the whole screen stays on-screen. Failed providers keep
+// their detail inline so a failure is never hidden by the compaction.
+func (m rootShellModel) providerSummaryLine(item lifecycle.Item, width int) string {
+	label := titleStyle.Render(providerLabel(item.Provider))
+	if item.Status == lifecycle.StatusFailed {
+		detail := dimStyle.Render(truncateCell(item.Detail, max(width-24, 10)))
+		return lipgloss.NewStyle().Bold(true).Foreground(coral).Render("×  ") + label + "  " +
+			lipgloss.NewStyle().Bold(true).Foreground(coral).Render("FAILED") + "   " + detail
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(green).Render("✓  ") + label + "  " +
+		lipgloss.NewStyle().Foreground(green).Render("COMPLETE")
 }
 
 func renderComponentChecklist(item lifecycle.Item, phase string, active bool, progressValue float64, spinnerView string, width int) string {

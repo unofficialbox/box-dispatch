@@ -80,6 +80,13 @@ type boxPrivateResponse struct {
 // true once a GraphQL-backed adapter exists. See docs/ROADMAP.md item 3.
 const boxAppMeteorDeploySupported = false
 
+// boxFormEnabled gates whether the Box Form surface is offered at all. It is off
+// for now so Forms are hidden from the validation and deployment screens (not
+// classified as a component, not built, and not counted when deciding whether a
+// deploy needs the authenticated browser). Flip to true to restore the
+// file-request-web Form adapter.
+const boxFormEnabled = false
+
 // BoxAppDeploysAutomatically reports whether box-dispatch has a working native
 // adapter for the Box App. It does not while the Meteor app-API is deprecated,
 // so the UI and deploy path present the Box App as a manual configuration step
@@ -175,7 +182,7 @@ func privateAdapterRequest(root string, manifest solution.Manifest, settings sol
 	components := map[string]string{}
 	formCapability, formEnabled := enabledCapability(manifest, selection, "Box Form")
 	formTitle := ""
-	if formEnabled && formCapability.Handler == "box.private-form" {
+	if boxFormEnabled && formEnabled && formCapability.Handler == "box.private-form" {
 		var err error
 		formTitle, err = solution.ResolveDeploymentName(formCapability.DisplayName, settings)
 		if err != nil {

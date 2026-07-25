@@ -418,6 +418,77 @@ func TestOverallProgressSpringConvergesAndSettles(t *testing.T) {
 	}
 }
 
+func TestDeployViewFitsAndScrollReverses(t *testing.T) {
+	// A tall deployment must not overflow the terminal, and scrolling up must
+	// undo scrolling down — the two together are what made the table unscrollable
+	// upward before (the frame overflowed and the top rendered off-screen).
+	m := newSetupOnlyShell()
+	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 44
+	provs := []string{"box", "salesforce", "databricks", "aws"}
+	items := make([]lifecycle.Item, 0, len(provs))
+	for _, p := range provs {
+		res := make([]lifecycle.ResourceReference, 30)
+		for i := range res {
+			res[i] = lifecycle.ResourceReference{Provider: p, Component: "Sample Content:f", Kind: "file", Name: "f.pdf", ID: "1"}
+		}
+		items = append(items, lifecycle.Item{Provider: p, Status: lifecycle.StatusMissing, Deployable: true, Resources: res})
+	}
+	m.validationItems = items
+
+	if lines := strings.Count(m.View(), "\n") + 1; lines > m.height {
+		t.Fatalf("deploy view overflows terminal: %d lines > height %d", lines, m.height)
+	}
+
+	var model tea.Model = m
+	for i := 0; i < 5; i++ {
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	down := model.(rootShellModel).deployAssetsScroll
+	if down == 0 {
+		t.Fatal("scrolling down did not advance the window")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if up := model.(rootShellModel).deployAssetsScroll; up != down-1 {
+		t.Fatalf("scroll up did not reverse down: down=%d up=%d", down, up)
+	}
+}
+
+func TestDeployedAssetsTableHeaderAndFileLink(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 50
+	m.validationItems = []lifecycle.Item{{Provider: "box", Resources: []lifecycle.ResourceReference{
+		{Provider: "box", Component: "Sample Content:msa.pdf", Kind: "file", Name: "msa.pdf", ID: "999"},
+	}}}
+	table := m.renderDeployedAssetsTable(112, m.deployTableCapacity())
+	if strings.Contains(table, "KIND") {
+		t.Error("column header should be TYPE, not KIND")
+	}
+	if !strings.Contains(table, "TYPE") {
+		t.Error("expected TYPE column header")
+	}
+	// The file name should carry an OSC 8 hyperlink to the /files/<id> deep link.
+	if !strings.Contains(table, "https://app.box.com/files/999") {
+		t.Errorf("file name is not linked to its Box file URL:\n%s", table)
+	}
+}
+
+func TestAssetLinkByKind(t *testing.T) {
+	cases := []struct {
+		ref  lifecycle.ResourceReference
+		want string
+	}{
+		{lifecycle.ResourceReference{Kind: "file", ID: "12"}, "https://app.box.com/files/12"},
+		{lifecycle.ResourceReference{Kind: "folder", ID: "7"}, "https://app.box.com/folder/7"},
+		{lifecycle.ResourceReference{Kind: "file", ID: ""}, ""}, // no ID → no link
+		{lifecycle.ResourceReference{Kind: "hub", ID: "5", URL: "https://app.box.com/hubs/5"}, "https://app.box.com/hubs/5"},
+	}
+	for _, tc := range cases {
+		if got := assetLink(tc.ref); got != tc.want {
+			t.Errorf("assetLink(%+v) = %q, want %q", tc.ref, got, tc.want)
+		}
+	}
+}
+
 func TestSpacebarSelectsHighlightedRowLikeEnter(t *testing.T) {
 	// Spacebar must activate the highlighted row on the plain list screens, the
 	// same as Enter, so arrows/space/enter behave consistently everywhere.

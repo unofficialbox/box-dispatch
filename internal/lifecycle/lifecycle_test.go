@@ -159,15 +159,23 @@ func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
 	// create_new naming strategy resolves.
 	settings.Box.RunID = "20260101T000000Z"
 	item := &Item{Provider: "box"}
-	// Must not touch the browser. The Box Form (file-request-web) is marked for
-	// automatic deployment; the Box App is demoted to manual because its Meteor
-	// deploy path is deprecated (boxAppMeteorDeploySupported == false).
+	// Must not touch the browser. The Box Form is hidden while boxFormEnabled is
+	// off, so it is not classified at all; the Box App is demoted to manual
+	// because its Meteor deploy path is deprecated (boxAppMeteorDeploySupported).
 	if err := validateBoxPrivateAdapters(root, manifest, settings.Box, settings.Box.Components, item); err != nil {
 		t.Fatal(err)
 	}
 	const form, app = "Box Form:New Contract Request", "Box App:Contract Lifecycle Management"
-	if !slices.Contains(item.DeployableComponents, form) {
-		t.Fatalf("Box Form not marked deployable: %+v", item.DeployableComponents)
+	if boxFormEnabled {
+		if !slices.Contains(item.DeployableComponents, form) {
+			t.Fatalf("Box Form not marked deployable: %+v", item.DeployableComponents)
+		}
+	} else {
+		for _, bucket := range [][]string{item.DeployableComponents, item.Missing, item.Present} {
+			if slices.Contains(bucket, form) {
+				t.Fatalf("Box Form must not be surfaced while disabled: %+v", bucket)
+			}
+		}
 	}
 	if boxAppMeteorDeploySupported {
 		if !slices.Contains(item.DeployableComponents, app) {
@@ -181,10 +189,8 @@ func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
 			t.Fatalf("Box App should be tracked as a manual (missing) component: %+v", item.Missing)
 		}
 	}
-	for _, want := range []string{form, app} {
-		if slices.Contains(item.Present, want) {
-			t.Fatalf("private surface %q should not be reported present without inspection", want)
-		}
+	if slices.Contains(item.Present, app) {
+		t.Fatalf("Box App should not be reported present without inspection: %+v", item.Present)
 	}
 }
 
