@@ -2514,21 +2514,14 @@ func (m rootShellModel) teardownBodyRows(width int) []string {
 	}
 	record := *m.teardownRecord
 	body := []string{}
-	if m.teardownDone || m.teardownStarted {
+	if m.teardownDone {
+		// Mirror the post-deploy screen: a status table of every resource the
+		// reset touched, deleted and remaining alike.
+		return m.teardownResultRows(width)
+	}
+	if m.teardownStarted {
 		for _, provider := range m.teardownProviders {
 			body = append(body, m.providerProgressRow(provider, m.teardownProgress[provider], nil, provider == m.currentTeardown, "teardown", width-10))
-		}
-		for _, result := range m.teardownResults {
-			body = append(body, "", accent.Render(strings.ToUpper(providerLabel(result.Provider)))+"  "+dimStyle.Render(result.Detail))
-			for _, outcome := range result.Remaining() {
-				marker, style := "×", lipgloss.NewStyle().Foreground(coral)
-				reason := outcome.Error
-				if outcome.Unmanaged {
-					marker, style = "○", lipgloss.NewStyle().Foreground(gold)
-					reason = "no delete API; remove manually"
-				}
-				body = append(body, style.Render(fmt.Sprintf("  %s %s %s", marker, outcome.Resource.Kind, outcome.Resource.Name))+dimStyle.Render("  "+reason))
-			}
 		}
 		return body
 	}
@@ -2544,6 +2537,70 @@ func (m rootShellModel) teardownBodyRows(width int) []string {
 		}
 	}
 	return body
+}
+
+// teardownResultRows renders the reset results as a status table — one row per
+// resource the destroy pass touched, mirroring the post-deploy assets table so
+// the two screens read the same. Deleted rows show green, failures coral, and
+// unmanaged (no delete API) gold with a reason.
+func (m rootShellModel) teardownResultRows(width int) []string {
+	inner := width - 8
+	wStatus, wSource, wType := 10, 10, 16
+	rest := inner - wStatus - wSource - wType - 4 // 4 single-space gaps
+	if rest < 24 {
+		rest = 24
+	}
+	wName := rest * 3 / 5
+	wID := rest - wName
+	cell := func(s string, n int, tone lipgloss.Color) string {
+		style := lipgloss.NewStyle().Width(n)
+		if tone != "" {
+			style = style.Foreground(tone)
+		}
+		return style.Render(truncateCell(s, n))
+	}
+	deleted, remaining := 0, 0
+	dataRows := []string{}
+	for _, result := range m.teardownResults {
+		for _, o := range result.Outcomes {
+			status, tone, reason := "✓ deleted", green, ""
+			switch {
+			case o.Deleted:
+				deleted++
+			case o.Unmanaged:
+				status, tone, reason = "○ manual", gold, "no delete API; remove manually"
+				remaining++
+			default:
+				status, tone, reason = "× failed", coral, o.Error
+				remaining++
+			}
+			id := o.Resource.ID
+			if strings.TrimSpace(id) == "" {
+				id = "—"
+			}
+			row := strings.Join([]string{
+				cell(status, wStatus, tone),
+				cell(providerLabel(result.Provider), wSource, white),
+				cell(o.Resource.Kind, wType, ""),
+				cell(o.Resource.Name, wName, ""),
+				cell(id, wID, muted),
+			}, " ")
+			if reason != "" {
+				row += dimStyle.Render("  " + reason)
+			}
+			dataRows = append(dataRows, row)
+		}
+	}
+	heading := lipgloss.NewStyle().Bold(true).Foreground(green).Render(fmt.Sprintf("✓  %d deleted", deleted))
+	if remaining > 0 {
+		heading += lipgloss.NewStyle().Bold(true).Foreground(coral).Render(fmt.Sprintf("   ·   %d remaining", remaining))
+	}
+	header := dimStyle.Render(strings.Join([]string{
+		cellPlain("STATUS", wStatus), cellPlain("SOURCE", wSource), cellPlain("TYPE", wType),
+		cellPlain("NAME", wName), cellPlain("ID", wID),
+	}, " "))
+	rows := []string{heading, "", header}
+	return append(rows, dataRows...)
 }
 
 // teardownVisibleRows is how many preview rows fit under the header, title, and
@@ -2750,19 +2807,21 @@ func assetLink(ref lifecycle.ResourceReference) string {
 }
 
 // linkCell renders a fixed-width table cell whose text is an OSC 8 terminal
-// hyperlink when url is non-empty. The escape codes carry no display width, so
-// padding is computed from the plain text and the cell aligns like any other.
+// hyperlink when url is non-empty. Linked text is underlined and coloured like a
+// link so it reads as clickable even in terminals that show no hover affordance.
+// The escape codes carry no display width, so padding is computed from the plain
+// text and the cell aligns like any other.
 func linkCell(text, url string, width int) string {
 	plain := truncateCell(text, width)
 	pad := width - lipgloss.Width(plain)
 	if pad < 0 {
 		pad = 0
 	}
-	rendered := plain
-	if url != "" {
-		rendered = hyperlink(url, plain)
+	if url == "" {
+		return plain + strings.Repeat(" ", pad)
 	}
-	return rendered + strings.Repeat(" ", pad)
+	styled := lipgloss.NewStyle().Foreground(cyan).Underline(true).Render(plain)
+	return hyperlink(url, styled) + strings.Repeat(" ", pad)
 }
 
 // renderDeployedAssetsTable lists what a successful run actually created — one row

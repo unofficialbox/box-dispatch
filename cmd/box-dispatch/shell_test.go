@@ -472,6 +472,24 @@ func TestDeployedAssetsTableHeaderAndFileLink(t *testing.T) {
 	}
 }
 
+func TestTeardownResultRowsSummary(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.width, m.height = 120, 50
+	m.teardownResults = []lifecycle.TeardownResult{
+		{Provider: "box", Outcomes: []lifecycle.TeardownOutcome{
+			{Resource: lifecycle.ResourceReference{Provider: "box", Kind: "folder", Name: "Workspace", ID: "1"}, Deleted: true},
+			{Resource: lifecycle.ResourceReference{Provider: "box", Kind: "automate_workflow", Name: "Intake", ID: "2"}, Unmanaged: true},
+			{Resource: lifecycle.ResourceReference{Provider: "box", Kind: "hub", Name: "CLM", ID: "3"}, Error: "boom"},
+		}},
+	}
+	rows := strings.Join(m.teardownResultRows(112), "\n")
+	for _, want := range []string{"1 deleted", "2 remaining", "STATUS", "TYPE", "✓ deleted", "○ manual", "× failed", "boom"} {
+		if !strings.Contains(rows, want) {
+			t.Errorf("teardown result table missing %q:\n%s", want, rows)
+		}
+	}
+}
+
 func TestAssetLinkByKind(t *testing.T) {
 	cases := []struct {
 		ref  lifecycle.ResourceReference
