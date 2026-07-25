@@ -2245,18 +2245,33 @@ func (m rootShellModel) viewWelcome(width int) string {
 		Padding(2, 5).
 		Render(heroContent)
 
-	routeLabel := lipgloss.NewStyle().Foreground(muted).Render("YOUR ROUTE")
-	sep := lipgloss.NewStyle().Foreground(divider).Render(" ──── ")
-	route := strings.Join([]string{
-		accent.Render("01  SELECT STACK"),
-		sep,
-		lipgloss.NewStyle().Bold(true).Foreground(coral).Render("02  CONNECT"),
-		sep,
-		accent.Render("03  PICK QUICKSTART"),
-		sep,
-		lipgloss.NewStyle().Bold(true).Foreground(green).Render("04  SHIP"),
-	}, "")
-	return hero + "\n\n" + routeLabel + "\n" + route
+	return hero + "\n\n" + m.routeStrip()
+}
+
+// routeStrip renders the four-phase overview as numbered chips joined by chevrons
+// — a clean flow where every step reads the same and only the destination (Ship)
+// is set apart in green.
+func (m rootShellModel) routeStrip() string {
+	steps := []struct {
+		num, label string
+		tone       lipgloss.Color
+	}{
+		{"01", "SELECT STACK", cyan},
+		{"02", "CONNECT", cyan},
+		{"03", "PICK QUICKSTART", cyan},
+		{"04", "SHIP", green},
+	}
+	label := lipgloss.NewStyle().Foreground(muted).Bold(true).Render("YOUR ROUTE")
+	chevron := lipgloss.NewStyle().Foreground(divider).Render(" › ")
+	parts := make([]string, 0, len(steps)*2)
+	for i, s := range steps {
+		if i > 0 {
+			parts = append(parts, chevron)
+		}
+		chip := lipgloss.NewStyle().Bold(true).Foreground(navy).Background(s.tone).Padding(0, 1).Render(s.num)
+		parts = append(parts, chip+lipgloss.NewStyle().Foreground(ice).Render(" "+s.label))
+	}
+	return label + "\n" + strings.Join(parts, "")
 }
 
 func (m rootShellModel) viewDeploymentHistory(width int) string {
