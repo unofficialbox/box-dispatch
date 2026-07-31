@@ -1,5 +1,9 @@
 # box-dispatch
 
+<p align="center">
+  <img src="docs/landing.png" alt="box-dispatch interactive launch shell — the welcome screen with the BOX DISPATCH wordmark, deployment menu, and the SELECT STACK › CONNECT › PICK QUICKSTART › SHIP route" width="900">
+</p>
+
 `box-dispatch` is the CLI for **box-dispatch**, a set of building blocks and accelerators for Box-backed solution stacks (Box, Salesforce/Agentforce, Databricks, AWS Bedrock AgentCore).
 
 This repo starts with a fast setup/check experience and expands toward scenario install and deployment workflows.
