@@ -48,4 +48,3 @@ var Specs = map[string]ProviderSpec{
 		SmokeSteps:     []string{"confirm AgentCore runtime name is configured", "confirm AWS profile and region are available"},
 	},
 }
-

@@ -17,9 +17,9 @@ import (
 const defaultImportScenario = "clm"
 
 type importReport struct {
-	source   string
-	format   string
-	scenario string
+	source    string
+	format    string
+	scenario  string
 	providers []string
 }
 
@@ -136,9 +136,9 @@ func (e *Engine) importFromBCLDirectory(path string, scenario string) (*config.R
 		return nil, importReport{}, err
 	}
 	return &cfg, importReport{
-		source:   path,
-		format:   "bcl",
-		scenario: cfg.ActiveScenario,
+		source:    path,
+		format:    "bcl",
+		scenario:  cfg.ActiveScenario,
 		providers: orderedMapKeys(cfg.Providers),
 	}, nil
 }
@@ -273,9 +273,9 @@ func buildConfigFromArtifacts(artifacts []config.DeployedArtifact, explicitScena
 func buildProviderConfigFromArtifacts(provider string, artifacts []config.DeployedArtifact) config.ProviderConfig {
 	spec := providers.Specs[provider]
 	providerCfg := config.ProviderConfig{
-		DisplayName:  strings.TrimSpace(spec.DisplayName),
-		Env:          map[string]string{},
-		Variables:    map[string]interface{}{"source": "artifact-import", "importedAt": time.Now().UTC().Format(time.RFC3339)},
+		DisplayName: strings.TrimSpace(spec.DisplayName),
+		Env:         map[string]string{},
+		Variables:   map[string]interface{}{"source": "artifact-import", "importedAt": time.Now().UTC().Format(time.RFC3339)},
 	}
 	if providerCfg.DisplayName == "" {
 		providerCfg.DisplayName = provider
