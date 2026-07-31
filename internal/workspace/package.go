@@ -47,8 +47,22 @@ func Build(req PackageRequest) (PackageManifest, error) {
 		return PackageManifest{}, err
 	}
 	cmd := exec.Command("git", "clone", "--depth", "1", req.Repository, req.Destination)
+	// Run the clone non-interactively. Without this, a credential challenge for
+	// github.com (private repo, proxy, rate-limit, or a machine-level credential
+	// helper) makes git block on a "Username for 'https://github.com':" prompt.
+	// Inside the full-screen shell that prompt is invisible and unanswerable, so
+	// packaging appears to hang forever. Failing fast surfaces a real error.
+	cmd.Stdin = nil
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0", // git: never fall back to an interactive prompt
+		"GCM_INTERACTIVE=Never", // Git Credential Manager: don't pop a dialog
+	)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return PackageManifest{}, fmt.Errorf("clone template: %w: %s", err, strings.TrimSpace(string(output)))
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed == "" {
+			trimmed = "no output (git could not authenticate to " + req.Repository + " non-interactively)"
+		}
+		return PackageManifest{}, fmt.Errorf("clone template %s: %w: %s", req.Repository, err, trimmed)
 	}
 	if err := os.RemoveAll(filepath.Join(req.Destination, ".git")); err != nil {
 		return PackageManifest{}, err
