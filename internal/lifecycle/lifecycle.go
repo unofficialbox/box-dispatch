@@ -266,10 +266,8 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 			entries = append(entries, spec.componentType+":"+key)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "folder-template.md")); err == nil && manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) {
+	if manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) {
 		entries = append(entries, manifest.Box.Workspace.ComponentType+":"+manifest.Box.Workspace.DisplayName)
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
 	for _, capability := range manifest.Box.Capabilities {
 		if !manifest.CapabilityEnabled(capability.ComponentType, selection) || capability.Source == "" || capability.DisplayName == "" {

@@ -332,6 +332,24 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	}
 }
 
+func TestBoxComponentsIncludeManifestWorkspaceWithoutMarkerFile(t *testing.T) {
+	manifest, err := solution.LoadBundled("clm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := boxComponentEntries(t.TempDir(), manifest, solution.ComponentSelection{
+		Mode:       "custom",
+		Selections: map[string]bool{"folder_structure": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := manifest.Box.Workspace.ComponentType + ":" + manifest.Box.Workspace.DisplayName
+	if !slices.Contains(entries, want) {
+		t.Fatalf("workspace component missing without marker file: got %#v, want %q", entries, want)
+	}
+}
+
 func TestBoxRequestBodyUnwrapsCLIEnvelope(t *testing.T) {
 	// `box request` wraps responses; parsing the envelope instead of the body
 	// made IDs come back empty and existing objects look absent.

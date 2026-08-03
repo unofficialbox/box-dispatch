@@ -67,6 +67,21 @@ Key implementation files:
 See [`BCL_ARTIFACT_CONTRACT.md`](BCL_ARTIFACT_CONTRACT.md) and
 [`examples/bcl/README.md`](examples/bcl/README.md).
 
+### Live deploy/reset validation
+
+On 2026-08-03, a minimal Box-only CLM package was built with `create_new` and only the
+folder-tree capability enabled. The run:
+
+- authenticated to Box through the saved CCG connection;
+- created one uniquely named workspace and nine child folders;
+- automatically wrote an audit record containing all 10 resource IDs; and
+- reset the deployment by recorded ID, deleting all 10 folders with zero remaining.
+
+The preflight also exposed a package-contract gap: the upstream CLM template does not include
+the old `config/box/folder-template.md` marker. The workspace is already fully declared in
+`dispatch.json`, so Box Dispatch now includes the enabled workspace directly from the
+manifest and no longer requires that redundant marker. A regression test covers this path.
+
 ### Agent tooling
 
 The development tooling is committed:
@@ -80,9 +95,10 @@ Keep these surfaces aligned when the workflow changes; `AGENTS.md` is canonical.
 
 ## Operational risks and follow-ups
 
-1. **Run a real reset smoke test.** Unit coverage is green, but Box Form browser deletion and
-   Salesforce destructive teardown still need validation against disposable live resources.
-   Review the preview carefully and use a non-production tenant/org.
+1. **Broaden the live reset smoke test.** The Box folder-tree deploy/audit/reset path is
+   proven. Box Form browser deletion and Salesforce destructive teardown still need
+   validation against disposable live resources. Review the preview carefully and use a
+   non-production tenant/org.
 2. **Reproduce the other machine's template-clone failure.** The public template repos do
    not require authentication. Re-run there and capture the now-visible Git error before
    changing credential helpers, URL rewrites, or proxy configuration.
@@ -107,13 +123,13 @@ Any output from `gofmt -l .` is a failure.
 ## Continuation point
 
 - **Current Status:** The launch shell, cleanup-safe reset flow, BCL import/export path, and
-  cross-agent tooling are implemented. The local checkout is aligned with both remote
-  branches; only this documentation refresh is expected to be uncommitted.
-- **Recommended Next Step:** Run a disposable end-to-end deploy and reset against Box, then
-  verify the audit record, previewed IDs, deletion results, and remaining/manual list.
-- **Why This Next:** Live provider behavior is the highest-risk boundary not fully proven by
-  the hermetic Go test suite.
-- **Expected Outcome:** A confirmed operator workflow for deployment rollback, plus exact
-  provider errors for any adapter that still needs hardening.
-- **Blockers:** A disposable Box workspace (and Salesforce org if that path is included) with
-  valid local credentials is required for the live smoke test.
+  cross-agent tooling are implemented. The Box folder deploy/audit/reset path is also proven
+  live with complete cleanup.
+- **Recommended Next Step:** Run a disposable Box Form deploy/reset through the authenticated
+  browser path, then test Salesforce destructive teardown in a disposable org.
+- **Why This Next:** These are the remaining live provider boundaries not proven by the
+  hermetic Go tests or the completed folder-tree smoke.
+- **Expected Outcome:** Confirmed cleanup behavior for the browser-backed and Salesforce
+  adapters, with exact errors for any path that still needs hardening.
+- **Blockers:** The browser test needs a signed-in non-production Box session; the Salesforce
+  test needs a selected authenticated disposable org.
