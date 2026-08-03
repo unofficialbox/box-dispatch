@@ -45,8 +45,10 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(source, "config", "box"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "config", "box", "spec.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"spec.json", "form-definition.json", "box-app-blueprint.md", "https-connectors.bcl"} {
+		if err := os.WriteFile(filepath.Join(source, "config", "box", name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, args := range [][]string{{"init"}, {"config", "user.email", "dispatch@example.com"}, {"config", "user.name", "Box Dispatch Test"}, {"add", "."}, {"commit", "-m", "fixture"}} {
 		cmd := exec.Command("git", args...)
@@ -73,5 +75,10 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, ".dispatch", "package.json")); err != nil {
 		t.Fatal("package manifest was not written")
+	}
+	for _, name := range []string{"form-definition.json", "box-app-blueprint.md", "https-connectors.bcl"} {
+		if _, err := os.Stat(filepath.Join(destination, "config", "box", name)); !os.IsNotExist(err) {
+			t.Fatalf("unsupported Box asset remains in package: %s", name)
+		}
 	}
 }

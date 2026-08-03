@@ -79,6 +79,12 @@ func Build(req PackageRequest) (PackageManifest, error) {
 	if loadErr != nil {
 		return PackageManifest{}, loadErr
 	}
+	if writeErr := solution.WriteManifest(req.Destination, solutionManifest); writeErr != nil {
+		return PackageManifest{}, writeErr
+	}
+	if pruneErr := pruneUnsupportedBoxAssets(req.Destination); pruneErr != nil {
+		return PackageManifest{}, pruneErr
+	}
 	if req.BoxComponents.Mode != "" || req.BoxStrategy != "" {
 		settings, loadErr := solution.ReadDeploymentSettings(req.Destination, solutionManifest.DeploymentConfig)
 		if loadErr != nil {
@@ -122,6 +128,21 @@ func Build(req PackageRequest) (PackageManifest, error) {
 		return PackageManifest{}, err
 	}
 	return manifest, nil
+}
+
+func pruneUnsupportedBoxAssets(root string) error {
+	for _, reference := range []string{
+		"config/box/form-definition.bcl",
+		"config/box/form-definition.json",
+		"config/box/box-app-blueprint.md",
+		"config/box/https-connectors.bcl",
+		"config/box/https-connectors.json",
+	} {
+		if err := os.Remove(filepath.Join(root, filepath.FromSlash(reference))); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func pruneUnselected(root string, components []string) error {

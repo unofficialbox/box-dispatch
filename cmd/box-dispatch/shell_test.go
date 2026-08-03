@@ -796,12 +796,12 @@ func TestDeployedAssetsIncludesExistingConfiguration(t *testing.T) {
 			},
 			// Configuration already in the tenant: created earlier, so the deploy
 			// records no ID, but it must still show as an existing row.
-			Present: []string{"Metadata Template:clmDocument", "Doc Gen Template:contract.docx", "Box App:CLM"},
+			Present: []string{"Metadata Template:clmDocument", "Doc Gen Template:contract.docx"},
 		},
 	}}
 	assets := m.deployedAssets()
-	if len(assets) != 4 {
-		t.Fatalf("deployedAssets = %d, want 4 (1 created + 3 existing): %+v", len(assets), assets)
+	if len(assets) != 3 {
+		t.Fatalf("deployedAssets = %d, want 3 (1 created + 2 existing): %+v", len(assets), assets)
 	}
 	var created, existing int
 	kinds := map[string]string{}
@@ -813,14 +813,11 @@ func TestDeployedAssetsIncludesExistingConfiguration(t *testing.T) {
 		}
 		kinds[a.ref.Component] = a.ref.Kind
 	}
-	if created != 1 || existing != 3 {
-		t.Fatalf("created=%d existing=%d, want 1 and 3", created, existing)
+	if created != 1 || existing != 2 {
+		t.Fatalf("created=%d existing=%d, want 1 and 2", created, existing)
 	}
 	if kinds["Metadata Template:clmDocument"] != "metadata_template" {
 		t.Fatalf("existing metadata kind = %q, want metadata_template", kinds["Metadata Template:clmDocument"])
-	}
-	if kinds["Box App:CLM"] != "app" {
-		t.Fatalf("existing app kind = %q, want app", kinds["Box App:CLM"])
 	}
 }
 

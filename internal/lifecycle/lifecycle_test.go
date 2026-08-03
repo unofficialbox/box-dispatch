@@ -101,9 +101,9 @@ func TestBoxComponentsFollowDeploymentDependencyOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	components := []string{"Box App:App", "Metadata Template:Contract", "Folder Structure:Workspace", "AI Agent:Agent"}
+	components := []string{"Box Hub:Hub", "Metadata Template:Contract", "Folder Structure:Workspace", "AI Agent:Agent"}
 	slices.SortStableFunc(components, func(a, b string) int { return manifest.Rank(a) - manifest.Rank(b) })
-	want := []string{"Folder Structure:Workspace", "Metadata Template:Contract", "AI Agent:Agent", "Box App:App"}
+	want := []string{"Folder Structure:Workspace", "Metadata Template:Contract", "AI Agent:Agent", "Box Hub:Hub"}
 	if !slices.Equal(components, want) {
 		t.Fatalf("ordered components = %#v, want %#v", components, want)
 	}
@@ -120,77 +120,24 @@ func TestCLMDeploymentOrder(t *testing.T) {
 		"Doc Gen Template",
 		"Extract Configuration",
 		"AI Agent",
-		"HTTPS Connector",
-		"Box Form",
 		"Automate Workflow",
 		"Box Hub",
 		"Sample Content",
-		"Box App",
 	}
 	if !slices.Equal(manifest.Box.ComponentOrder, want) {
 		t.Fatalf("deployment order = %#v, want %#v", manifest.Box.ComponentOrder, want)
 	}
 }
 
-func TestCLMPrivateSurfacesHaveDeployAdapters(t *testing.T) {
+func TestCLMExcludesCapabilitiesWithoutPublicAPIs(t *testing.T) {
 	manifest, err := solution.Load(testCLMPackage(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, componentType := range []string{"Box Form", "Box App"} {
-		capability, found := manifest.Capability(componentType)
-		if !found || capability.API != "private" || capability.Handler == "" || !slices.Contains(capability.Operations, "deploy") {
-			t.Fatalf("%s private adapter = %#v", componentType, capability)
+	for _, component := range []string{"Box Form", "Box App", "HTTPS Connector"} {
+		if _, found := manifest.Capability(component); found {
+			t.Fatalf("%s must not be included without a public API", component)
 		}
-	}
-}
-
-func TestValidatePrivateSurfacesAreDeployableWithoutBrowser(t *testing.T) {
-	root := testCLMPackage(t)
-	manifest, err := solution.Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings, err := solution.ReadDeploymentSettings(root, manifest.DeploymentConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Real packages get a run_id at build time; supply a stable one so the
-	// create_new naming strategy resolves.
-	settings.Box.RunID = "20260101T000000Z"
-	item := &Item{Provider: "box"}
-	// Must not touch the browser. The Box Form is hidden while boxFormEnabled is
-	// off, so it is not classified at all; the Box App is demoted to manual
-	// because its Meteor deploy path is deprecated (boxAppMeteorDeploySupported).
-	if err := validateBoxPrivateAdapters(root, manifest, settings.Box, settings.Box.Components, item); err != nil {
-		t.Fatal(err)
-	}
-	const form, app = "Box Form:New Contract Request", "Box App:Contract Lifecycle Management"
-	if boxFormEnabled {
-		if !slices.Contains(item.DeployableComponents, form) {
-			t.Fatalf("Box Form not marked deployable: %+v", item.DeployableComponents)
-		}
-	} else {
-		for _, bucket := range [][]string{item.DeployableComponents, item.Missing, item.Present} {
-			if slices.Contains(bucket, form) {
-				t.Fatalf("Box Form must not be surfaced while disabled: %+v", bucket)
-			}
-		}
-	}
-	if boxAppMeteorDeploySupported {
-		if !slices.Contains(item.DeployableComponents, app) {
-			t.Fatalf("Box App should be deployable while Meteor is supported: %+v", item.DeployableComponents)
-		}
-	} else {
-		if slices.Contains(item.DeployableComponents, app) {
-			t.Fatalf("Box App must not be auto-deployable while Meteor is deprecated: %+v", item.DeployableComponents)
-		}
-		if !slices.Contains(item.Missing, app) {
-			t.Fatalf("Box App should be tracked as a manual (missing) component: %+v", item.Missing)
-		}
-	}
-	if slices.Contains(item.Present, app) {
-		t.Fatalf("Box App should not be reported present without inspection: %+v", item.Present)
 	}
 }
 
@@ -311,14 +258,12 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	}
 	write("ai-agent-specs.json", `{"agents":[{"key":"risk","name":"Risk Agent"}]}`)
 	write("automate-workflows.json", `{"workflows":[{"key":"intake","name":"Intake"}]}`)
-	write("https-connectors.json", `{"connectors":[{"key":"salesforce","name":"Salesforce"}]}`)
 	write("metadata-templates.json", `{"templates":[{"templateKey":"contract","displayName":"Contract"}]}`)
 	write("docgen-template-data.json", `{"approvalMemo":{}}`)
 	write("extract-field-prompts.json", `{"contractIntake":{}}`)
-	for _, name := range []string{"box-app-blueprint.md", "folder-template.md", "form-definition.json", "hub-blueprint.md"} {
+	for _, name := range []string{"folder-template.md", "hub-blueprint.md"} {
 		write(name, "# Blueprint")
 	}
-	write("form-definition.json", `{}`)
 	manifest, err := solution.LoadBundled("clm")
 	if err != nil {
 		t.Fatal(err)
@@ -327,8 +272,8 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 12 {
-		t.Fatalf("got %d Box components, want 12: %#v", len(entries), entries)
+	if len(entries) != 9 {
+		t.Fatalf("got %d Box components, want 9: %#v", len(entries), entries)
 	}
 }
 
@@ -373,26 +318,5 @@ func TestBoxRequestBodyUnwrapsCLIEnvelope(t *testing.T) {
 	body, err = boxRequestBody(plain, "GET", "/enterprise_hubs")
 	if err != nil || string(body) != string(plain) {
 		t.Fatalf("plain output should pass through, got %q err %v", body, err)
-	}
-}
-
-func TestPrivateSurfaceScriptIsolatesFormAndAppFailures(t *testing.T) {
-	script := boxPrivateBrowserScript(`{"operation":"deploy"}`)
-	// Each surface must catch its own error, so a failing Box App cannot discard
-	// a Box Form that was actually created and leave it unrecorded.
-	for _, want := range []string{
-		`if(request.form){try{`,
-		`if(request.app){try{`,
-		`catch(error){result.form=`,
-		`catch(error){result.app=`,
-	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("injected script is missing %q", want)
-		}
-	}
-	// The template error should explain the real limitation rather than implying
-	// the operator should go and create a template app.
-	if !strings.Contains(script, "no portable Box App definition") {
-		t.Fatal("template failure should explain that the solution has no portable app definition")
 	}
 }

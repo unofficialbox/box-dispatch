@@ -2572,15 +2572,9 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 	rows := make([]string, 0, len(m.boxCapabilities))
 	for i, capability := range m.boxCapabilities {
 		enabled := m.boxCapabilitySelected(capability)
-		// The Box App's only adapter is the deprecated Meteor app-API, so it is a
-		// manual configuration step (like the HTTPS Connector), not an
-		// auto-deployed component — surface it as CONFIGURATION, not READY.
-		autoDeploy := capability.Handler != "" &&
-			!(capability.Handler == lifecycle.BoxAppHandler && !lifecycle.BoxAppDeploysAutomatically())
+		autoDeploy := capability.Handler != ""
 		status := strings.ToUpper(capability.API)
 		switch {
-		case capability.Handler == lifecycle.BoxAppHandler && !lifecycle.BoxAppDeploysAutomatically():
-			status = "CONFIGURATION"
 		case autoDeploy:
 			status = "READY"
 		case capability.API == "public":
@@ -2889,13 +2883,11 @@ func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 		action = activePane.Copy().Width(width - 4).Render(m.renderDeployConfirm(width - 8))
 	}
 	if m.deployStarted {
-		// Box Apps are provisioned through the browser, which may raise a Box
-		// sign-in window and wait for it before the deploy continues.
 		activity := m.renderActivity(width - 4)
 		if activity == "" {
 			activity = m.spinner.View() + " Deploying provider configuration..."
 		}
-		action = activity + "\n" + dimStyle.Render("If a Box sign-in window opens, complete it and the deployment continues.")
+		action = activity
 	} else if m.deployDone {
 		action = lipgloss.NewStyle().Bold(true).Foreground(green).Render("Deployment run complete")
 		if m.deploymentAuditPath == "" {
@@ -2941,7 +2933,7 @@ func (m rootShellModel) deployedResources() []lifecycle.ResourceReference {
 // deployedAsset pairs a resource reference with whether this run created it. The
 // deploy adapters only record IDs for components they create, so already-present
 // configuration (metadata templates, Doc Gen templates, AI agents, hubs, the
-// Box Form/App) carries no ID — but the operator still wants to see it in the
+// configuration carries no ID — but the operator still wants to see it in the
 // post-deploy table. Those are surfaced from the validation Present list as
 // "existing" rows so the table reflects the whole solution, not just new files.
 type deployedAsset struct {
@@ -2999,14 +2991,8 @@ func kindForComponent(component string) string {
 		return "extract"
 	case "Box Hub":
 		return "hub"
-	case "Box Form":
-		return "form"
-	case "Box App":
-		return "app"
 	case "Automate Workflow":
 		return "automate_workflow"
-	case "HTTPS Connector":
-		return "https_connector"
 	}
 	return strings.ReplaceAll(strings.ToLower(componentType(component)), " ", "_")
 }

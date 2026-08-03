@@ -25,12 +25,9 @@
       "Doc Gen Template",
       "Extract Configuration",
       "AI Agent",
-      "HTTPS Connector",
-      "Box Form",
       "Automate Workflow",
       "Box Hub",
-      "Sample Content",
-      "Box App"
+      "Sample Content"
     ],
     "workspace": {
       "component_type": "Folder Structure",
@@ -71,11 +68,8 @@
       {"id": "docgen_template", "component_type": "Doc Gen Template", "enabled_by_default": true, "api": "public", "handler": "box.docgen-template", "operations": ["validate", "deploy"]},
       {"id": "extract_configuration", "component_type": "Extract Configuration", "enabled_by_default": true, "api": "public", "handler": "box.ai-extract", "operations": ["validate", "deploy"]},
       {"id": "ai_agent", "component_type": "AI Agent", "enabled_by_default": true, "api": "public", "handler": "box.ai-agent", "operations": ["validate", "deploy"]},
-      {"id": "https_connector", "component_type": "HTTPS Connector", "enabled_by_default": true, "api": "configuration", "operations": ["package"]},
-      {"id": "box_form", "component_type": "Box Form", "display_name": "New Contract Request", "source": "form-definition.json", "enabled_by_default": true, "api": "private", "handler": "box.private-form", "operations": ["validate", "deploy"]},
       {"id": "automate_workflow", "component_type": "Automate Workflow", "enabled_by_default": true, "api": "public", "handler": "box.automate-workflow", "operations": ["validate"]},
-      {"id": "box_hub", "component_type": "Box Hub", "display_name": "Acme Contract Clause Library", "source": "hub-blueprint.md", "enabled_by_default": true, "api": "public", "handler": "box.hub", "operations": ["validate", "deploy"]},
-      {"id": "box_app", "component_type": "Box App", "display_name": "Contract Lifecycle Management", "source": "box-app-blueprint.md", "enabled_by_default": true, "api": "private", "handler": "box.private-app", "template": "Contract Lifecycle Management", "operations": ["validate", "deploy"]}
+      {"id": "box_hub", "component_type": "Box Hub", "display_name": "Acme Contract Clause Library", "source": "hub-blueprint.md", "enabled_by_default": true, "api": "public", "handler": "box.hub", "operations": ["validate", "deploy"]}
     ]
   }
 }

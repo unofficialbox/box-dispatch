@@ -292,6 +292,20 @@ func WriteBundled(root, templateID string) error {
 	return err
 }
 
+// WriteManifest persists the normalized package contract. Package builders use
+// this after loading a cloned template so capabilities without public APIs
+// cannot re-enter the product through a stale upstream dispatch.json.
+func WriteManifest(root string, manifest Manifest) error {
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "dispatch.json"), append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write solution manifest: %w", err)
+	}
+	return nil
+}
+
 func IsUnavailable(err error) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
@@ -362,7 +376,42 @@ func parse(data []byte, source string) (Manifest, error) {
 	if manifest.SchemaVersion == "" || manifest.TemplateID == "" {
 		return Manifest{}, fmt.Errorf("%s is missing schema_version or template_id", source)
 	}
-	return manifest, nil
+	return publicAPICapabilitiesOnly(manifest), nil
+}
+
+func publicAPICapabilitiesOnly(manifest Manifest) Manifest {
+	capabilities := make([]Capability, 0, len(manifest.Box.Capabilities))
+	componentTypes := map[string]bool{}
+	capabilityIDs := map[string]bool{}
+	for _, capability := range manifest.Box.Capabilities {
+		if !strings.EqualFold(strings.TrimSpace(capability.API), "public") {
+			continue
+		}
+		capabilities = append(capabilities, capability)
+		componentTypes[capability.ComponentType] = true
+		capabilityIDs[manifest.CapabilityID(capability)] = true
+	}
+	manifest.Box.Capabilities = capabilities
+
+	order := make([]string, 0, len(manifest.Box.ComponentOrder))
+	for _, componentType := range manifest.Box.ComponentOrder {
+		if componentTypes[componentType] {
+			order = append(order, componentType)
+		}
+	}
+	manifest.Box.ComponentOrder = order
+
+	for id := range manifest.Box.DeploymentDefaults.ComponentStrategies {
+		if !capabilityIDs[id] {
+			delete(manifest.Box.DeploymentDefaults.ComponentStrategies, id)
+		}
+	}
+	for id := range manifest.Box.DeploymentDefaults.Components.Selections {
+		if !capabilityIDs[id] {
+			delete(manifest.Box.DeploymentDefaults.Components.Selections, id)
+		}
+	}
+	return manifest
 }
 
 func packageTemplateID(root string) (string, error) {

@@ -4,8 +4,8 @@
 
 - **Date:** 2026-08-03
 - **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
-- **Branch:** `restore-launch-shell` at `e77db96`; local `main`, `origin/main`, and
-  `origin/restore-launch-shell` point at the same commit.
+- **Branch:** `restore-launch-shell`; use `git log --oneline --decorate -5` for the current
+  tip rather than relying on a handoff-embedded commit hash.
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26.
 - **Working tree at handoff review:** clean before this documentation refresh.
 
@@ -38,9 +38,11 @@ Reset/teardown is implemented rather than pending:
   name before deletion starts.
 - Box resources are deleted strictly by recorded ID, in dependency-safe order, with the
   workspace folder last. Folder ID `0` is always refused.
-- Box files, folders, metadata templates, AI agents, hubs, and Doc Gen templates use the
-  provider API. Box Forms use the authenticated browser path. Box Apps remain an explicit
-  manual step while the old Meteor mutation path is disabled.
+- Box files, folders, metadata templates, AI agents, hubs, and Doc Gen templates use public
+  provider APIs. Capabilities without a public API are excluded from the product surface.
+- Box Forms, Box Apps, and Box HTTPS Connectors are absent from manifests, packaging,
+  validation, deployment, and reset. Their missing public lifecycle APIs are recorded in
+  [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
 - Salesforce metadata teardown uses a generated destructive-changes deployment.
 - Unsupported providers and resource types are reported as remaining/manual instead of
   being silently treated as deleted.
@@ -95,20 +97,19 @@ Keep these surfaces aligned when the workflow changes; `AGENTS.md` is canonical.
 
 ## Operational risks and follow-ups
 
-1. **Broaden the live reset smoke test.** The Box folder-tree deploy/audit/reset path is
-   proven. Box Form browser deletion and Salesforce destructive teardown still need
-   validation against disposable live resources. Review the preview carefully and use a
-   non-production tenant/org.
+1. **Validate Salesforce reset.** The Box folder-tree deploy/audit/reset path is proven.
+   Salesforce destructive teardown still needs validation against a disposable org.
 2. **Reproduce the other machine's template-clone failure.** The public template repos do
    not require authentication. Re-run there and capture the now-visible Git error before
    changing credential helpers, URL rewrites, or proxy configuration.
-3. **Manual cleanup remains intentional.** Box Apps, Automate workflows, and providers with
-   no delete adapter remain visible in reset results for operator cleanup.
+3. **Partial public APIs remain explicit.** Automate workflows can be inspected through the
+   public API but cannot be created or deleted; the gap is tracked in
+   [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
 4. **Old `.env` values remain in Git history.** The file is no longer tracked and no live
    tokens were identified, but history rewriting would require explicit approval and a
    coordinated force-push.
-5. **The branch name is historical.** `restore-launch-shell` currently matches `main`; do not
-   follow older fast-forward or merge instructions from previous handoff text.
+5. **The branch name is historical.** `restore-launch-shell` is the active work branch; do
+   not follow older fast-forward or merge instructions from previous handoff text.
 
 ## Verification gate
 
@@ -125,11 +126,9 @@ Any output from `gofmt -l .` is a failure.
 - **Current Status:** The launch shell, cleanup-safe reset flow, BCL import/export path, and
   cross-agent tooling are implemented. The Box folder deploy/audit/reset path is also proven
   live with complete cleanup.
-- **Recommended Next Step:** Run a disposable Box Form deploy/reset through the authenticated
-  browser path, then test Salesforce destructive teardown in a disposable org.
-- **Why This Next:** These are the remaining live provider boundaries not proven by the
-  hermetic Go tests or the completed folder-tree smoke.
-- **Expected Outcome:** Confirmed cleanup behavior for the browser-backed and Salesforce
-  adapters, with exact errors for any path that still needs hardening.
-- **Blockers:** The browser test needs a signed-in non-production Box session; the Salesforce
-  test needs a selected authenticated disposable org.
+- **Recommended Next Step:** Test Salesforce destructive teardown in a disposable org.
+- **Why This Next:** It is the remaining live reset boundary not proven by the hermetic Go
+  tests or the completed Box folder-tree smoke.
+- **Expected Outcome:** Confirmed Salesforce cleanup behavior with exact errors for any path
+  that still needs hardening.
+- **Blockers:** The Salesforce test needs a selected authenticated disposable org.
