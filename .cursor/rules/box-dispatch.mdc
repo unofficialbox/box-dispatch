@@ -1,0 +1,57 @@
+---
+description: box-dispatch — Go TUI launch shell; build/verify gate, TTY gate, and repo conventions
+globs:
+alwaysApply: true
+---
+
+# box-dispatch — project rules
+
+`box-dispatch` is a Go CLI (`github.com/unofficialbox/box-dispatch`, `go 1.26`) whose default
+mode is a full-screen **Bubble Tea / lipgloss / huh** "solution launch shell" that packages
+and deploys Box + partner (Salesforce, Databricks, AWS Bedrock AgentCore) stacks. Running with
+no subcommand **in a real TTY** starts the wizard; scripted or `--json` prints a plain report.
+
+The canonical, fuller guide is **`AGENTS.md`** at the repo root — read it. This rule is the
+always-on summary.
+
+## Verification gate — run before every commit
+
+All four must be clean; do not report done or commit until they pass:
+
+```bash
+gofmt -l . && go build ./... && go vet ./... && go test ./...
+```
+
+- `gofmt -l .` printing any path is a **failure** — fix with `gofmt -w <file>`. It's the
+  authoritative check, not `go fmt`.
+- If `go test` fails, report the real failing output — never claim the suite is green when it
+  isn't. Tests are hermetic (no live provider/network calls).
+
+## TTY gate (don't chase a dead end)
+
+The shell launches only when stdout is a TTY and not `--json` (`cmd/box-dispatch/main.go`). You
+**cannot** drive the alt-screen TUI from a piped/non-interactive shell. Verify shell changes
+with `go test ./cmd/box-dispatch/...`, or use `go run ./cmd/box-dispatch check --json --offline`
+for a machine-readable check.
+
+## Conventions
+
+- Match surrounding idiom; this codebase favors small inline per-method helpers over broad
+  abstractions.
+- `internal/workspace/package.go` clones templates **non-interactively**
+  (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`, `Stdin=nil`) so a credential challenge
+  fails fast instead of hanging inside the shell — keep it that way.
+- Any teardown/delete work operates **by recorded resource ID only** (never name-matching) and
+  must refuse Box folder ID `"0"`.
+- Provider config is via env vars — see `.env.sample`. `.env` is gitignored; never commit
+  tokens.
+- The latest `HANDOFF_*.md` at the repo root has current branch state and pending features.
+
+## Map
+
+- `cmd/box-dispatch/main.go` — cobra root, TTY gate, `runLaunchShell()`.
+- `cmd/box-dispatch/shell.go` — shell model (`Update`/`View`, menus, deploy/package/history).
+- `internal/workspace/package.go` — template clone + component pruning.
+- `internal/lifecycle/` — deploy engine + Box/Salesforce backends + browser adapters.
+- `internal/audit/deployment.go` — deployment audit records.
+- `internal/bcl/`, `internal/engine/` — BCL import/export contract (`BCL_ARTIFACT_CONTRACT.md`).

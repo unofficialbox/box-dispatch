@@ -47,8 +47,9 @@ that thread:** have the user re-run the deploy on that machine and send the new 
 (it now surfaces git's real output), then clear the specific trigger (e.g.
 `gh auth setup-git`, unset a bad credential helper, or fix the proxy).
 
-## New agent skills (in `.claude/skills/`, commit these)
-Invoke with the Skill tool; each has a `SKILL.md`:
+## Agent tooling (cross-tool — commit these)
+
+**Claude Code skills** (`.claude/skills/`, invoke with the Skill tool; each has a `SKILL.md`):
 - **`verify-build`** — the Go quality gate to run before every commit/push/merge:
   `gofmt -l .` → `go build ./...` → `go vet ./...` → `go test ./...`. All must be clean.
 - **`launch-shell`** — how to build/run the TUI, and the **TTY gate** (why piped Bash gets a
@@ -58,6 +59,18 @@ Invoke with the Skill tool; each has a `SKILL.md`:
   real color emoji: force `termenv.TrueColor` (lipgloss strips color off-TTY) → capture ANSI
   → `ansi2html.py` (bundled) → headless-Chrome screenshot at 2×. Explains why `freeze` can't
   be used (resvg can't render Apple Color Emoji).
+
+**Codex / Cursor / cross-agent** (the above `.claude/skills/` are Claude-only — these carry
+the same knowledge to other tools):
+- **`AGENTS.md`** (repo root) — the cross-agent source of truth (read by Codex and any
+  `AGENTS.md`-aware tool). Covers the verification gate, build/run, the TTY gate, runtime
+  config, the repo map, and conventions; points at the `.claude/skills/` for the screenshot
+  pipeline detail.
+- **`.cursor/rules/box-dispatch.mdc`** — Cursor rule (`alwaysApply: true`) mirroring the
+  gate, TTY gate, and conventions, and referencing `AGENTS.md` for the full guide.
+
+Keep these three surfaces (skills, `AGENTS.md`, the Cursor rule) roughly in sync when
+conventions change — `AGENTS.md` is the canonical text.
 
 ## The big pending feature — "Reset demo environment" (teardown)
 A full implementation plan exists at
