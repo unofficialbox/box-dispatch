@@ -8,6 +8,31 @@
 
 This repo starts with a fast setup/check experience and expands toward scenario install and deployment workflows.
 
+## Launch behavior
+
+Running `box-dispatch` with no subcommand starts the full-screen solution launch shell when
+stdout is an interactive terminal:
+
+```bash
+box-dispatch
+```
+
+The shell packages, validates, deploys, audits, and resets solution stacks. When stdout is
+redirected or piped, the same no-subcommand invocation prints the plain connectivity report
+instead of starting the full-screen UI. Passing `--json` also selects machine-readable
+connectivity output.
+
+Use the explicit `check` command when connectivity validation is the intended operation:
+
+```bash
+box-dispatch check
+box-dispatch check --offline
+box-dispatch check --json
+```
+
+`box-dispatch check` uses its interactive progress UI in a TTY, `--offline` skips live
+provider calls, and `--json` is suitable for scripts and redirected output.
+
 ## First-time UX (FTUX)
 
 1. `box-dispatch check` (interactive by default)
@@ -105,7 +130,7 @@ Files are emitted during both `resolve` and `bootstrap` so they can feed cleanup
 
 ## Standardized import
 
-See the artifact contract for full import/export rules: [BCL_ARTIFACT_CONTRACT.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT.md)
+See the artifact contract for full import/export rules: [BCL_ARTIFACT_CONTRACT.md](BCL_ARTIFACT_CONTRACT.md)
 
 Use `box-dispatch import` as the single admin-facing entry point for loading deployment details:
 

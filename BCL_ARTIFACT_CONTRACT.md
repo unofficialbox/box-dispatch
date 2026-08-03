@@ -22,7 +22,7 @@ It covers:
   - `resolve`: `<generatedDir>/<scenario>/<provider>-artifacts.bcl`
   - `bootstrap`: `<generatedDir>/<scenario>/<provider>-artifacts.bcl`
 - Emission command path:
-  - built by `writeArtifactBundle(...)` in [internal/engine/artifacts.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/engine/artifacts.go)
+  - built by `writeArtifactBundle(...)` in [internal/engine/artifacts.go](internal/engine/artifacts.go)
   - file format via `bcl.WriteBCL(...)`
 - Artifacts currently emitted:
   - `box`: `box.folder`, `box.enterprise` when IDs exist in env
@@ -43,7 +43,7 @@ It covers:
 ## 3) Import contract (BCL -> runtime config)
 
 - Supported import entry point:
-  - [cmd/box-dispatch/import.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/cmd/box-dispatch/import.go)
+  - [cmd/box-dispatch/import.go](cmd/box-dispatch/import.go)
   - format is validated as `bcl` only
 - `internal/engine/import.go` performs:
   - file path check (`*.bcl`) or directory scan (`*artifacts.bcl`)
@@ -81,7 +81,7 @@ It covers:
 
 ## 5) Relevant references
 
-- [internal/bcl/bcl.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/bcl/bcl.go)
-- [internal/engine/artifacts.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/engine/artifacts.go)
-- [internal/engine/import.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/engine/import.go)
-- [README.md import section](/Users/massnerder/Developer/unofficialbox/box-dispatch/README.md)
+- [internal/bcl/bcl.go](internal/bcl/bcl.go)
+- [internal/engine/artifacts.go](internal/engine/artifacts.go)
+- [internal/engine/import.go](internal/engine/import.go)
+- [README.md import section](README.md#standardized-import)

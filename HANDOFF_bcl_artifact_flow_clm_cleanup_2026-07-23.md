@@ -16,20 +16,20 @@
 
 ## Flow file changes (`box-dispatch`)
 ### Artifact contract + CLI code
-- [BCL_ARTIFACT_CONTRACT.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT.md)
+- [BCL_ARTIFACT_CONTRACT.md](BCL_ARTIFACT_CONTRACT.md)
   - Canonical contract for BCL emit and import behavior.
-- [cmd/box-dispatch/import.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/cmd/box-dispatch/import.go)
+- [cmd/box-dispatch/import.go](cmd/box-dispatch/import.go)
   - `--format` now constrained to `bcl`.
   - Usage now references the single BCL contract for import.
-- [internal/engine/import.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/engine/import.go)
+- [internal/engine/import.go](internal/engine/import.go)
   - Removed support paths for non-BCL imports.
   - Supports `.bcl` single file and `*artifacts.bcl` directory import paths only.
   - Returns `unsupported import format` for anything else.
-- [README.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/README.md)
+- [README.md](README.md)
   - Updated section and linked to the unified BCL contract.
-- [internal/engine/artifacts.go](/Users/massnerder/Developer/unofficialbox/box-dispatch/internal/engine/artifacts.go)
+- [internal/engine/artifacts.go](internal/engine/artifacts.go)
   - Defines BCL artifact emit path and write behavior (`<provider>-artifacts.bcl`).
-- [BCL_ARTIFACT_CONTRACT_POINTER.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT_POINTER.md)
+- [BCL_ARTIFACT_CONTRACT_POINTER.md](BCL_ARTIFACT_CONTRACT_POINTER.md)
   - Compatibility pointer to the unified artifact contract.
 
 ## CLM conversion work in `box-bedrock-for-clm`
@@ -73,11 +73,11 @@
 - If any legacy JSON format parser needs to be restored later, it should be done intentionally and documented as a compatibility mode, not the default path.
 
 ## Artifact contract links
-- [BCL_ARTIFACT_CONTRACT.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT.md)
-- [BCL_ARTIFACT_CONTRACT_POINTER.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT_POINTER.md) (compatibility alias)
+- [BCL_ARTIFACT_CONTRACT.md](BCL_ARTIFACT_CONTRACT.md)
+- [BCL_ARTIFACT_CONTRACT_POINTER.md](BCL_ARTIFACT_CONTRACT_POINTER.md) (compatibility alias)
 
 ## Next-session checklist
-1. Read this handoff file and [BCL_ARTIFACT_CONTRACT.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT.md) start-to-finish before making changes.
+1. Read this handoff file and [BCL_ARTIFACT_CONTRACT.md](BCL_ARTIFACT_CONTRACT.md) start-to-finish before making changes.
 2. Confirm `box-dispatch resolve`/`bootstrap` emits `<provider>-artifacts.bcl` and `box-dispatch import` accepts it (`--force` if runtime exists).
 3. Verify CLM active config references point to `.bcl` files (no runtime `.json` expectations remain).
 4. Scan docs/scripts for any user-facing mentions of deprecated `*.json` or `*.tf.json` imports and remove if found.
