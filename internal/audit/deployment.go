@@ -85,7 +85,7 @@ func ExportDeployment(root string, before, after []lifecycle.Item, startedAt, co
 		Artifacts:           map[string]string{},
 		Providers:           providerRecords(before, after),
 	}
-	for _, relative := range []string{"dispatch.json", manifest.DeploymentConfig, ".dispatch/package.json"} {
+	for _, relative := range []string{solution.ManifestFile, manifest.DeploymentConfig, ".dispatch/package.json"} {
 		if digest, digestErr := fileDigest(filepath.Join(root, filepath.FromSlash(relative))); digestErr == nil {
 			record.Artifacts[relative] = digest
 		}

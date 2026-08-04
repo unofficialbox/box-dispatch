@@ -7,7 +7,6 @@ func TestOrderResourcesForTeardownDeletesLeavesBeforeContainers(t *testing.T) {
 		{Kind: "folder", Name: "workspace"},
 		{Kind: "file", Name: "sample.docx"},
 		{Kind: "hub", Name: "hub"},
-		{Kind: "form", Name: "intake form"},
 		{Kind: "metadata_template", Name: "contract"},
 		{Kind: "ai_agent", Name: "agent"},
 	}
@@ -20,10 +19,6 @@ func TestOrderResourcesForTeardownDeletesLeavesBeforeContainers(t *testing.T) {
 	// that a later step still expects to delete.
 	if got[len(got)-1] != "folder" {
 		t.Fatalf("folder must be deleted last, got order %v", got)
-	}
-	// Private browser surfaces go first.
-	if got[0] != "form" {
-		t.Fatalf("private surfaces must be removed first, got order %v", got)
 	}
 	if len(got) != len(resources) {
 		t.Fatalf("ordering dropped resources: %v", got)
@@ -98,57 +93,5 @@ func TestDestroyProviderReportsUnsupportedProvider(t *testing.T) {
 	}
 	if result.Deleted() != 0 {
 		t.Fatal("nothing may be deleted for an unsupported provider")
-	}
-}
-
-func TestPrivateDestroyNeverCountsAbsentAsDeleted(t *testing.T) {
-	// An unauthenticated Box session makes every private surface look "absent"
-	// (the app tier answers 200 with an empty list instead of 401). Reporting
-	// that as deleted would claim a reset that removed nothing.
-	var absent TeardownOutcome
-	applyPrivateDestroyOutcome(&absent, "absent", "Box Form")
-	if absent.Deleted {
-		t.Fatal("an absent surface must never be reported as deleted")
-	}
-	if absent.Error == "" {
-		t.Fatal("an absent surface must explain that nothing was removed")
-	}
-
-	var deleted TeardownOutcome
-	applyPrivateDestroyOutcome(&deleted, "deleted", "Box Form")
-	if !deleted.Deleted || deleted.Error != "" {
-		t.Fatalf("a confirmed delete should be recorded: %+v", deleted)
-	}
-
-	var failed TeardownOutcome
-	applyPrivateDestroyOutcome(&failed, "Box App delete failed: boom", "Box App")
-	if failed.Deleted || failed.Error == "" {
-		t.Fatalf("a failure must not be recorded as deleted: %+v", failed)
-	}
-
-	var empty TeardownOutcome
-	applyPrivateDestroyOutcome(&empty, "", "Box App")
-	if empty.Deleted || empty.Error == "" {
-		t.Fatalf("an empty outcome must not be recorded as deleted: %+v", empty)
-	}
-}
-
-func TestBrowserIsOnlyNeededForPrivateSurfaces(t *testing.T) {
-	// A Box deploy of public-API components must never warm a browser.
-	public := []ResourceReference{
-		{Kind: "folder", ID: "1"}, {Kind: "file", ID: "2"},
-		{Kind: "metadata_template", ID: "k"}, {Kind: "hub", ID: "3"},
-		{Kind: "ai_agent", ID: "4"}, {Kind: "docgen_template", ID: "5"},
-	}
-	if boxPrivateResourcesPresent(public) {
-		t.Fatal("public-API resources must not require the browser")
-	}
-	for _, kind := range []string{"form", "app"} {
-		if !boxPrivateResourcesPresent([]ResourceReference{{Kind: kind, ID: "1"}}) {
-			t.Fatalf("%s must require the browser", kind)
-		}
-	}
-	if boxPrivateResourcesPresent(nil) {
-		t.Fatal("no resources must not require the browser")
 	}
 }

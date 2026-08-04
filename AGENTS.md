@@ -74,11 +74,13 @@ The checker looks for: Box `BOX_ACCESS_TOKEN`; Salesforce `SF_ALIAS` (or
 - `internal/workspace/package.go` — template clone + component pruning. The clone runs
   **non-interactively** (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`, `Stdin=nil`) so a
   credential challenge fails fast instead of hanging invisibly inside the shell. Keep it so.
-- `internal/lifecycle/` — deploy engine + Box/Salesforce backends + browser adapters.
+- `internal/lifecycle/` — deploy engine + public Box/Salesforce backends.
 - `internal/audit/deployment.go` — deployment audit records (`ListDeployments`).
 - `internal/bcl/`, `internal/engine/` — BCL is the single import/export artifact contract
   (`BCL_ARTIFACT_CONTRACT.md`).
-- `internal/{checker,config,solution,boxconn,providers,shellstate,model}` — supporting packages.
+- `internal/solution/` — typed BCL solution/deployment configuration, bundled manifests,
+  and BCL-only package configuration validation.
+- `internal/{checker,config,boxconn,providers,shellstate,model}` — supporting packages.
 
 ## Conventions
 

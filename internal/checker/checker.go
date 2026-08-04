@@ -184,6 +184,18 @@ func runCommandOutput(ctx context.Context, name string, args ...string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
+// decodeCLIJSON tolerates CLI notices written before a JSON response. The
+// Salesforce CLI currently prints update warnings to stderr even when --json
+// is requested; CombinedOutput preserves that warning ahead of the payload.
+func decodeCLIJSON(out string, target any) error {
+	clean := ansiEscape.ReplaceAllString(out, "")
+	start := strings.IndexByte(clean, '{')
+	if start < 0 {
+		return fmt.Errorf("CLI output did not contain JSON")
+	}
+	return json.NewDecoder(strings.NewReader(clean[start:])).Decode(target)
+}
+
 // boxUserFields is the field set both transports request; enterprise is not
 // part of the default projection and has to be named explicitly.
 const boxUserFields = "id,login,name,enterprise"
@@ -315,7 +327,10 @@ func connectivitySalesforce() (bool, string, ProviderDiscovery) {
 			InstanceURL string `json:"instanceUrl"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(out), &payload); err == nil && payload.Result.Username != "" {
+	if err := decodeCLIJSON(out, &payload); err != nil {
+		return false, "sf org display returned unreadable JSON", discovery
+	}
+	if payload.Result.Username != "" {
 		discovery.Identity = payload.Result.Username
 		discovery.Profile = payload.Result.Alias
 		discovery.Host = payload.Result.InstanceURL
@@ -347,7 +362,7 @@ func salesforceOptions() []string {
 			} `json:"scratchOrgs"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+	if err := decodeCLIJSON(out, &payload); err != nil {
 		return nil
 	}
 	options := make([]string, 0, len(payload.Result.NonScratchOrgs)+len(payload.Result.ScratchOrgs))
@@ -615,7 +630,7 @@ func salesforceCLIError(out string) string {
 	var payload struct {
 		Message string `json:"message"`
 	}
-	if json.Unmarshal([]byte(clean), &payload) == nil && strings.TrimSpace(payload.Message) != "" {
+	if decodeCLIJSON(clean, &payload) == nil && strings.TrimSpace(payload.Message) != "" {
 		return payload.Message
 	}
 	return firstLine(clean)

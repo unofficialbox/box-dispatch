@@ -212,7 +212,6 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 	}{
 		{"ai-agent-specs", "agents", "AI Agent"},
 		{"automate-workflows", "workflows", "Automate Workflow"},
-		{"https-connectors", "connectors", "HTTPS Connector"},
 		{"metadata-templates", "templates", "Metadata Template"},
 	}
 	for _, spec := range arrays {
@@ -266,10 +265,8 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 			entries = append(entries, spec.componentType+":"+key)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "folder-template.md")); err == nil && manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) {
+	if manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) {
 		entries = append(entries, manifest.Box.Workspace.ComponentType+":"+manifest.Box.Workspace.DisplayName)
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
 	for _, capability := range manifest.Box.Capabilities {
 		if !manifest.CapabilityEnabled(capability.ComponentType, selection) || capability.Source == "" || capability.DisplayName == "" {
@@ -437,10 +434,6 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 	}
 	if publicErr := validateBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, &item); publicErr != nil {
 		item.Status, item.Detail = StatusFailed, publicErr.Error()
-		return item, nil
-	}
-	if privateErr := validateBoxPrivateAdapters(root, manifest, settings.Box, selection, &item); privateErr != nil {
-		item.Status, item.Detail = StatusFailed, privateErr.Error()
 		return item, nil
 	}
 	for _, component := range item.Missing {
@@ -675,18 +668,8 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 		item.Status, item.Detail = StatusFailed, err.Error()
 		return item
 	}
-	manifest, settings, selection := box.manifest, box.settings, box.selection
+	manifest, selection := box.manifest, box.selection
 	target, api, ctx := box.target, box.api, box.ctx
-	// Box Forms and Apps are provisioned through a browser after the public
-	// components. Check that session up front so an unsigned-in operator is told
-	// before anything is created, rather than half way through the deploy. Only
-	// solutions that actually include those surfaces need a browser at all.
-	if boxPrivateSurfacesPlanned(root, box, item.DeployableComponents) {
-		if sessionErr := ensureBoxPrivateSession(); sessionErr != nil {
-			item.Status, item.Detail = StatusFailed, sessionErr.Error()
-			return item
-		}
-	}
 	workspace := manifest.Box.Workspace
 	deployed := []string{}
 	folderComponent := workspace.ComponentType + ":" + workspace.DisplayName
@@ -825,22 +808,8 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 	}
 	deployed = append(deployed, publicDeployed...)
 	item.Resources = append(item.Resources, publicResources...)
-	if boxPrivateSurfacesPlanned(root, box, item.DeployableComponents) {
-		report.step("Provisioning Box App through the authenticated browser")
-	}
-	privateDeployed, privateResources, privateErr := deployBoxPrivateAdapters(root, manifest, settings.Box, selection, item.DeployableComponents, workspaceID, item.Resources)
-	deployed = append(deployed, privateDeployed...)
-	item.Resources = append(item.Resources, privateResources...)
-	// Record what succeeded before reporting any failure. Returning early here
-	// discarded every public component that had already been created, so the
-	// run reported nothing deployed while the objects existed in Box.
 	for _, component := range deployed {
 		classifyBoxComponent(&item, component, true, false)
-	}
-	if privateErr != nil {
-		item.Status = StatusFailed
-		item.Detail = fmt.Sprintf("Deployed %d Box components, then failed: %s", len(deployed), privateErr.Error())
-		return item
 	}
 	item.Deployable = len(item.DeployableComponents) > 0
 	if len(item.Missing) == 0 {

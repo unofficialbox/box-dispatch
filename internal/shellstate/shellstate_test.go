@@ -75,6 +75,29 @@ func TestSolutionPlanRoundTripAsBCL(t *testing.T) {
 	}
 }
 
+func TestUISettingsRoundTripAsBCL(t *testing.T) {
+	root := isolateRoot(t)
+	want := config.UISettings{BoxComponentVisibility: map[string]bool{
+		"folder_structure": true,
+		"box_form":         false,
+	}}
+	if err := SaveUISettings(want); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, stateDirName, uiSettingsBCL)
+	if _, err := bcl.LoadBCL(path); err != nil {
+		t.Fatalf("written file is not valid BCL: %v", err)
+	}
+	got, err := LoadUISettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.BoxComponentVisibility) != 2 || !got.BoxComponentVisibility["folder_structure"] || got.BoxComponentVisibility["box_form"] {
+		t.Fatalf("round-trip mismatch: got %+v", got)
+	}
+}
+
 func TestLoadMigratesLegacyJSON(t *testing.T) {
 	root := isolateRoot(t)
 	// Only a legacy JSON file (under the old .windlass dir) exists; no .bcl yet.

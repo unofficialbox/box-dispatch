@@ -1,149 +1,144 @@
-# Handoff: box-dispatch launch-shell polish + teardown groundwork
+# Handoff: box-dispatch launch shell, BCL, and reset
 
-## Date / context
-- **Date:** 2026-08-03
+## Current state
+
+- **Date:** 2026-08-04
 - **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
-- **Branch:** `restore-launch-shell` (tip `1871d72`). `main` is at `4a55ac0`.
-- **Module:** `github.com/unofficialbox/box-dispatch`, `go 1.26`.
-- **What this is:** `box-dispatch` is a full-screen Bubble Tea / lipgloss / huh "solution
-  launch shell" that packages and deploys Box + partner (Salesforce / Databricks / AWS)
-  solution stacks. Run with no subcommand in a TTY → the wizard; scripted/`--json` → a plain
-  connectivity report.
+- **Branch:** `restore-launch-shell`; use `git log --oneline --decorate -5` for the current
+  tip rather than relying on a handoff-embedded commit hash.
+- **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26.
+- **Working tree at handoff review:** contains the current Salesforce connection, Box
+  capability visibility, and BCL solution-manifest migration; changes are not yet committed.
 
-## Branch / merge state
-- `main` is **2 commits behind** `restore-launch-shell`, and `main` **is an ancestor** of the
-  branch — a clean fast-forward is possible (no merge commit needed):
-  - `c4d027b chore: gitignore .env and add .env.sample template`
-  - `1871d72 fix: run template clone non-interactively so packaging can't hang`
-- To land them: `git checkout main && git merge --ff-only restore-launch-shell && git push`.
-  (Confirm with the user first — they drive merges to main.)
-- Working tree is clean except untracked `.claude/` (the new skills below + a personal
-  `settings.local.json`). **Commit the skills** (`.claude/skills/`); leave
-  `.claude/settings.local.json` untracked/personal.
+`box-dispatch` is a full-screen Bubble Tea/lipgloss/huh solution launch shell. With no
+subcommand, a real TTY starts the shell; redirected output or `--json` runs the plain
+connectivity report. Use `box-dispatch check` for an explicit connectivity check.
 
-## What landed this cycle (already committed/pushed to the branch)
-1. **Cleanup + parallel-history merge to reconcile with origin/main.** The branch was proven
-   to be the superset; add/add conflicts were resolved to "ours". Build + tests green.
-2. **README hero image.** `docs/landing.png` — a colored screenshot of the welcome screen
-   with a real punk-rock 🤘. Referenced under the `# box-dispatch` heading.
-3. **`.env` hygiene.** `.env` is now gitignored; `.env.sample` documents every provider env
-   var (Box / Salesforce / Databricks / AWS), marking secrets and setup-managed keys.
-   ⚠️ **Untracking does not scrub history** — old `.env` values still live in past commits.
-   Low sensitivity (no live tokens were in it), but if the user wants them gone it needs
-   `git filter-repo`/BFG + a force-push to `main`. Not done; needs explicit consent.
-4. **Packaging hang fix** (`internal/workspace/package.go:49`). The template clone inherited
-   the environment and could fall back to git's interactive
-   `Username for 'https://github.com':` prompt, which is invisible/unanswerable inside the
-   alt-screen shell → it hung forever (the blank `github.com/` line the user saw). Fixed to
-   run **non-interactively** (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`,
-   `cmd.Stdin=nil`) so it **fails fast with git's real output** instead of hanging.
+## Completed work
 
-### Open diagnostic thread (packaging)
-All four template repos (`box-bedrock-for-clm`, `-lifesciences`, `-citizen-services`,
-`box-bedrock-template`) are **public** — a clean machine needs no auth. So the prompt on the
-user's other machine was **machine-specific**: a git credential helper intercepting
-github.com, a corporate proxy returning 401, or an `insteadOf` URL rewrite. **Next action for
-that thread:** have the user re-run the deploy on that machine and send the new error message
-(it now surfaces git's real output), then clear the specific trigger (e.g.
-`gh auth setup-git`, unset a bad credential helper, or fix the proxy).
+### Launch shell and packaging
 
-## Agent tooling (cross-tool — commit these)
+- The windlass-era launch shell is restored as the default interactive experience and has
+  the current Box Dispatch styling, progress views, history, deployment results, and reset
+  flow.
+- Template cloning is non-interactive (`GIT_TERMINAL_PROMPT=0`,
+  `GCM_INTERACTIVE=Never`, and no stdin), so an authentication or proxy problem fails with
+  the real Git error instead of hanging inside the alt-screen UI.
+- `.env` is gitignored and `.env.sample` documents the provider configuration.
+- `docs/landing.png` is the current README hero image.
 
-**Claude Code skills** (`.claude/skills/`, invoke with the Skill tool; each has a `SKILL.md`):
-- **`verify-build`** — the Go quality gate to run before every commit/push/merge:
-  `gofmt -l .` → `go build ./...` → `go vet ./...` → `go test ./...`. All must be clean.
-- **`launch-shell`** — how to build/run the TUI, and the **TTY gate** (why piped Bash gets a
-  plain report, not the alt-screen UI) so an agent doesn't chase a dead end. Points to the
-  tests and the screenshot skill for non-interactive verification.
-- **`landing-screenshot`** — the non-obvious pipeline to regenerate `docs/landing.png` with a
-  real color emoji: force `termenv.TrueColor` (lipgloss strips color off-TTY) → capture ANSI
-  → `ansi2html.py` (bundled) → headless-Chrome screenshot at 2×. Explains why `freeze` can't
-  be used (resvg can't render Apple Color Emoji).
+### Reset demo environment
 
-**Codex / Cursor / cross-agent** (the above `.claude/skills/` are Claude-only — these carry
-the same knowledge to other tools):
-- **`AGENTS.md`** (repo root) — the cross-agent source of truth (read by Codex and any
-  `AGENTS.md`-aware tool). Covers the verification gate, build/run, the TTY gate, runtime
-  config, the repo map, and conventions; points at the `.claude/skills/` for the screenshot
-  pipeline detail.
-- **`.cursor/rules/box-dispatch.mdc`** — Cursor rule (`alwaysApply: true`) mirroring the
-  gate, TTY gate, and conventions, and referencing `AGENTS.md` for the full guide.
+Reset/teardown is implemented rather than pending:
 
-Keep these three surfaces (skills, `AGENTS.md`, the Cursor rule) roughly in sync when
-conventions change — `AGENTS.md` is the canonical text.
+- The welcome screen exposes **Reset demo environment** and deployment history rows can open
+  the reset preview.
+- Deployment audit records are persisted automatically and include the created resource IDs
+  teardown needs.
+- Reset previews the exact recorded inventory and requires the operator to type the package
+  name before deletion starts.
+- Box resources are deleted strictly by recorded ID, in dependency-safe order, with the
+  workspace folder last. Folder ID `0` is always refused.
+- Box files, folders, metadata templates, AI agents, hubs, and Doc Gen templates use public
+  provider APIs. Capabilities without a complete public lifecycle API remain in the catalog
+  as nondeployable metadata.
+- Box Forms, Box Apps, Box HTTPS Connectors, and Box Automate workflows are hidden by
+  default through `.dispatch/ui-settings.bcl`. An operator can reveal locked reference rows,
+  but these capabilities remain absent from packaging, validation, deployment, and reset.
+  Their API gaps are recorded in [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
+- Salesforce metadata teardown uses a generated destructive-changes deployment.
+- Unsupported providers and resource types are reported as remaining/manual instead of
+  being silently treated as deleted.
+- Per-resource failures do not abort the rest of the reset; the result screen distinguishes
+  deleted, manual, and failed resources.
 
-## The big pending feature — "Reset demo environment" (teardown)
-A full implementation plan exists at
-`~/.claude/plans/generic-scribbling-fiddle.md` (**read it before starting**). Summary:
+Key implementation files:
 
-- **Goal:** a **Reset** action in the shell that deletes exactly what a past deployment
-  created, driven entirely by the deployment audit trail, **by ID only** (never name-matching,
-  so it can't touch resources dispatch didn't create).
-- **Scope:** Box + Salesforce (Databricks/AWS record no resources). Box Forms/Apps are deleted
-  through the authenticated browser adapter (same mechanism that creates them).
-- **Prerequisite gaps the plan closes first:**
-  - `createAIAgent`/`createHub` currently discard the created IDs
-    (`internal/lifecycle/box_sdk.go` ~L362/L384) → hubs and AI agents are invisible to
-    teardown. Must record their IDs.
-  - `deployBoxPublicAdapters` only appends a `ResourceReference` for `docgen_template`
-    (`box_public_adapters.go` ~L104) → add `hub` and `ai_agent`.
-  - The audit record is only written on an explicit keypress after deploy
-    (`shell.go` ~L1171). Auto-persist it when the deploy queue drains (~L766) or reset has no
-    trail to act on.
-  - `boxAPI` has **no delete methods** (`box_sdk.go:21-35`) — add `deleteFolder/File/
-    MetadataTemplate/AIAgent/Hub/DocgenTemplate` to both backends (`*boxSDK` via typed
-    managers; `boxCLI` via the existing `boxRequest(ctx,"DELETE",...)` escape hatch, box_sdk.go:182;
-    hubs/docgen need header `box-version: 2025.0`). **Automate workflows have no delete API** →
-    report as unmanaged.
-- **New engine:** `internal/lifecycle/teardown.go` with
-  `DestroyProvider(root, provider, resources)` mirroring `DeployProvider`; delete Box
-  resources in reverse dependency order, workspace folder last (recursive); refuse folder ID
-  `"0"` (mirror the `loadBoxTarget` guard, lifecycle.go:496). Salesforce via a generated
-  `destructiveChanges.xml` + `sf project deploy start`. Continue-on-error per item.
-- **Shell UI:** new `screenTeardown`, a third welcome option "Reset demo environment"
-  (update the hardcoded `options` slice ~shell.go:1477 **and** `m.moveCursor(key, 2)` ~L943 in
-  lockstep), plus an Enter action on a history row. Preview the exact resources, then a
-  destructive confirm (`huh.NewInput().Validate` requiring the workspace name typed) modeled
-  on `requestDeployConfirmation` (shell.go:689).
-- **Caveat flagged in the plan:** the browser Form/App delete calls are **unverified against a
-  live tenant** — they must fail soft and report the surface as remaining, not abort the reset.
+- [`internal/lifecycle/teardown.go`](internal/lifecycle/teardown.go)
+- [`internal/lifecycle/teardown_test.go`](internal/lifecycle/teardown_test.go)
+- [`internal/audit/deployment.go`](internal/audit/deployment.go)
+- [`cmd/box-dispatch/shell.go`](cmd/box-dispatch/shell.go)
+- [`cmd/box-dispatch/shell_test.go`](cmd/box-dispatch/shell_test.go)
 
-## Other known follow-ups (from persistent memory)
-- **BCL emitter round-trip gap:** `WriteBCL` output parses but extracts zero artifacts — flat
-  summaries vs. nested extraction. Investigation pending. (See memory `bcl-emitter-roundtrip-gap`.)
-- **UI restore vs BCL split:** keep the windlass-era shell styling; the BCL migration is the
-  keeper work. (See memory `ui-restore-vs-bcl-split`.)
+### BCL artifact flow
 
-## Verification (always, before reporting done)
-Run the **`verify-build`** skill, or by hand from the repo root:
+- BCL is the single solution-package configuration and admin-facing import/export contract.
+- The bundled CLM template is `internal/solution/manifests/clm.bcl`. New packages use
+  `dispatch.bcl` plus `.dispatch/deployment.bcl`. JSON configuration is unsupported and
+  obsolete JSON files are removed when packaging encounters them.
+- A malformed `dispatch.bcl` fails explicitly. `deployment_config` must reference a
+  package-relative `.bcl` file.
+- `resolve` and `bootstrap` emit `<provider>-artifacts.bcl`; `import` accepts either one
+  `.bcl` file or a directory of `*artifacts.bcl` files.
+- The HCL-like form emitted by Box Dispatch is accepted by the loader and extracts resource
+  IDs correctly. Worked HCL and JSON examples are covered by import tests.
+- The shell reads migrated BCL configuration artifacts and stores project-local component
+  visibility in `.dispatch/ui-settings.bcl`.
+
+See [`BCL_ARTIFACT_CONTRACT.md`](BCL_ARTIFACT_CONTRACT.md) and
+[`examples/bcl/README.md`](examples/bcl/README.md).
+
+### Live deploy/reset validation
+
+On 2026-08-03, a minimal Box-only CLM package was built with `create_new` and only the
+folder-tree capability enabled. The run:
+
+- authenticated to Box through the saved CCG connection;
+- created one uniquely named workspace and nine child folders;
+- automatically wrote an audit record containing all 10 resource IDs; and
+- reset the deployment by recorded ID, deleting all 10 folders with zero remaining.
+
+The preflight also exposed a package-contract gap: the upstream CLM template does not include
+the old `config/box/folder-template.md` marker. The workspace is already fully declared in
+the solution manifest (now canonical `dispatch.bcl`), so Box Dispatch includes the enabled
+workspace directly and no longer requires that redundant marker. A regression test covers
+this path.
+
+### Agent tooling
+
+The development tooling is committed:
+
+- `AGENTS.md` is the cross-agent source of truth.
+- `.cursor/rules/box-dispatch.mdc` mirrors the always-on Cursor guidance.
+- `.claude/skills/verify-build/`, `launch-shell/`, and `landing-screenshot/` document the
+  repo-specific verification and visual workflows.
+
+Keep these surfaces aligned when the workflow changes; `AGENTS.md` is canonical.
+
+## Operational risks and follow-ups
+
+1. **Validate Salesforce reset.** The Box folder-tree deploy/audit/reset path is proven.
+   Salesforce destructive teardown still needs validation against a disposable org.
+2. **Reproduce the other machine's template-clone failure.** The public template repos do
+   not require authentication. Re-run there and capture the now-visible Git error before
+   changing credential helpers, URL rewrites, or proxy configuration.
+3. **Partial public APIs remain explicit.** Automate's public list/start endpoints do not
+   satisfy the package lifecycle, so the capability remains nondeployable, hidden by
+   default, and tracked in [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
+4. **Old `.env` values remain in Git history.** The file is no longer tracked and no live
+   tokens were identified, but history rewriting would require explicit approval and a
+   coordinated force-push.
+5. **The branch name is historical.** `restore-launch-shell` is the active work branch; do
+   not follow older fast-forward or merge instructions from previous handoff text.
+
+## Verification gate
+
+Run from the repository root before committing or pushing:
+
 ```bash
 gofmt -l . && go build ./... && go vet ./... && go test ./...
 ```
-All four must be clean. As of this handoff, they are.
 
-## Where things live (quick map)
-- `cmd/box-dispatch/main.go` — cobra root; `runLaunchShell()` (alt-screen), the TTY gate.
-- `cmd/box-dispatch/shell.go` — the shell model: screen enum, `Update`/`View`, welcome menu,
-  package/deploy/history flows. `newDispatchShell()` L426; `View()` L2053.
-- `internal/workspace/package.go` — template clone + component pruning (packaging fix here).
-- `internal/lifecycle/` — deploy engine + Box/Salesforce backends + browser adapters
-  (teardown work lands here).
-- `internal/audit/deployment.go` — deployment records (`ListDeployments`; needs
-  `FindDeployment`).
-- `internal/bcl/`, `internal/engine/` — BCL artifact contract + import/export.
-
----
+Any output from `gofmt -l .` is a failure.
 
 ## Continuation point
-- **Current Status:** Launch-shell polish is complete and green on `restore-launch-shell`
-  (docs image, `.env` hygiene, packaging-hang fix). Three dev skills and this handoff are
-  written but not yet committed. `main` is a clean fast-forward behind the branch.
-- **Recommended Next Step:** With the user's OK, fast-forward `main` to `1871d72` and commit
-  the new `.claude/skills/` + this handoff.
-- **Why This Next:** It's zero-risk (ff-only, tree already green) and gets the packaging fix
-  and dev tooling onto `main` where the other machine and future agents can use them.
-- **Expected Outcome:** `main` carries the fix and tooling; the next agent can pick up the
-  Reset/teardown feature from the plan file with the skills in place.
-- **Blockers:** (1) The user drives merges to `main` — confirm before pushing. (2) The
-  packaging root-cause on the other machine still needs that machine's new error output to
-  close out. (3) History still contains old `.env` values — scrubbing needs explicit consent.
+
+- **Current Status:** The launch shell, cleanup-safe reset flow, BCL solution configuration,
+  BCL import/export path, and cross-agent tooling are implemented. The Box folder
+  deploy/audit/reset path is also proven live with complete cleanup.
+- **Recommended Next Step:** Test Salesforce destructive teardown in a disposable org.
+- **Why This Next:** It is the remaining live reset boundary not proven by the hermetic Go
+  tests or the completed Box folder-tree smoke.
+- **Expected Outcome:** Confirmed Salesforce cleanup behavior with exact errors for any path
+  that still needs hardening.
+- **Blockers:** The Salesforce test needs a selected authenticated disposable org.

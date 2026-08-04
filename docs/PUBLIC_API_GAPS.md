@@ -1,77 +1,69 @@
-# Cost of Missing Public APIs
+# Public API gaps
 
-What it costs `box-dispatch` to support Box capabilities that have no public API,
-measured against what the same capabilities cost when a public API exists.
+`box-dispatch` supports provider capabilities only when they can be inspected,
+created or updated, and cleaned up through documented public APIs. It does not
+ship browser automation or adapters built on private application endpoints.
 
-## How these numbers were derived
+## Unsupported deployment capabilities
 
-- **"LOC written"** is measured from this repository, not estimated: whole-file
-  counts (`wc -l`) for files that exist solely as workarounds, and brace-matched
-  function bodies for individual routines.
-- **"LOC with a public API"** is not a guess either. It is the *measured* cost of
-  comparable capabilities in this same codebase that do have public APIs:
+| Capability ID | Public operations | Missing lifecycle operations | Dispatch behavior |
+|---|---|---|---|
+| `box_form` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `box_app` | None | Portable list, get, create, update, delete, or template instantiation | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `https_connector` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `automate_workflow` | List and start | Create, update, delete | Cataloged as partial API; hidden by default; never packaged, validated, deployed, or reset |
 
-  | Comparable capability | list + create + delete, both backends |
-  |---|---|
-  | Box Hub | **52 lines** |
-  | Box AI Agent | **63 lines** |
+These entries remain in the solution capability catalog so Dispatch can explain
+the gap. They cannot become deployable until Box publishes a supported API
+covering the complete lifecycle needed by an automated environment. A private
+web endpoint, reverse-engineered browser call, or UI script is not an acceptable
+substitute.
 
-  Plus roughly 18 lines of validate/deploy wiring per capability. So a fully
-  supported public-API capability costs **~70–80 lines** here. That is the
-  benchmark used in the estimate column.
-- Line counts **understate** the private-surface cost. The injected browser
-  script is written as dense one-liners: **11,366 characters and ~124 statements
-  compressed into 26 physical lines.** Formatted normally it would be ~124 lines.
+## BCL visibility configuration
 
-## The table
+The launch shell writes project-local display preferences to
+`.dispatch/ui-settings.bcl`. `metadata.boxComponentVisibility` maps capability
+IDs to booleans:
 
-| Product area | Public API today | LOC written to work around it | LOC if a public API existed | Multiplier |
-|---|---|---|---|---|
-| **Box Forms** | none | ~160 (share of adapter + injected JS) | ~75 | ~2× |
-| **Box Apps** | none | ~160 (share of adapter + injected JS) | ~75 | ~2× |
-| **Browser transport** — CDP attach, tab selection, session preflight | n/a — exists *only* because Forms/Apps have no API | **252** | **0** | ∞ |
-| **Browser lifecycle** — cross-platform discovery, launch, dedicated profile, tenant-URL derivation | n/a — same reason | **171** | **0** | ∞ |
-| **Tests for the above** | n/a | **121** | **0** | ∞ |
-| **Automate Workflow — delete** | `List` + `Start` only | **0 — cannot be implemented at all** | ~10 | capability unavailable |
-| **Tenant web host discovery** | `users/me` does not return it; scraped from `avatar_url` | **17** | ~1 (read a field) | ~17× |
-| **Totals** | | **~864 lines of Go + ~124 JS statements** | **~150** | **~6×** |
+```json
+"boxComponentVisibility": {
+  "folder_structure": true,
+  "box_form": false,
+  "box_app": false,
+  "https_connector": false,
+  "automate_workflow": false
+}
+```
 
-## Costs that are not lines of code
+Supported capabilities default to `true`. Unsupported and partial-API
+capabilities default to `false`. Changing an unsupported entry to `true` shows a
+gold, locked reference row on **Configure Box components**; it does not enable
+selection, packaging, validation, deployment, or reset. See
+[`config/runtime/ui-settings.example.bcl`](../config/runtime/ui-settings.example.bcl)
+for the complete example.
 
-These matter more than the LOC multiplier and should carry the argument:
+## Partial public APIs
 
-| Cost | Detail |
-|---|---|
-| **6 new dependencies** | `chromedp`, `cdproto`, `sysutil`, `gobwas/ws`, `gobwas/pool`, `gobwas/httphead` — 14 `go.sum` entries, pulled in purely to drive a browser |
-| **+3 MB binary** | 17 MB → 20 MB |
-| **A browser is now a runtime dependency** | Chrome/Chromium/Edge must be installed, launched with `--remote-debugging-port`, and signed in — for two component types |
-| **A second authentication context** | Operators authenticate twice: OAuth for the public API, and an interactive browser session for Forms/Apps. The two share nothing |
-| **Unverifiable correctness** | Delete calls are reverse-engineered method names (`app.remove` / `app.delete` / `app.archive`). There is no contract to test against |
-| **Silent-failure risk** | The app tier answers an unauthenticated request with **HTTP 200 and an empty list**, not 401. That once made `box-dispatch` report a Form as deleted when it had touched nothing — a false success in a destructive operation. It took an explicit host check plus refusing to treat "absent" as "deleted" to make it safe |
-| **Breaks on any UI change** | Cloning a Box App means replicating the web client's own document model: deep-copying the page/section/item tree, rewriting `enterprise_<id>` references, regenerating 17-character IDs, repointing `erid` references, and driving a lock → update → cancelEdit cycle |
-| **Local security surface** | The DevTools port is unauthenticated. Any local process can attach and act as the signed-in Box user while the browser is running |
+| Capability | Available publicly | Missing operation | Current behavior |
+|---|---|---|---|
+| Box user identity | User/account identity | Stable tenant web hostname | No browser transport depends on this value; it is not part of deployment |
 
-## What would remove the cost
+Partial capabilities remain usable only where the supported operation is useful
+and cannot imply lifecycle coverage that does not exist. In particular, reset
+must report a recorded resource as unmanaged when no public delete operation is
+available.
 
-1. **CRUD for Box Forms** — create, list, get, delete.
-2. **CRUD for Box Apps**, plus "instantiate from template" so nobody has to clone
-   page trees by hand.
-3. **Delete for Automate workflows.** Today a workflow can be started via API but
-   never removed — so an environment can be provisioned but not reset.
-4. **Return the tenant web host from `users/me`.** It is currently only obtainable
-   by parsing it out of `avatar_url`, which is incidental rather than contractual.
-5. **Return 401, not 200 + empty data, when unauthenticated.** Clients cannot
-   distinguish "nothing exists" from "you cannot see it," which turns an auth
-   failure into silent data loss in any automation.
-6. **A parity principle:** anything creatable in the web UI should be creatable
-   *and deletable* through the public API. The business case is reproducible demo,
-   test, and CI environments — today they can be built but not reliably torn down.
+## API acceptance criteria
 
-## Bottom line
+A capability may be added to an automated Box Dispatch package when:
 
-Two component types with no public API cost **~6× the code** of an equivalent
-public capability, plus a browser dependency, six libraries, a second auth
-context, and a class of silent-failure bug that does not exist on the public API
-path. Everything else in the solution — folders, files, metadata templates, Doc
-Gen, Extract, AI agents, hubs, Automate deployment — is served by the public API
-and costs a few dozen lines each.
+1. The required endpoints are documented public APIs.
+2. Authentication works through the same explicit provider connection as other
+   API calls; no second browser session is required.
+3. Create/update returns stable resource IDs for the deployment audit.
+4. Validation can distinguish missing, present, and unauthorized states.
+5. Reset can delete strictly by the recorded resource ID, or the capability is
+   explicitly read-only and never represented as deployable.
+
+This boundary keeps deployments reproducible, teardown safe, CI practical, and
+provider failures diagnosable.

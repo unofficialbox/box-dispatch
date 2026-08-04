@@ -53,12 +53,10 @@ func (r TeardownResult) Remaining() []TeardownOutcome {
 	return remaining
 }
 
-// teardownKindOrder deletes leaves before their containers: the private
-// browser surfaces first, then enterprise-level objects, then files, and the
-// folder tree last (folder deletes are recursive, so the workspace goes last).
+// teardownKindOrder deletes leaves before their containers: enterprise-level
+// objects first, then files, and the folder tree last (folder deletes are
+// recursive, so the workspace goes last).
 var teardownKindOrder = []string{
-	"form",
-	"app",
 	"docgen_template",
 	"ai_agent",
 	"hub",
@@ -169,22 +167,7 @@ func destroyBoxResources(root string, resources []ResourceReference, report Repo
 		return result, err
 	}
 
-	// Private surfaces have no delete API and are removed through the
-	// authenticated browser in one pass before the API-backed resources. Verify
-	// that session before deleting anything, so a reset cannot remove the Box
-	// API resources and only then discover it cannot touch the Form or App.
-	if boxPrivateResourcesPresent(resources) {
-		if sessionErr := ensureBoxPrivateSession(); sessionErr != nil {
-			return result, sessionErr
-		}
-	}
-	privateOutcomes, privateHandled := destroyBoxPrivateSurfaces(root, box, resources)
-	result.Outcomes = append(result.Outcomes, privateOutcomes...)
-
 	for _, resource := range orderResourcesForTeardown(resources) {
-		if privateHandled[resourceKey(resource)] {
-			continue
-		}
 		report.step("Deleting " + resource.Kind + " " + resource.Name)
 		result.Outcomes = append(result.Outcomes, deleteBoxResource(box, resource))
 	}
@@ -309,20 +292,6 @@ const emptySalesforcePackage = `<?xml version="1.0" encoding="UTF-8"?>
     <version>62.0</version>
 </Package>
 `
-
-// boxPrivateResourcesPresent reports whether a teardown will need the browser.
-func boxPrivateResourcesPresent(resources []ResourceReference) bool {
-	for _, resource := range resources {
-		if resource.Kind == "form" || resource.Kind == "app" {
-			return true
-		}
-	}
-	return false
-}
-
-func resourceKey(resource ResourceReference) string {
-	return resource.Kind + ":" + resource.ID
-}
 
 func teardownDetail(result TeardownResult) string {
 	remaining := result.Remaining()

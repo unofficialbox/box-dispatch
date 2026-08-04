@@ -52,19 +52,3 @@ func TestPrefersBoxCCGHonoursPinnedDefault(t *testing.T) {
 		})
 	}
 }
-
-func TestHostFromAvatarURLExtractsTenantOrigin(t *testing.T) {
-	cases := map[string]string{
-		"https://kadams.ent.box.com/api/avatar/large/385982796": "https://kadams.ent.box.com",
-		"https://acme.ent.box.com/x":                            "https://acme.ent.box.com",
-		"https://app.box.com/api/avatar/large/1":                "", // generic host, not a tenant
-		"https://example.com/pic":                               "",
-		"":                                                      "",
-		"   ":                                                   "",
-	}
-	for in, want := range cases {
-		if got := hostFromAvatarURL(in); got != want {
-			t.Fatalf("hostFromAvatarURL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

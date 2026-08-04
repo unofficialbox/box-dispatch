@@ -8,6 +8,31 @@
 
 This repo starts with a fast setup/check experience and expands toward scenario install and deployment workflows.
 
+## Launch behavior
+
+Running `box-dispatch` with no subcommand starts the full-screen solution launch shell when
+stdout is an interactive terminal:
+
+```bash
+box-dispatch
+```
+
+The shell packages, validates, deploys, audits, and resets solution stacks. When stdout is
+redirected or piped, the same no-subcommand invocation prints the plain connectivity report
+instead of starting the full-screen UI. Passing `--json` also selects machine-readable
+connectivity output.
+
+Use the explicit `check` command when connectivity validation is the intended operation:
+
+```bash
+box-dispatch check
+box-dispatch check --offline
+box-dispatch check --json
+```
+
+`box-dispatch check` uses its interactive progress UI in a TTY, `--offline` skips live
+provider calls, and `--json` is suitable for scripts and redirected output.
+
 ## First-time UX (FTUX)
 
 1. `box-dispatch check` (interactive by default)
@@ -86,6 +111,26 @@ If the new profile layout is unavailable, runtime config still falls back to rep
 `config/runtime/environment.example.bcl` when initializing from existing scenario
 repositories for compatibility.
 
+The interactive launch shell also keeps project-local presentation settings in
+`.dispatch/ui-settings.bcl`. Its `metadata.boxComponentVisibility` map controls which Box
+capability catalog rows appear on **Configure Box components**. Supported capabilities
+default visible; capabilities with incomplete or missing public APIs default hidden. Making
+an unsupported capability visible only shows a locked reference row—it cannot be packaged
+or deployed. See [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md) and the tracked
+[`config/runtime/ui-settings.example.bcl`](config/runtime/ui-settings.example.bcl).
+
+Generated solution packages use BCL for their complete package contract:
+
+- `dispatch.bcl` — template, workspace, sample-content, capability, and deployment-order
+  definition
+- `.dispatch/deployment.bcl` — component selection, naming strategy, and rollback settings
+
+JSON solution manifests and deployment settings are unsupported. An invalid `dispatch.bcl`
+fails explicitly, and `deployment_config` must reference a package-relative `.bcl` file.
+Packaging removes obsolete `dispatch.json` and `.dispatch/deployment.json` files if they are
+encountered in a cloned template. See
+[`BCL_ARTIFACT_CONTRACT.md`](BCL_ARTIFACT_CONTRACT.md#2-solution-configuration-contract).
+
 The checker looks for:
 
 - **Box**: `BOX_ACCESS_TOKEN`
@@ -105,7 +150,7 @@ Files are emitted during both `resolve` and `bootstrap` so they can feed cleanup
 
 ## Standardized import
 
-See the artifact contract for full import/export rules: [BCL_ARTIFACT_CONTRACT.md](/Users/massnerder/Developer/unofficialbox/box-dispatch/BCL_ARTIFACT_CONTRACT.md)
+See the artifact contract for full import/export rules: [BCL_ARTIFACT_CONTRACT.md](BCL_ARTIFACT_CONTRACT.md)
 
 Use `box-dispatch import` as the single admin-facing entry point for loading deployment details:
 
