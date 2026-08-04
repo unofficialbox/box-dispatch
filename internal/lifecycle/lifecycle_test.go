@@ -120,7 +120,6 @@ func TestCLMDeploymentOrder(t *testing.T) {
 		"Doc Gen Template",
 		"Extract Configuration",
 		"AI Agent",
-		"Automate Workflow",
 		"Box Hub",
 		"Sample Content",
 	}
@@ -129,14 +128,18 @@ func TestCLMDeploymentOrder(t *testing.T) {
 	}
 }
 
-func TestCLMExcludesCapabilitiesWithoutPublicAPIs(t *testing.T) {
+func TestCLMCatalogRetainsUnsupportedCapabilitiesAsNonDeployable(t *testing.T) {
 	manifest, err := solution.Load(testCLMPackage(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, component := range []string{"Box Form", "Box App", "HTTPS Connector"} {
-		if _, found := manifest.Capability(component); found {
-			t.Fatalf("%s must not be included without a public API", component)
+	for _, component := range []string{"Box Form", "Box App", "HTTPS Connector", "Automate Workflow"} {
+		capability, found := manifest.Capability(component)
+		if !found {
+			t.Fatalf("%s must remain documented in the capability catalog", component)
+		}
+		if capability.CanDeploy() || manifest.CapabilityEnabled(component, solution.ComponentSelection{Mode: "all"}) {
+			t.Fatalf("%s must not be deployable without a complete public API", component)
 		}
 	}
 }
@@ -272,8 +275,11 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 9 {
-		t.Fatalf("got %d Box components, want 9: %#v", len(entries), entries)
+	if len(entries) != 8 {
+		t.Fatalf("got %d Box components, want 8: %#v", len(entries), entries)
+	}
+	if slices.Contains(entries, "Automate Workflow:Intake") {
+		t.Fatalf("validate-only Automate workflow leaked into package components: %#v", entries)
 	}
 }
 

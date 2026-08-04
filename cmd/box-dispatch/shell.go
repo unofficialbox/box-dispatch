@@ -632,8 +632,37 @@ func (m *rootShellModel) prepareBoxComponentSelection() {
 	if err != nil {
 		return
 	}
-	m.boxCapabilities = append([]solution.Capability(nil), manifest.Box.Capabilities...)
+	uiSettings, err := shellstate.LoadUISettings()
+	if err != nil {
+		m.message = "Could not load .dispatch/ui-settings.bcl: " + err.Error()
+		return
+	}
+	if uiSettings.BoxComponentVisibility == nil {
+		uiSettings.BoxComponentVisibility = map[string]bool{}
+	}
+	settingsChanged := false
+	for _, capability := range manifest.Box.Capabilities {
+		id := manifest.CapabilityID(capability)
+		visible, configured := uiSettings.BoxComponentVisibility[id]
+		if !configured {
+			visible = capability.CanDeploy()
+			uiSettings.BoxComponentVisibility[id] = visible
+			settingsChanged = true
+		}
+		if !visible {
+			continue
+		}
+		m.boxCapabilities = append(m.boxCapabilities, capability)
+	}
+	if settingsChanged {
+		if err := shellstate.SaveUISettings(uiSettings); err != nil {
+			m.message = "Could not write .dispatch/ui-settings.bcl: " + err.Error()
+		}
+	}
 	for _, capability := range m.boxCapabilities {
+		if !capability.CanDeploy() {
+			continue
+		}
 		enabled := capability.EnabledByDefault == nil || *capability.EnabledByDefault
 		m.boxComponentValues[manifest.CapabilityID(capability)] = enabled
 	}
@@ -1151,6 +1180,13 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.results[msg.provider] = msg.result
 			if msg.result.ConnectivityOK {
+				if msg.provider == "salesforce" {
+					profile := firstNonEmptyString(msg.result.Discovery.Profile, msg.result.Discovery.Identity)
+					if profile != "" {
+						m.saveProviderOption(msg.provider, profile)
+						_ = os.Setenv("SF_ALIAS", profile)
+					}
+				}
 				m.statuses[msg.provider] = connectionConnected
 				m.message = providerLabel(msg.provider) + " connected"
 			} else {
@@ -1162,10 +1198,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case externalFinishedMsg:
 		if msg.err != nil {
 			m.message = "Connection command failed: " + msg.err.Error()
-		} else {
-			m.message = "Authentication finished. Choose Check connection when ready."
+			return m, nil
 		}
-		return m, nil
+		m.message = "Authentication finished. Verifying connection..."
+		return m.beginChecks([]string{msg.provider})
 	case packageFinishedMsg:
 		m.packageStarted = false
 		if msg.err != nil {
@@ -1520,7 +1556,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.moveCursor(key, len(options))
 		m.optionCursor = m.cursor
 		if (key.String() == "enter" || key.String() == "right") && len(options) > 0 {
-			m.saveProviderOption(options[m.cursor])
+			m.saveProviderOption(m.provider, options[m.cursor])
 			m.screen, m.cursor = screenProvider, 0
 			m.message = "Selection saved. Choose Check connection when ready."
 		}
@@ -1761,12 +1797,7 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 			m.hostInput.Focus()
 			return m, textinput.Blink
 		}
-		commands := map[string][]string{
-			"box":        {"box", "login"},
-			"salesforce": {"sf", "org", "login", "web"},
-			"aws":        {"aws", "configure", "sso"},
-		}
-		parts := commands[m.provider]
+		parts := providerCLIConnectCommand(m.provider)
 		cmd := exec.Command(parts[0], parts[1:]...)
 		provider := m.provider
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return externalFinishedMsg{provider: provider, err: err} })
@@ -1774,6 +1805,15 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		m.screen, m.cursor = screenDashboard, 0
 	}
 	return m, nil
+}
+
+func providerCLIConnectCommand(provider string) []string {
+	commands := map[string][]string{
+		"box":        {"box", "login"},
+		"salesforce": {"sf", "org", "login", "web", "--set-default"},
+		"aws":        {"aws", "configure", "sso"},
+	}
+	return commands[provider]
 }
 
 func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1999,9 +2039,9 @@ func (m rootShellModel) viewBoxCCG(width int) string {
 		panel.Copy().Width(width-4).Padding(1, 2).Render(form)
 }
 
-func (m rootShellModel) saveProviderOption(value string) {
+func (m rootShellModel) saveProviderOption(provider, value string) {
 	settings, _ := shellstate.LoadConnectionSettings()
-	switch m.provider {
+	switch provider {
 	case "salesforce":
 		settings.SalesforceAlias = value
 	case "databricks":
@@ -2561,6 +2601,10 @@ func (m rootShellModel) updateBoxComponents(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case " ":
 		if len(m.boxCapabilities) > 0 {
 			capability := m.boxCapabilities[m.cursor]
+			if !capability.CanDeploy() {
+				m.message = capability.ComponentType + " is reference-only because its public API does not support deployment."
+				return m, nil
+			}
 			m.boxComponentMode = "custom"
 			m.boxComponentValues[capability.ID] = !m.boxComponentValues[capability.ID]
 		}
@@ -2572,25 +2616,22 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 	rows := make([]string, 0, len(m.boxCapabilities))
 	for i, capability := range m.boxCapabilities {
 		enabled := m.boxCapabilitySelected(capability)
-		autoDeploy := capability.Handler != ""
-		status := strings.ToUpper(capability.API)
-		switch {
-		case autoDeploy:
-			status = "READY"
-		case capability.API == "public":
-			status = "ADAPTER PENDING"
+		canDeploy := capability.CanDeploy()
+		status := "NO PUBLIC API"
+		if strings.EqualFold(strings.TrimSpace(capability.API), "partial") {
+			status = "PARTIAL API"
 		}
 		// Same marker vocabulary and colours the validate and deploy checklists
-		// use: green tick for what will be deployed, gold ring for anything left
-		// manual, dim ring for what is not selected.
-		marker, tone := "○", muted
+		// use: green tick for what will be deployed, gold dash for reference-only
+		// capabilities, dim ring for supported capabilities not selected.
+		marker, tone := "—", gold
 		switch {
-		case !enabled:
+		case canDeploy && !enabled:
+			marker, tone = "○", muted
 			status = "EXCLUDED"
-		case autoDeploy:
+		case canDeploy:
 			marker, tone = "✓", green
-		default:
-			tone = gold
+			status = "READY"
 		}
 		line := fmt.Sprintf("%s  %-25s %s", marker, capability.ComponentType, status)
 		style := lipgloss.NewStyle().Width(width - 10).Foreground(tone)
@@ -2605,11 +2646,14 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 	mode := accent.Render(strings.ToUpper(m.boxComponentMode))
 	controls := dimStyle.Render("a enable all · n disable all · d defaults · c customize · Space toggle · Enter save")
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Configure Box components") + "  " + mode + "\n" +
-		dimStyle.Render("Global modes override individual values. Toggling a row switches to Custom.") + "\n\n" +
+		dimStyle.Render("Global modes affect supported rows only. Gold rows are visible references and cannot be selected.") + "\n\n" +
 		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n")) + "\n" + controls
 }
 
 func (m rootShellModel) boxCapabilitySelected(capability solution.Capability) bool {
+	if !capability.CanDeploy() {
+		return false
+	}
 	defaultEnabled := capability.EnabledByDefault == nil || *capability.EnabledByDefault
 	switch m.boxComponentMode {
 	case "all":

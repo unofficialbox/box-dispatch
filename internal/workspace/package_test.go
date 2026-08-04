@@ -45,7 +45,7 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(source, "config", "box"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"spec.json", "form-definition.json", "box-app-blueprint.md", "https-connectors.bcl"} {
+	for _, name := range []string{"spec.json", "form-definition.json", "box-app-blueprint.md", "https-connectors.bcl", "automate-workflows.json"} {
 		if err := os.WriteFile(filepath.Join(source, "config", "box", name), []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -58,8 +58,8 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 		}
 	}
 	destination := filepath.Join(t.TempDir(), "package")
-	// The template must have a bundled manifest: the fixture ships no
-	// dispatch.json, so Build relies on WriteBundled to supply one.
+	// The template fixture ships no dispatch.bcl, so Build relies on the bundled
+	// CLM manifest.
 	manifest, err := Build(PackageRequest{Repository: source, Destination: destination, TemplateID: "clm", Components: []string{"box"}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,19 @@ func TestBuildClonesDetachesAndWritesManifest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destination, ".dispatch", "package.json")); err != nil {
 		t.Fatal("package manifest was not written")
 	}
-	for _, name := range []string{"form-definition.json", "box-app-blueprint.md", "https-connectors.bcl"} {
+	if _, err := os.Stat(filepath.Join(destination, "dispatch.bcl")); err != nil {
+		t.Fatal("canonical solution manifest was not written")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "dispatch.json")); !os.IsNotExist(err) {
+		t.Fatalf("obsolete JSON solution manifest remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, ".dispatch", "deployment.bcl")); err != nil {
+		t.Fatal("canonical deployment settings were not written")
+	}
+	if _, err := os.Stat(filepath.Join(destination, ".dispatch", "deployment.json")); !os.IsNotExist(err) {
+		t.Fatalf("obsolete JSON deployment settings remain: %v", err)
+	}
+	for _, name := range []string{"form-definition.json", "box-app-blueprint.md", "https-connectors.bcl", "automate-workflows.json"} {
 		if _, err := os.Stat(filepath.Join(destination, "config", "box", name)); !os.IsNotExist(err) {
 			t.Fatalf("unsupported Box asset remains in package: %s", name)
 		}

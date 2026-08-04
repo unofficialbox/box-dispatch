@@ -70,7 +70,11 @@ func Build(req PackageRequest) (PackageManifest, error) {
 	if err := pruneUnselected(req.Destination, req.Components); err != nil {
 		return PackageManifest{}, err
 	}
-	if _, err := os.Stat(filepath.Join(req.Destination, "dispatch.json")); os.IsNotExist(err) {
+	hasManifest, err := solution.ManifestExists(req.Destination)
+	if err != nil {
+		return PackageManifest{}, err
+	}
+	if !hasManifest {
 		if writeErr := solution.WriteBundled(req.Destination, req.TemplateID); writeErr != nil && !solution.IsUnavailable(writeErr) {
 			return PackageManifest{}, writeErr
 		}
@@ -137,6 +141,8 @@ func pruneUnsupportedBoxAssets(root string) error {
 		"config/box/box-app-blueprint.md",
 		"config/box/https-connectors.bcl",
 		"config/box/https-connectors.json",
+		"config/box/automate-workflows.bcl",
+		"config/box/automate-workflows.json",
 	} {
 		if err := os.Remove(filepath.Join(root, filepath.FromSlash(reference))); err != nil && !os.IsNotExist(err) {
 			return err

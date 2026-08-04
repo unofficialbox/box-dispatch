@@ -20,6 +20,7 @@ const (
 	stateDirName          = ".dispatch"
 	connectionSettingsBCL = "connection-settings.bcl"
 	solutionPlanBCL       = "solution-plan.bcl"
+	uiSettingsBCL         = "ui-settings.bcl"
 	// Legacy JSON files (under the old .windlass state dir) read once for
 	// forward migration to BCL.
 	legacyStateDirName     = ".windlass"
@@ -29,6 +30,7 @@ const (
 	stateProvider         = "box-dispatch"
 	connectionSettingsCtx = "connection-settings"
 	solutionPlanContext   = "solution-plan"
+	uiSettingsContext     = "ui-settings"
 )
 
 func stateDir() string { return filepath.Join(config.Paths().Root, stateDirName) }
@@ -75,6 +77,25 @@ func SaveSolutionPlan(plan config.SolutionPlan) error {
 	return nil
 }
 
+// LoadUISettings reads local presentation preferences from BCL. A missing file
+// returns an empty value; the shell fills capability-aware defaults and writes
+// them back so the configuration is explicit and editable.
+func LoadUISettings() (config.UISettings, error) {
+	var settings config.UISettings
+	if err := readState(statePath(uiSettingsBCL), "", &settings); err != nil {
+		return settings, fmt.Errorf("read UI settings: %w", err)
+	}
+	return settings, nil
+}
+
+// SaveUISettings writes local presentation preferences as BCL.
+func SaveUISettings(settings config.UISettings) error {
+	if err := writeState(statePath(uiSettingsBCL), uiSettingsContext, settings); err != nil {
+		return fmt.Errorf("write UI settings: %w", err)
+	}
+	return nil
+}
+
 // readState decodes state from the BCL file, falling back to a legacy JSON file
 // for one-time migration. A missing file leaves out at its zero value.
 func readState(bclPath, legacyJSONPath string, out any) error {
@@ -86,6 +107,9 @@ func readState(bclPath, legacyJSONPath string, out any) error {
 		return fromMetadata(doc.Metadata, out)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if legacyJSONPath == "" {
+		return nil
 	}
 
 	data, err := os.ReadFile(legacyJSONPath)

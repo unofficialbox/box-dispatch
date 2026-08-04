@@ -1,8 +1,11 @@
-# BCL Artifact Contract (box-dispatch)
+# BCL Configuration and Artifact Contract (box-dispatch)
 
-This document defines the contract for Box Configuration Language (BCL) artifacts used by `box-dispatch` as the single interchange format.
+This document defines the contract for Box Configuration Language (BCL) documents used by
+`box-dispatch` for solution configuration, local shell state, and deployment artifacts.
 
 It covers:
+- Solution template and package configuration
+- Project-local shell and deployment settings
 - Export/emit behavior (`resolve`, `bootstrap`) from provider state into BCL
 - Import behavior (`box-dispatch import`) from BCL back into runtime config
 
@@ -16,7 +19,38 @@ It covers:
   - canonical JSON payload support
   - HCL-like BCL inventory payload under `locals { bcl = { ... } }`
 
-## 2) Export contract (runtime -> BCL)
+Every typed document uses `provider = "box-dispatch"` or its actual provider and a distinct
+`context`. A context selects the schema; changing a file extension to `.bcl` is not enough.
+
+## 2) Solution configuration contract
+
+New solution packages use:
+
+- `dispatch.bcl`
+  - `context = "solution-manifest"`
+  - `metadata.manifest` contains the typed template ID, deployment configuration reference,
+    Box workspace, sample content, capability catalog, and deployment order
+- `.dispatch/deployment.bcl`
+  - `context = "deployment-settings"`
+  - `metadata.settings` contains naming, rollback, strategy, and component selection
+- `.dispatch/ui-settings.bcl`
+  - `context = "ui-settings"`
+  - `metadata.boxComponentVisibility` controls presentation only and cannot grant deployment
+    support
+
+The bundled CLM source is
+[`internal/solution/manifests/clm.bcl`](internal/solution/manifests/clm.bcl). Package builders
+emit the canonical HCL-like form through `bcl.WriteBCL`.
+
+Format rules:
+
+- `dispatch.bcl` is the only solution-manifest format.
+- `deployment_config` must reference a package-relative `.bcl` file.
+- Invalid BCL fails explicitly; there is no JSON fallback.
+- Packaging removes obsolete `dispatch.json` and `.dispatch/deployment.json` files if a
+  cloned template still contains them.
+
+## 3) Export contract (runtime -> BCL)
 
 - Emitted at:
   - `resolve`: `<generatedDir>/<scenario>/<provider>-artifacts.bcl`
@@ -40,7 +74,7 @@ It covers:
   - `version`
   - `artifacts` with `name`, `artifactType`, `providerObjectId`, `enterpriseId`
 
-## 3) Import contract (BCL -> runtime config)
+## 4) Import contract (BCL -> runtime config)
 
 - Supported import entry point:
   - [cmd/box-dispatch/import.go](cmd/box-dispatch/import.go)
@@ -73,15 +107,17 @@ It covers:
   - directory has zero importable `*artifacts.bcl` resources
   - parsed artifacts are empty
 
-## 4) Operational contract
+## 5) Operational contract
 
-- There is no legacy `*.tf.json` or custom JSON migration path at import time.
+- Artifact import has no `*.tf.json` or custom JSON path.
 - `*.bcl` is the single supported admin-facing interchange format.
 - Import source is also the cleanup-ready artifact source for rehydrating environment state.
 
-## 5) Relevant references
+## 6) Relevant references
 
 - [internal/bcl/bcl.go](internal/bcl/bcl.go)
+- [internal/solution/manifest.go](internal/solution/manifest.go)
+- [internal/solution/manifests/clm.bcl](internal/solution/manifests/clm.bcl)
 - [internal/engine/artifacts.go](internal/engine/artifacts.go)
 - [internal/engine/import.go](internal/engine/import.go)
 - [README.md import section](README.md#standardized-import)

@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/unofficialbox/box-dispatch/internal/bcl"
 )
 
-//go:embed manifests/*.json
+//go:embed manifests/*.bcl
 var bundled embed.FS
 
 type Manifest struct {
@@ -21,7 +23,16 @@ type Manifest struct {
 	Box              BoxManifest `json:"box"`
 }
 
-const defaultDeploymentConfig = ".dispatch/deployment.json"
+const (
+	ManifestFile = "dispatch.bcl"
+
+	defaultDeploymentConfig = ".dispatch/deployment.bcl"
+	manifestProvider        = "box-dispatch"
+	manifestContext         = "solution-manifest"
+	manifestMetadataKey     = "manifest"
+	deploymentContext       = "deployment-settings"
+	deploymentMetadataKey   = "settings"
+)
 
 type DeploymentSettings struct {
 	SchemaVersion string                `json:"schema_version"`
@@ -137,28 +148,29 @@ type Capability struct {
 }
 
 func Load(root string) (Manifest, error) {
-	path := filepath.Join(root, "dispatch.json")
-	if data, err := os.ReadFile(path); err == nil {
-		return loadPackageManifest(root, data, path)
+	bclPath := filepath.Join(root, ManifestFile)
+	if _, err := os.Stat(bclPath); err == nil {
+		manifest, loadErr := loadBCLManifestFile(bclPath)
+		if loadErr != nil {
+			return Manifest{}, loadErr
+		}
+		return preparePackageManifest(root, manifest)
 	} else if !os.IsNotExist(err) {
 		return Manifest{}, err
 	}
+
 	templateID, err := packageTemplateID(root)
 	if err != nil {
 		return Manifest{}, err
 	}
-	data, err := bundled.ReadFile("manifests/" + templateID + ".json")
+	manifest, err := LoadBundled(templateID)
 	if err != nil {
-		return Manifest{}, fmt.Errorf("solution package requires dispatch.json: %w", err)
+		return Manifest{}, fmt.Errorf("solution package requires %s: %w", ManifestFile, err)
 	}
-	return loadPackageManifest(root, data, "bundled "+templateID+" manifest")
+	return preparePackageManifest(root, manifest)
 }
 
-func loadPackageManifest(root string, data []byte, source string) (Manifest, error) {
-	manifest, err := parse(data, source)
-	if err != nil {
-		return Manifest{}, err
-	}
+func preparePackageManifest(root string, manifest Manifest) (Manifest, error) {
 	if manifest.DeploymentConfig == "" {
 		manifest.DeploymentConfig = defaultDeploymentConfig
 	}
@@ -168,16 +180,24 @@ func loadPackageManifest(root string, data []byte, source string) (Manifest, err
 	return manifest, nil
 }
 
+func ManifestExists(root string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(root, ManifestFile)); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	return false, nil
+}
+
 func EnsureDeploymentConfig(root, reference string) error {
 	return ensureDeploymentConfig(root, reference, DefaultDeploymentSettings())
 }
 
 func ensureDeploymentConfig(root, reference string, settings DeploymentSettings) error {
-	reference = filepath.Clean(filepath.FromSlash(reference))
-	if filepath.IsAbs(reference) || reference == ".." || strings.HasPrefix(reference, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("deployment_config must be a package-relative path")
+	path, err := packageRelativePath(root, reference)
+	if err != nil {
+		return err
 	}
-	path := filepath.Join(root, reference)
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
@@ -237,21 +257,11 @@ func ReadDeploymentSettings(root, reference string) (DeploymentSettings, error) 
 	if err != nil {
 		return DeploymentSettings{}, err
 	}
-	data, err := os.ReadFile(path)
+	doc, err := bcl.LoadBCL(path)
 	if err != nil {
 		return DeploymentSettings{}, err
 	}
-	settings := DefaultDeploymentSettings()
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return DeploymentSettings{}, fmt.Errorf("parse deployment configuration: %w", err)
-	}
-	if settings.Box.Components.Mode == "" {
-		settings.Box.Components.Mode = "defaults"
-	}
-	if settings.Box.Components.Selections == nil {
-		settings.Box.Components.Selections = map[string]bool{}
-	}
-	return settings, nil
+	return deploymentSettingsFromDocument(doc, path)
 }
 
 func WriteDeploymentSettings(root, reference string, settings DeploymentSettings) error {
@@ -259,14 +269,16 @@ func WriteDeploymentSettings(root, reference string, settings DeploymentSettings
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(settings, "", "  ")
+	doc, err := deploymentSettingsDocument(settings)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	temporary := path + ".tmp"
+	defer os.Remove(temporary)
+	if err := bcl.WriteBCL(temporary, doc); err != nil {
+		return fmt.Errorf("create deployment configuration: %w", err)
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := os.Rename(temporary, path); err != nil {
 		return fmt.Errorf("create deployment configuration: %w", err)
 	}
 	return nil
@@ -277,31 +289,52 @@ func packageRelativePath(root, reference string) (string, error) {
 	if filepath.IsAbs(reference) || reference == ".." || strings.HasPrefix(reference, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("deployment_config must be a package-relative path")
 	}
+	if !strings.EqualFold(filepath.Ext(reference), ".bcl") {
+		return "", fmt.Errorf("deployment_config must reference a .bcl file")
+	}
 	return filepath.Join(root, reference), nil
 }
 
 func WriteBundled(root, templateID string) error {
-	data, err := bundled.ReadFile("manifests/" + templateID + ".json")
+	manifest, err := LoadBundled(templateID)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "dispatch.json"), data, 0o644); err != nil {
+	if err := WriteManifest(root, manifest); err != nil {
 		return err
 	}
-	_, err = loadPackageManifest(root, data, "bundled "+templateID+" manifest")
+	_, err = preparePackageManifest(root, manifest)
 	return err
 }
 
 // WriteManifest persists the normalized package contract. Package builders use
 // this after loading a cloned template so capabilities without public APIs
-// cannot re-enter the product through a stale upstream dispatch.json.
+// cannot re-enter the product through stale upstream configuration.
 func WriteManifest(root string, manifest Manifest) error {
-	data, err := json.MarshalIndent(manifest, "", "  ")
+	manifest = normalizeCapabilityCatalog(manifest)
+	if manifest.DeploymentConfig == "" {
+		manifest.DeploymentConfig = defaultDeploymentConfig
+	}
+	if _, err := packageRelativePath(root, manifest.DeploymentConfig); err != nil {
+		return err
+	}
+	doc, err := manifestDocument(manifest)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "dispatch.json"), append(data, '\n'), 0o644); err != nil {
+	path := filepath.Join(root, ManifestFile)
+	temporary := path + ".tmp"
+	defer os.Remove(temporary)
+	if err := bcl.WriteBCL(temporary, doc); err != nil {
 		return fmt.Errorf("write solution manifest: %w", err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		return fmt.Errorf("write solution manifest: %w", err)
+	}
+	for _, obsolete := range []string{"dispatch.json", ".dispatch/deployment.json"} {
+		if err := os.Remove(filepath.Join(root, filepath.FromSlash(obsolete))); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove obsolete JSON configuration %s: %w", obsolete, err)
+		}
 	}
 	return nil
 }
@@ -334,7 +367,7 @@ func (m Manifest) CapabilityID(capability Capability) string {
 
 func (m Manifest) CapabilityEnabled(componentType string, selection ComponentSelection) bool {
 	capability, configured := m.Capability(componentType)
-	if !configured {
+	if !configured || !capability.CanDeploy() {
 		return false
 	}
 	defaultEnabled := capability.EnabledByDefault == nil || *capability.EnabledByDefault
@@ -351,11 +384,12 @@ func (m Manifest) CapabilityEnabled(componentType string, selection ComponentSel
 }
 
 func LoadBundled(templateID string) (Manifest, error) {
-	data, err := bundled.ReadFile("manifests/" + templateID + ".json")
+	source := "bundled " + templateID + " manifest"
+	data, err := bundled.ReadFile("manifests/" + templateID + ".bcl")
 	if err != nil {
 		return Manifest{}, err
 	}
-	return parse(data, "bundled "+templateID+" manifest")
+	return parseBCLManifest(data, source)
 }
 
 func (m Manifest) Rank(component string) int {
@@ -368,7 +402,7 @@ func (m Manifest) Rank(component string) int {
 	return len(m.Box.ComponentOrder)
 }
 
-func parse(data []byte, source string) (Manifest, error) {
+func decodeManifestPayload(data []byte, source string) (Manifest, error) {
 	var manifest Manifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parse %s: %w", source, err)
@@ -376,30 +410,111 @@ func parse(data []byte, source string) (Manifest, error) {
 	if manifest.SchemaVersion == "" || manifest.TemplateID == "" {
 		return Manifest{}, fmt.Errorf("%s is missing schema_version or template_id", source)
 	}
-	return publicAPICapabilitiesOnly(manifest), nil
+	return normalizeCapabilityCatalog(manifest), nil
 }
 
-func publicAPICapabilitiesOnly(manifest Manifest) Manifest {
-	capabilities := make([]Capability, 0, len(manifest.Box.Capabilities))
-	componentTypes := map[string]bool{}
+func loadBCLManifestFile(path string) (Manifest, error) {
+	doc, err := bcl.LoadBCL(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return manifestFromDocument(doc, path)
+}
+
+func parseBCLManifest(data []byte, source string) (Manifest, error) {
+	doc, err := bcl.ParseBCL(data, source)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return manifestFromDocument(doc, source)
+}
+
+func manifestFromDocument(doc bcl.BCLDocument, source string) (Manifest, error) {
+	if doc.Provider != manifestProvider || doc.Context != manifestContext {
+		return Manifest{}, fmt.Errorf("parse %s: expected provider %q and context %q", source, manifestProvider, manifestContext)
+	}
+	payload, ok := doc.Metadata[manifestMetadataKey]
+	if !ok {
+		return Manifest{}, fmt.Errorf("parse %s: missing metadata.%s", source, manifestMetadataKey)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("parse %s: %w", source, err)
+	}
+	manifest, err := decodeManifestPayload(data, source)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if doc.Scenario != "" && doc.Scenario != manifest.TemplateID {
+		return Manifest{}, fmt.Errorf("parse %s: scenario %q does not match template_id %q", source, doc.Scenario, manifest.TemplateID)
+	}
+	return manifest, nil
+}
+
+func manifestDocument(manifest Manifest) (bcl.BCLDocument, error) {
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return bcl.BCLDocument{}, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return bcl.BCLDocument{}, err
+	}
+	return bcl.NewDocument(manifest.TemplateID, manifestProvider, manifestContext, "", map[string]any{
+		manifestMetadataKey: payload,
+	}), nil
+}
+
+func deploymentSettingsFromDocument(doc bcl.BCLDocument, source string) (DeploymentSettings, error) {
+	if doc.Provider != manifestProvider || doc.Context != deploymentContext {
+		return DeploymentSettings{}, fmt.Errorf("parse %s: expected provider %q and context %q", source, manifestProvider, deploymentContext)
+	}
+	payload, ok := doc.Metadata[deploymentMetadataKey]
+	if !ok {
+		return DeploymentSettings{}, fmt.Errorf("parse %s: missing metadata.%s", source, deploymentMetadataKey)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return DeploymentSettings{}, fmt.Errorf("parse %s: %w", source, err)
+	}
+	settings := DefaultDeploymentSettings()
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return DeploymentSettings{}, fmt.Errorf("parse %s: %w", source, err)
+	}
+	if settings.Box.Components.Mode == "" {
+		settings.Box.Components.Mode = "defaults"
+	}
+	if settings.Box.Components.Selections == nil {
+		settings.Box.Components.Selections = map[string]bool{}
+	}
+	return settings, nil
+}
+
+func deploymentSettingsDocument(settings DeploymentSettings) (bcl.BCLDocument, error) {
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return bcl.BCLDocument{}, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return bcl.BCLDocument{}, err
+	}
+	return bcl.NewDocument("", manifestProvider, deploymentContext, "", map[string]any{
+		deploymentMetadataKey: payload,
+	}), nil
+}
+
+// normalizeCapabilityCatalog preserves unsupported entries as documentation
+// metadata while removing them from deployment defaults. UI visibility is a
+// separate BCL-backed Dispatch preference and never grants deploy support.
+func normalizeCapabilityCatalog(manifest Manifest) Manifest {
 	capabilityIDs := map[string]bool{}
 	for _, capability := range manifest.Box.Capabilities {
-		if !strings.EqualFold(strings.TrimSpace(capability.API), "public") {
+		if !capability.CanDeploy() {
 			continue
 		}
-		capabilities = append(capabilities, capability)
-		componentTypes[capability.ComponentType] = true
 		capabilityIDs[manifest.CapabilityID(capability)] = true
 	}
-	manifest.Box.Capabilities = capabilities
-
-	order := make([]string, 0, len(manifest.Box.ComponentOrder))
-	for _, componentType := range manifest.Box.ComponentOrder {
-		if componentTypes[componentType] {
-			order = append(order, componentType)
-		}
-	}
-	manifest.Box.ComponentOrder = order
 
 	for id := range manifest.Box.DeploymentDefaults.ComponentStrategies {
 		if !capabilityIDs[id] {
@@ -412,6 +527,24 @@ func publicAPICapabilitiesOnly(manifest Manifest) Manifest {
 		}
 	}
 	return manifest
+}
+
+// CanDeploy reports whether selecting the capability can lead to a supported
+// public deployment. Empty operations remain compatible with older core
+// capabilities whose non-empty handler already represented deploy support.
+func (capability Capability) CanDeploy() bool {
+	if !strings.EqualFold(strings.TrimSpace(capability.API), "public") || strings.TrimSpace(capability.Handler) == "" {
+		return false
+	}
+	if len(capability.Operations) == 0 {
+		return true
+	}
+	for _, operation := range capability.Operations {
+		if strings.EqualFold(strings.TrimSpace(operation), "deploy") {
+			return true
+		}
+	}
+	return false
 }
 
 func packageTemplateID(root string) (string, error) {

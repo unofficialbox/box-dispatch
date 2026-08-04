@@ -4,27 +4,51 @@
 created or updated, and cleaned up through documented public APIs. It does not
 ship browser automation or adapters built on private application endpoints.
 
-## Excluded capabilities
+## Unsupported deployment capabilities
 
-| Capability | Public API gap | Product decision |
-|---|---|---|
-| Box Forms | No public list, get, create, update, or delete API | Excluded from manifests, packaging, validation, deploy, and reset |
-| Box Apps | No public CRUD API or portable template-instantiation API | Excluded from manifests, packaging, validation, deploy, and reset |
-| Box HTTPS Connectors | No public lifecycle API | Excluded from manifests, packaging, validation, deploy, and reset |
+| Capability ID | Public operations | Missing lifecycle operations | Dispatch behavior |
+|---|---|---|---|
+| `box_form` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `box_app` | None | Portable list, get, create, update, delete, or template instantiation | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `https_connector` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
+| `automate_workflow` | List and start | Create, update, delete | Cataloged as partial API; hidden by default; never packaged, validated, deployed, or reset |
 
-These capabilities can return only when Box publishes a supported API covering
-the complete lifecycle needed by an automated environment. A private web
-endpoint, reverse-engineered browser call, or UI script is not an acceptable
+These entries remain in the solution capability catalog so Dispatch can explain
+the gap. They cannot become deployable until Box publishes a supported API
+covering the complete lifecycle needed by an automated environment. A private
+web endpoint, reverse-engineered browser call, or UI script is not an acceptable
 substitute.
+
+## BCL visibility configuration
+
+The launch shell writes project-local display preferences to
+`.dispatch/ui-settings.bcl`. `metadata.boxComponentVisibility` maps capability
+IDs to booleans:
+
+```json
+"boxComponentVisibility": {
+  "folder_structure": true,
+  "box_form": false,
+  "box_app": false,
+  "https_connector": false,
+  "automate_workflow": false
+}
+```
+
+Supported capabilities default to `true`. Unsupported and partial-API
+capabilities default to `false`. Changing an unsupported entry to `true` shows a
+gold, locked reference row on **Configure Box components**; it does not enable
+selection, packaging, validation, deployment, or reset. See
+[`config/runtime/ui-settings.example.bcl`](../config/runtime/ui-settings.example.bcl)
+for the complete example.
 
 ## Partial public APIs
 
 | Capability | Available publicly | Missing operation | Current behavior |
 |---|---|---|---|
-| Box Automate workflows | List workflows; start a workflow | Create, update, and delete | Box Dispatch can inspect existing workflows, but does not deploy or remove them |
 | Box user identity | User/account identity | Stable tenant web hostname | No browser transport depends on this value; it is not part of deployment |
 
-Partial capabilities remain visible only where the supported operation is useful
+Partial capabilities remain usable only where the supported operation is useful
 and cannot imply lifecycle coverage that does not exist. In particular, reset
 must report a recorded resource as unmanaged when no public delete operation is
 available.

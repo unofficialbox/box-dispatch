@@ -56,6 +56,65 @@ func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 	}
 }
 
+func TestSalesforceConnectSetsCLIDefault(t *testing.T) {
+	got := strings.Join(providerCLIConnectCommand("salesforce"), " ")
+	if !strings.Contains(got, "org login web --set-default") {
+		t.Fatalf("Salesforce connect command = %q, want --set-default", got)
+	}
+}
+
+func TestSuccessfulExternalLoginImmediatelyRechecksProvider(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+
+	updated, cmd := model.Update(externalFinishedMsg{provider: "salesforce"})
+	result := updated.(rootShellModel)
+	if cmd == nil {
+		t.Fatal("successful login did not schedule a connectivity check")
+	}
+	if result.statuses["salesforce"] != connectionChecking {
+		t.Fatalf("Salesforce status = %v, want checking", result.statuses["salesforce"])
+	}
+}
+
+func TestSuccessfulSalesforceCheckPersistsTargetOrg(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	t.Setenv("SF_ALIAS", "")
+
+	model := newSetupOnlyShell()
+	updated, _ := model.Update(checkFinishedMsg{
+		provider: "salesforce",
+		result: checker.ProviderResult{
+			Name:           "salesforce",
+			ConnectivityOK: true,
+			Discovery:      checker.ProviderDiscovery{Identity: "scratch-user@example.test"},
+		},
+	})
+	result := updated.(rootShellModel)
+	if result.statuses["salesforce"] != connectionConnected {
+		t.Fatalf("Salesforce status = %v, want connected", result.statuses["salesforce"])
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SalesforceAlias != "scratch-user@example.test" {
+		t.Fatalf("saved Salesforce target = %q", settings.SalesforceAlias)
+	}
+	if os.Getenv("SF_ALIAS") != "scratch-user@example.test" {
+		t.Fatalf("SF_ALIAS = %q", os.Getenv("SF_ALIAS"))
+	}
+}
+
 func TestConnectedServicesUnlockConfigurationAndPackage(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.screen = screenDashboard
@@ -83,6 +142,82 @@ func TestConnectedServicesUnlockConfigurationAndPackage(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("entering Package did not start package creation")
+	}
+}
+
+func isolateShellRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	return dir
+}
+
+func TestBoxConfigurationHidesUnsupportedCapabilitiesByDefault(t *testing.T) {
+	root := isolateShellRoot(t)
+	model := newSetupOnlyShell()
+	model.answers.templateID = "clm"
+	model.prepareBoxComponentSelection()
+	view := model.viewBoxComponents(100)
+	if strings.Contains(view, "Automate Workflow") {
+		t.Fatalf("validate-only Automate workflow appeared as configurable:\n%s", view)
+	}
+	for _, expected := range []string{"Folder Structure", "Metadata Template", "Doc Gen Template", "AI Agent", "Box Hub"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("deployable capability %q missing from configuration:\n%s", expected, view)
+		}
+	}
+	settings, err := shellstate.LoadUISettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"box_form", "box_app", "https_connector", "automate_workflow"} {
+		if settings.BoxComponentVisibility[id] {
+			t.Fatalf("%s should default hidden in BCL", id)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".dispatch", "ui-settings.bcl")); err != nil {
+		t.Fatalf("BCL UI settings were not generated: %v", err)
+	}
+}
+
+func TestBCLCanShowUnsupportedCapabilitiesAsLockedReferences(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveUISettings(config.UISettings{BoxComponentVisibility: map[string]bool{
+		"automate_workflow": true,
+		"box_form":          true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	model := newSetupOnlyShell()
+	model.answers.templateID = "clm"
+	model.prepareBoxComponentSelection()
+	view := model.viewBoxComponents(100)
+	for _, expected := range []string{"Automate Workflow", "PARTIAL API", "Box Form", "NO PUBLIC API"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("visible reference %q missing from configuration:\n%s", expected, view)
+		}
+	}
+	for i, capability := range model.boxCapabilities {
+		if capability.ComponentType == "Automate Workflow" {
+			model.cursor = i
+			break
+		}
+	}
+	updated, _ := model.updateBoxComponents(tea.KeyMsg{Type: tea.KeySpace})
+	result := updated.(rootShellModel)
+	if result.boxComponentMode != "defaults" || result.boxComponentValues["automate_workflow"] {
+		t.Fatal("reference-only Automate workflow became selected")
+	}
+	if !strings.Contains(result.message, "reference-only") {
+		t.Fatalf("locked row message = %q", result.message)
 	}
 }
 

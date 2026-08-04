@@ -2,12 +2,13 @@
 
 ## Current state
 
-- **Date:** 2026-08-03
+- **Date:** 2026-08-04
 - **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
 - **Branch:** `restore-launch-shell`; use `git log --oneline --decorate -5` for the current
   tip rather than relying on a handoff-embedded commit hash.
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26.
-- **Working tree at handoff review:** clean before this documentation refresh.
+- **Working tree at handoff review:** contains the current Salesforce connection, Box
+  capability visibility, and BCL solution-manifest migration; changes are not yet committed.
 
 `box-dispatch` is a full-screen Bubble Tea/lipgloss/huh solution launch shell. With no
 subcommand, a real TTY starts the shell; redirected output or `--json` runs the plain
@@ -39,10 +40,12 @@ Reset/teardown is implemented rather than pending:
 - Box resources are deleted strictly by recorded ID, in dependency-safe order, with the
   workspace folder last. Folder ID `0` is always refused.
 - Box files, folders, metadata templates, AI agents, hubs, and Doc Gen templates use public
-  provider APIs. Capabilities without a public API are excluded from the product surface.
-- Box Forms, Box Apps, and Box HTTPS Connectors are absent from manifests, packaging,
-  validation, deployment, and reset. Their missing public lifecycle APIs are recorded in
-  [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
+  provider APIs. Capabilities without a complete public lifecycle API remain in the catalog
+  as nondeployable metadata.
+- Box Forms, Box Apps, Box HTTPS Connectors, and Box Automate workflows are hidden by
+  default through `.dispatch/ui-settings.bcl`. An operator can reveal locked reference rows,
+  but these capabilities remain absent from packaging, validation, deployment, and reset.
+  Their API gaps are recorded in [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
 - Salesforce metadata teardown uses a generated destructive-changes deployment.
 - Unsupported providers and resource types are reported as remaining/manual instead of
   being silently treated as deleted.
@@ -59,12 +62,18 @@ Key implementation files:
 
 ### BCL artifact flow
 
-- BCL is the single admin-facing import/export contract.
+- BCL is the single solution-package configuration and admin-facing import/export contract.
+- The bundled CLM template is `internal/solution/manifests/clm.bcl`. New packages use
+  `dispatch.bcl` plus `.dispatch/deployment.bcl`. JSON configuration is unsupported and
+  obsolete JSON files are removed when packaging encounters them.
+- A malformed `dispatch.bcl` fails explicitly. `deployment_config` must reference a
+  package-relative `.bcl` file.
 - `resolve` and `bootstrap` emit `<provider>-artifacts.bcl`; `import` accepts either one
   `.bcl` file or a directory of `*artifacts.bcl` files.
 - The HCL-like form emitted by Box Dispatch is accepted by the loader and extracts resource
   IDs correctly. Worked HCL and JSON examples are covered by import tests.
-- The shell reads migrated BCL configuration artifacts.
+- The shell reads migrated BCL configuration artifacts and stores project-local component
+  visibility in `.dispatch/ui-settings.bcl`.
 
 See [`BCL_ARTIFACT_CONTRACT.md`](BCL_ARTIFACT_CONTRACT.md) and
 [`examples/bcl/README.md`](examples/bcl/README.md).
@@ -81,8 +90,9 @@ folder-tree capability enabled. The run:
 
 The preflight also exposed a package-contract gap: the upstream CLM template does not include
 the old `config/box/folder-template.md` marker. The workspace is already fully declared in
-`dispatch.json`, so Box Dispatch now includes the enabled workspace directly from the
-manifest and no longer requires that redundant marker. A regression test covers this path.
+the solution manifest (now canonical `dispatch.bcl`), so Box Dispatch includes the enabled
+workspace directly and no longer requires that redundant marker. A regression test covers
+this path.
 
 ### Agent tooling
 
@@ -102,9 +112,9 @@ Keep these surfaces aligned when the workflow changes; `AGENTS.md` is canonical.
 2. **Reproduce the other machine's template-clone failure.** The public template repos do
    not require authentication. Re-run there and capture the now-visible Git error before
    changing credential helpers, URL rewrites, or proxy configuration.
-3. **Partial public APIs remain explicit.** Automate workflows can be inspected through the
-   public API but cannot be created or deleted; the gap is tracked in
-   [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
+3. **Partial public APIs remain explicit.** Automate's public list/start endpoints do not
+   satisfy the package lifecycle, so the capability remains nondeployable, hidden by
+   default, and tracked in [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md).
 4. **Old `.env` values remain in Git history.** The file is no longer tracked and no live
    tokens were identified, but history rewriting would require explicit approval and a
    coordinated force-push.
@@ -123,9 +133,9 @@ Any output from `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The launch shell, cleanup-safe reset flow, BCL import/export path, and
-  cross-agent tooling are implemented. The Box folder deploy/audit/reset path is also proven
-  live with complete cleanup.
+- **Current Status:** The launch shell, cleanup-safe reset flow, BCL solution configuration,
+  BCL import/export path, and cross-agent tooling are implemented. The Box folder
+  deploy/audit/reset path is also proven live with complete cleanup.
 - **Recommended Next Step:** Test Salesforce destructive teardown in a disposable org.
 - **Why This Next:** It is the remaining live reset boundary not proven by the hermetic Go
   tests or the completed Box folder-tree smoke.

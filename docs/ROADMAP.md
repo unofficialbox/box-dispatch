@@ -25,11 +25,13 @@ an equivalent supported operation.
 
 ## 3. Keep a public-API-only capability boundary
 
-Box Forms, Box Apps, and Box HTTPS Connectors are excluded because they do not
-have complete public APIs. Box Dispatch does not use private web endpoints or
-browser automation as a provider adapter. Partial API coverage, including the
-missing create/delete operations for Automate workflows, is tracked in
-[`PUBLIC_API_GAPS.md`](PUBLIC_API_GAPS.md).
+Box Forms, Box Apps, Box HTTPS Connectors, and Box Automate workflows remain in
+the capability catalog but are nondeployable because they do not have complete
+public lifecycle APIs. They are hidden from the component picker by default
+through `.dispatch/ui-settings.bcl`; showing one produces a locked reference row.
+Box Dispatch does not use private web endpoints or browser automation as a
+provider adapter. Partial API coverage, including Automate's list/start-only
+surface, is tracked in [`PUBLIC_API_GAPS.md`](PUBLIC_API_GAPS.md).
 
-Reconsider an excluded capability only when a documented public API satisfies
+Reconsider a nondeployable capability only when a documented public API satisfies
 the lifecycle acceptance criteria in that gap document.

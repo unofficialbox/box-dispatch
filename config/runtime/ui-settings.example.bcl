@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "scenario": "",
+  "provider": "box-dispatch",
+  "context": "ui-settings",
+  "generatedAt": "2026-08-04T00:00:00Z",
+  "resources": [],
+  "metadata": {
+    "boxComponentVisibility": {
+      "folder_structure": true,
+      "metadata_template": true,
+      "sample_content": true,
+      "docgen_template": true,
+      "extract_configuration": true,
+      "ai_agent": true,
+      "box_hub": true,
+      "box_form": false,
+      "box_app": false,
+      "https_connector": false,
+      "automate_workflow": false
+    }
+  }
+}

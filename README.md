@@ -111,6 +111,26 @@ If the new profile layout is unavailable, runtime config still falls back to rep
 `config/runtime/environment.example.bcl` when initializing from existing scenario
 repositories for compatibility.
 
+The interactive launch shell also keeps project-local presentation settings in
+`.dispatch/ui-settings.bcl`. Its `metadata.boxComponentVisibility` map controls which Box
+capability catalog rows appear on **Configure Box components**. Supported capabilities
+default visible; capabilities with incomplete or missing public APIs default hidden. Making
+an unsupported capability visible only shows a locked reference row—it cannot be packaged
+or deployed. See [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md) and the tracked
+[`config/runtime/ui-settings.example.bcl`](config/runtime/ui-settings.example.bcl).
+
+Generated solution packages use BCL for their complete package contract:
+
+- `dispatch.bcl` — template, workspace, sample-content, capability, and deployment-order
+  definition
+- `.dispatch/deployment.bcl` — component selection, naming strategy, and rollback settings
+
+JSON solution manifests and deployment settings are unsupported. An invalid `dispatch.bcl`
+fails explicitly, and `deployment_config` must reference a package-relative `.bcl` file.
+Packaging removes obsolete `dispatch.json` and `.dispatch/deployment.json` files if they are
+encountered in a cloned template. See
+[`BCL_ARTIFACT_CONTRACT.md`](BCL_ARTIFACT_CONTRACT.md#2-solution-configuration-contract).
+
 The checker looks for:
 
 - **Box**: `BOX_ACCESS_TOKEN`

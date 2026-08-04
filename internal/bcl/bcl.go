@@ -203,11 +203,18 @@ func ConfigObject(path string) (map[string]json.RawMessage, error) {
 }
 
 func LoadBCL(path string) (BCLDocument, error) {
-	var doc BCLDocument
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return BCLDocument{}, err
 	}
+	return ParseBCL(raw, path)
+}
+
+// ParseBCL decodes either the canonical JSON payload form or the HCL-like form
+// emitted by WriteBCL. It is used for embedded BCL documents that do not have a
+// filesystem path as well as ordinary file loading.
+func ParseBCL(raw []byte, source string) (BCLDocument, error) {
+	var doc BCLDocument
 	if err := json.Unmarshal(raw, &doc); err == nil && doc.Provider != "" {
 		normalizeBCLDocumentDefaults(&doc)
 		return doc, nil
@@ -215,7 +222,7 @@ func LoadBCL(path string) (BCLDocument, error) {
 
 	inventory, err := parseBCLLocals(raw)
 	if err != nil {
-		return BCLDocument{}, fmt.Errorf("unsupported BCL format at %q: %w", path, err)
+		return BCLDocument{}, fmt.Errorf("unsupported BCL format at %q: %w", source, err)
 	}
 
 	payload, err := json.Marshal(inventory)
@@ -223,7 +230,7 @@ func LoadBCL(path string) (BCLDocument, error) {
 		return BCLDocument{}, err
 	}
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return BCLDocument{}, fmt.Errorf("unsupported BCL format at %q: unable to decode parsed inventory", path)
+		return BCLDocument{}, fmt.Errorf("unsupported BCL format at %q: unable to decode parsed inventory", source)
 	}
 	normalizeBCLDocumentDefaults(&doc)
 	return doc, nil

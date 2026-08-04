@@ -78,7 +78,9 @@ The checker looks for: Box `BOX_ACCESS_TOKEN`; Salesforce `SF_ALIAS` (or
 - `internal/audit/deployment.go` — deployment audit records (`ListDeployments`).
 - `internal/bcl/`, `internal/engine/` — BCL is the single import/export artifact contract
   (`BCL_ARTIFACT_CONTRACT.md`).
-- `internal/{checker,config,solution,boxconn,providers,shellstate,model}` — supporting packages.
+- `internal/solution/` — typed BCL solution/deployment configuration, bundled manifests,
+  and BCL-only package configuration validation.
+- `internal/{checker,config,boxconn,providers,shellstate,model}` — supporting packages.
 
 ## Conventions
 
