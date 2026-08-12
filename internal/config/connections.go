@@ -32,6 +32,31 @@ type ConnectionSettings struct {
 	// environment name, or the box-dispatch CCG sentinel. Empty means fall back
 	// to precedence (CCG when configured, else the CLI's current environment).
 	BoxDefaultConnection string `json:"boxDefaultConnection,omitempty"`
+
+	// VerifiedConnections stores credential-free identity details from the last
+	// successful provider check. The shell restores these snapshots on later
+	// runs and invalidates them whenever the selected connection changes.
+	VerifiedConnections map[string]VerifiedConnection `json:"verifiedConnections,omitempty"`
+}
+
+// VerifiedConnection is the non-secret result of a successful provider check.
+// Selection identifies the configured alias/profile/environment that produced
+// the result so manually edited settings cannot reuse a mismatched snapshot.
+type VerifiedConnection struct {
+	VerifiedAt string   `json:"verifiedAt"`
+	Selection  string   `json:"selection,omitempty"`
+	Identity   string   `json:"identity,omitempty"`
+	Account    string   `json:"account,omitempty"`
+	Enterprise string   `json:"enterprise,omitempty"`
+	Profile    string   `json:"profile,omitempty"`
+	Host       string   `json:"host,omitempty"`
+	Region     string   `json:"region,omitempty"`
+	Options    []string `json:"options,omitempty"`
+	AuthType   string   `json:"authType,omitempty"`
+	OrgID      string   `json:"orgId,omitempty"`
+	OrgStatus  string   `json:"orgStatus,omitempty"`
+	OrgType    string   `json:"orgType,omitempty"`
+	ExpiresAt  string   `json:"expiresAt,omitempty"`
 }
 
 // HasBoxCCG reports whether a complete CCG credential set has been captured.

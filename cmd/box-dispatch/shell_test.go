@@ -49,6 +49,7 @@ func TestShellDefaultsToReuseExistingDeployment(t *testing.T) {
 }
 
 func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
+	isolateShellRoot(t)
 	model := newSetupOnlyShell()
 	// Connect is entered from the component picker; selections live on answers.
 	model.screen = screenComponents
@@ -75,6 +76,127 @@ func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 	}
 	if _, exists := result.statuses["aws"]; exists {
 		t.Fatal("unselected AWS was scheduled for checking")
+	}
+}
+
+func TestEnteringConnectReusesSavedVerifiedConnections(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
+		BoxDefaultConnection: "box-dispatch-ccg",
+		SalesforceAlias:      "dispatch-scratch",
+		VerifiedConnections: map[string]config.VerifiedConnection{
+			"box": {
+				VerifiedAt: "2026-08-12T12:00:00Z", Selection: "box-dispatch-ccg",
+				Identity: "box@example.test", Enterprise: "5105484", AuthType: "CCG",
+			},
+			"salesforce": {
+				VerifiedAt: "2026-08-12T12:00:00Z", Selection: "dispatch-scratch",
+				Identity: "sf@example.test", Profile: "dispatch-scratch", OrgType: "scratch",
+				OrgStatus: "Active", ExpiresAt: "2099-09-10", Options: []string{"dispatch-scratch", "production"},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	model := newSetupOnlyShell()
+	model.screen = screenComponents
+	model.answers.components = []string{"box", "salesforce"}
+	model.rebuildComponentForm()
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	result := updated.(rootShellModel)
+	if cmd != nil {
+		t.Fatal("saved verified connections unexpectedly scheduled another check")
+	}
+	if !result.allSelectedConnected() || result.statuses["box"] != connectionConnected || result.statuses["salesforce"] != connectionConnected {
+		t.Fatalf("restored statuses = %#v, want both connected", result.statuses)
+	}
+	if got := providerConnectionSummary(result.results["salesforce"]); !strings.Contains(got, "dispatch-scratch") {
+		t.Fatalf("restored Salesforce summary = %q", got)
+	}
+	if !strings.Contains(result.message, "saved verified connections") {
+		t.Fatalf("reuse message = %q", result.message)
+	}
+}
+
+func TestChangedConnectionDoesNotReuseMismatchedVerification(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
+		SalesforceAlias: "new-org",
+		VerifiedConnections: map[string]config.VerifiedConnection{
+			"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "old-org", Profile: "old-org", OrgStatus: "Active"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model := newSetupOnlyShell()
+	if got := model.statuses["salesforce"]; got == connectionConnected {
+		t.Fatalf("mismatched saved connection restored as connected: %v", got)
+	}
+}
+
+func TestExpiredSalesforceVerificationIsNotRestored(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
+		SalesforceAlias: "expired-scratch",
+		VerifiedConnections: map[string]config.VerifiedConnection{
+			"salesforce": {
+				VerifiedAt: "2026-07-01T12:00:00Z", Selection: "expired-scratch",
+				Identity: "expired@example.test", Profile: "expired-scratch", OrgType: "scratch",
+				OrgStatus: "Active", ExpiresAt: "2026-07-31",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model := newSetupOnlyShell()
+	if got := model.statuses["salesforce"]; got == connectionConnected {
+		t.Fatalf("expired saved Salesforce org restored as connected: %v", got)
+	}
+}
+
+func TestStartingAnotherDeploymentClearsCompletedRunState(t *testing.T) {
+	isolateShellRoot(t)
+	model := newSetupOnlyShell()
+	model.screen, model.cursor = screenWelcome, 0
+	model.packagePath = "/tmp/previous-package"
+	model.packageDone = true
+	model.validateStarted, model.validateDone = true, true
+	model.deployDone = true
+	model.deploymentPhase = deploymentPhaseComplete
+	model.validationItems = []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}
+	model.deploymentBaseline = append([]lifecycle.Item(nil), model.validationItems...)
+	model.deploymentAuditPath = "/tmp/previous-audit.json"
+	model.statuses["box"] = connectionConnected
+	model.componentForm.State = huh.StateCompleted
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := updated.(rootShellModel)
+	if result.screen != screenComponents {
+		t.Fatalf("screen = %v, want Choose", result.screen)
+	}
+	if result.packageDone || result.validateStarted || result.validateDone || result.deployDone || len(result.validationItems) != 0 || result.packagePath != "" || result.deploymentAuditPath != "" {
+		t.Fatalf("new deployment retained completed run state: packageDone=%v validate=%v/%v deployDone=%v items=%d package=%q audit=%q",
+			result.packageDone, result.validateStarted, result.validateDone, result.deployDone, len(result.validationItems), result.packagePath, result.deploymentAuditPath)
+	}
+	if result.deploymentPhase != deploymentPhaseReview {
+		t.Fatalf("deployment phase = %q, want review", result.deploymentPhase)
+	}
+	if result.componentForm.State == huh.StateCompleted {
+		t.Fatal("new deployment retained the completed Choose form")
+	}
+	if result.statuses["box"] != connectionConnected {
+		t.Fatal("starting a new deployment discarded the valid Box connection")
+	}
+	choice := templateChoice{id: "test", name: "Second run", repository: "https://example.test/solution.git"}
+	result.selected = &choice
+	result.directoryInput.SetValue(t.TempDir())
+	result.packageInput.SetValue("second-package")
+	updated, cmd := result.startDeploymentPipeline()
+	result = updated.(rootShellModel)
+	if cmd == nil || !result.packageStarted || result.deploymentPhase != deploymentPhasePackage {
+		t.Fatalf("second run skipped package assembly: phase=%q packageStarted=%v cmd=%v", result.deploymentPhase, result.packageStarted, cmd)
 	}
 }
 
@@ -151,6 +273,10 @@ func TestSuccessfulSalesforceCheckPersistsTargetOrg(t *testing.T) {
 	}
 	if settings.SalesforceOrgID != "00Dtest" || settings.SalesforceOrgType != "scratch" || settings.SalesforceOrgStatus != "Active" || settings.SalesforceExpirationDate != "2026-09-09" {
 		t.Fatalf("saved Salesforce lifecycle metadata = %#v", settings)
+	}
+	snapshot, found := settings.VerifiedConnections["salesforce"]
+	if !found || snapshot.Selection != "dispatch-scratch" || snapshot.OrgID != "00Dtest" || snapshot.VerifiedAt == "" {
+		t.Fatalf("saved Salesforce verification = %#v", snapshot)
 	}
 	if os.Getenv("SF_ALIAS") != "dispatch-scratch" {
 		t.Fatalf("SF_ALIAS = %q", os.Getenv("SF_ALIAS"))
@@ -264,13 +390,65 @@ func TestSalesforceProviderActionsAreStreamlinedByStatus(t *testing.T) {
 	}
 
 	model.statuses["salesforce"] = connectionConnected
-	if got := model.providerActions(); !slices.Equal(got, []string{"salesforce-done", "salesforce-existing", "scratch"}) {
+	if got := model.providerActions(); !slices.Equal(got, []string{"salesforce-done", "salesforce-existing", "forget-verification", "scratch"}) {
 		t.Fatalf("connected actions = %v", got)
+	}
+}
+
+func TestForgetVerificationKeepsConnectionSelection(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
+		SalesforceAlias: "dispatch-scratch",
+		VerifiedConnections: map[string]config.VerifiedConnection{
+			"salesforce": {
+				VerifiedAt: "2026-08-12T12:00:00Z", Selection: "dispatch-scratch",
+				Identity: "user@example.test", Profile: "dispatch-scratch", OrgStatus: "Active",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+	index := slices.Index(model.providerActions(), "forget-verification")
+	if index < 0 {
+		t.Fatalf("connected provider actions omit snapshot removal: %v", model.providerActions())
+	}
+	updated, cmd := model.runProviderAction(index)
+	model = updated.(rootShellModel)
+	if cmd != nil {
+		t.Fatal("forgetting a snapshot unexpectedly scheduled provider work")
+	}
+	if model.statuses["salesforce"] != connectionPending {
+		t.Fatalf("status = %v, want not checked", model.statuses["salesforce"])
+	}
+	if _, found := model.results["salesforce"]; found {
+		t.Fatal("forgotten verification details remain in the shell")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SalesforceAlias != "dispatch-scratch" {
+		t.Fatalf("forgetting verification removed the connection selection: %q", settings.SalesforceAlias)
+	}
+	if _, found := settings.VerifiedConnections["salesforce"]; found {
+		t.Fatal("saved verification snapshot was not removed")
+	}
+	if !strings.Contains(model.message, "credentials and selections were kept") {
+		t.Fatalf("removal guidance = %q", model.message)
 	}
 }
 
 func TestChoosingSalesforceOrgImmediatelyRechecks(t *testing.T) {
 	isolateShellRoot(t)
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{VerifiedConnections: map[string]config.VerifiedConnection{
+		"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "old-org", Profile: "old-org", OrgStatus: "Active"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	model := newSetupOnlyShell()
 	model.provider = "salesforce"
 	model.screen = screenOptions
@@ -292,6 +470,9 @@ func TestChoosingSalesforceOrgImmediatelyRechecks(t *testing.T) {
 	}
 	if settings.SalesforceAlias != "dispatch-dev" {
 		t.Fatalf("saved Salesforce alias = %q", settings.SalesforceAlias)
+	}
+	if _, found := settings.VerifiedConnections["salesforce"]; found {
+		t.Fatal("choosing another Salesforce org retained the previous verification")
 	}
 }
 
@@ -1938,10 +2119,13 @@ func TestBoxCCGSavePersistsCredentials(t *testing.T) {
 	model.ccgClientSecret = &clientSecret
 	model.ccgSubjectType = &subjectType
 	model.ccgSubjectID = &subjectID
-	updated, _ := model.saveBoxCCG()
+	updated, cmd := model.saveBoxCCG()
 	model = updated.(rootShellModel)
 	if model.screen != screenProvider {
 		t.Fatalf("after save screen = %v, want provider", model.screen)
+	}
+	if cmd == nil || model.statuses["box"] != connectionChecking {
+		t.Fatalf("new Box connection was not verified immediately: status=%v cmd=%v", model.statuses["box"], cmd)
 	}
 
 	saved, err := shellstate.LoadConnectionSettings()

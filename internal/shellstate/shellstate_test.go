@@ -3,6 +3,7 @@ package shellstate
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/unofficialbox/box-dispatch/internal/bcl"
@@ -33,6 +34,9 @@ func TestConnectionSettingsRoundTripAsBCL(t *testing.T) {
 		DatabricksProfile:     "clm",
 		AWSProfile:            "demo",
 		AWSRegion:             "us-east-1",
+		VerifiedConnections: map[string]config.VerifiedConnection{
+			"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "agentforce", Identity: "user@example.test"},
+		},
 	}
 	if err := SaveConnectionSettings(want); err != nil {
 		t.Fatal(err)
@@ -51,7 +55,7 @@ func TestConnectionSettingsRoundTripAsBCL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round-trip mismatch: got %+v want %+v", got, want)
 	}
 }
@@ -126,7 +130,7 @@ func TestMissingStateReturnsZeroValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (config.ConnectionSettings{}) {
+	if !reflect.DeepEqual(got, config.ConnectionSettings{}) {
 		t.Fatalf("expected zero value for absent state, got %+v", got)
 	}
 }
