@@ -22,12 +22,12 @@ var Specs = map[string]ProviderSpec{
 	},
 	"salesforce-agentforce": {
 		Key:            "salesforce-agentforce",
-		DisplayName:    "Salesforce Agentforce",
+		DisplayName:    "Salesforce",
 		Platform:       "salesforce",
 		RequiredTools:  []string{"sf"},
 		RequiredTokens: []string{"SF_ALIAS", "SF_PROJECT_DIR"},
 		BootstrapSteps: []string{"validate-salesforce-prereqs", "materialize-salesforce-artifacts", "deploy-salesforce-agentforce", "verify-salesforce-org-binding"},
-		SmokeSteps:     []string{"confirm salesforce alias is resolvable", "confirm agentforce metadata is configured"},
+		SmokeSteps:     []string{"confirm salesforce alias is resolvable", "confirm salesforce metadata is configured"},
 	},
 	"databricks": {
 		Key:            "databricks",

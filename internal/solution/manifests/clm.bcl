@@ -10,6 +10,26 @@
       "schema_version": "1.0",
       "template_id": "clm",
       "deployment_config": ".dispatch/deployment.bcl",
+      "salesforce": {
+        "required_packages": [
+          {
+            "name": "Box for Salesforce",
+            "namespace": "box",
+            "package_id": "033700000004yvWAAQ",
+            "version_id": "04tKi000000gPNZIA2",
+            "version_name": "5.43",
+            "version_number": "5.43.0.1",
+            "security_type": "AdminsOnly"
+          }
+        ],
+        "required_permission_sets": [
+          {"name": "box__Box_Admin_All_Licenses", "label": "Box Admin (All Licenses)"},
+          {"name": "box__Docgen_Template_Manager", "label": "Box Doc Gen Template Manager"},
+          {"name": "box__Box_Sign_Admin", "label": "Box Sign"},
+          {"name": "CLM_Box_Automate_Integration", "label": "CLM Box Automate Integration"},
+          {"name": "CLM_Demo_Operator", "label": "CLM Demo Operator"}
+        ]
+      },
       "box": {
         "deployment_defaults": {
           "global_strategy": "create_new",

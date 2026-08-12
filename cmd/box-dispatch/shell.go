@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -18,7 +19,6 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
@@ -27,6 +27,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 	"github.com/unofficialbox/box-dispatch/internal/workspace"
@@ -84,6 +85,9 @@ const (
 	screenTeardown
 	screenBoxCCG
 	screenBoxSwitch
+	screenDiagnostic
+	screenScratchConfirm
+	screenDevHubs
 )
 
 type connectionStatus int
@@ -120,6 +124,26 @@ type checkFinishedMsg struct {
 type externalFinishedMsg struct {
 	provider string
 	err      error
+}
+
+type postDeployOpenFinishedMsg struct {
+	label string
+	err   error
+}
+
+type scratchOrgFinishedMsg struct {
+	alias string
+	info  salesforceorg.Info
+	err   error
+}
+
+type devHubListFinishedMsg struct {
+	hubs []salesforceorg.DevHub
+	err  error
+}
+
+type devHubLoginFinishedMsg struct {
+	err error
 }
 
 type packageFinishedMsg struct {
@@ -256,10 +280,6 @@ type rootShellModel struct {
 	spinner               spinner.Model
 	hostInput             textinput.Model
 	progress              progress.Model
-	journeySpring         harmonica.Spring
-	journeyValue          float64
-	journeyVel            float64
-	journeyAnimating      bool
 	activityLog           []string     // live step lines for the running task
 	activityExpanded      bool         // whether the activity feed is expanded
 	activityCh            chan tea.Msg // steps + final result from the running task
@@ -283,6 +303,8 @@ type rootShellModel struct {
 	validationQueue       []string
 	validationProgress    map[string]float64
 	currentValidation     string
+	lifecycleScroll       int  // first visible row of validation/deployment provider details
+	lifecycleFollowTail   bool // live validation/deployment follows the newest checklist row
 	deployStarted         bool
 	deployDone            bool
 	confirmingDeploy      bool
@@ -302,6 +324,16 @@ type rootShellModel struct {
 	historyError          string
 	validationItems       []lifecycle.Item
 	message               string
+	providerDiagnostics   map[string]string
+	diagnosticTitle       string
+	diagnosticBody        string
+	diagnosticReturn      shellScreen
+	diagnosticScroll      int
+	salesforceCreating    bool
+	pendingScratchAlias   string
+	scratchConfirmCursor  int
+	devHubs               []salesforceorg.DevHub
+	selectedDevHub        salesforceorg.DevHub
 
 	// Teardown ("reset the demo environment") state. The record is the resource
 	// inventory the reset deletes from; nothing outside it is ever touched.
@@ -400,21 +432,19 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 		deploymentStrategy: solution.StrategyCreateNew,
 	}
 	m := rootShellModel{
-		screen:             screenWelcome,
-		components:         components,
-		templates:          templates,
-		statuses:           map[string]connectionStatus{},
-		results:            map[string]checker.ProviderResult{},
-		validationProgress: map[string]float64{},
-		deploymentProgress: map[string]float64{},
-		spinner:            spin,
-		hostInput:          host,
-		progress:           bar,
-		// Critically damped (ratio 1.0) so the overall-progress bar eases toward
-		// each step without ever springing backward past its target.
-		journeySpring: harmonica.NewSpring(harmonica.FPS(60), 6.0, 1.0),
-		help:          helpModel,
-		answers:       answers,
+		screen:              screenWelcome,
+		components:          components,
+		templates:           templates,
+		statuses:            map[string]connectionStatus{},
+		results:             map[string]checker.ProviderResult{},
+		providerDiagnostics: map[string]string{},
+		validationProgress:  map[string]float64{},
+		deploymentProgress:  map[string]float64{},
+		spinner:             spin,
+		hostInput:           host,
+		progress:            bar,
+		help:                helpModel,
+		answers:             answers,
 	}
 	m.rebuildComponentForm()
 	m.rebuildTemplateForm()
@@ -507,7 +537,7 @@ func firstNonEmptyString(values ...string) string {
 func defaultComponents() []componentChoice {
 	return []componentChoice{
 		{provider: "box", name: "Box", role: "Content, unstructured data, and AI", selected: true, required: true},
-		{provider: "salesforce", name: "Agentforce", role: "Structured data, human experience, and agents"},
+		{provider: "salesforce", name: "Salesforce", role: "CRM, structured records, and customer workflows"},
 		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence"},
 		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration"},
 	}
@@ -814,6 +844,8 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 	m.validateRunning = true
 	m.validateDone = false
 	m.activityLog, m.activityExpanded = nil, false
+	m.lifecycleScroll = 0
+	m.lifecycleFollowTail = true
 	m.validationItems = nil
 	m.validationQueue = append([]string(nil), m.selectedProviders()...)
 	m.validationProgress = map[string]float64{}
@@ -830,13 +862,18 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 		}
 		m.validationItems = append(m.validationItems, item)
 	}
-	return m.startNextValidation()
+	next, cmd := m.startNextValidation()
+	result := next.(rootShellModel)
+	result.followLifecycleTail()
+	return result, cmd
 }
 
 func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
 	m.deployStarted = true
 	m.deployDone = false
 	m.activityLog, m.activityExpanded = nil, false
+	m.lifecycleScroll = 0
+	m.lifecycleFollowTail = true
 	m.deployAssetsScroll = 0
 	m.deploymentBaseline = append([]lifecycle.Item(nil), m.validationItems...)
 	m.deploymentStartedAt = time.Now().UTC()
@@ -847,7 +884,10 @@ func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
 	for _, item := range m.deploymentQueue {
 		m.deploymentProgress[item.Provider] = 0
 	}
-	return m.startNextDeployment()
+	next, cmd := m.startNextDeployment()
+	result := next.(rootShellModel)
+	result.followLifecycleTail()
+	return result, cmd
 }
 
 func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
@@ -860,6 +900,7 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.confirmingDeploy = true
+	m.lifecycleScroll = 0
 	m.deployConfirmCursor = 1 // default to the safe choice (Cancel)
 	m.deployConfirmTitle = fmt.Sprintf("Deploy %d provider configuration set(s)?", deployable)
 	m.deployConfirmDesc = "Box Dispatch will deploy missing configuration to: " + strings.Join(providers, ", ") + ". Existing components will be skipped."
@@ -1087,55 +1128,8 @@ func (m rootShellModel) Init() tea.Cmd {
 	return m.componentForm.Init()
 }
 
-// journeyFrameMsg drives one frame of the overall-progress spring.
-type journeyFrameMsg time.Time
-
-// journeyFrame schedules the next animation frame at ~60fps.
-func journeyFrame() tea.Cmd {
-	return tea.Tick(time.Second/60, func(t time.Time) tea.Msg { return journeyFrameMsg(t) })
-}
-
-// Update wraps the main message router with the overall-progress animation: it
-// advances the spring on frame messages, and after every other message kicks a
-// frame loop when the journey target has moved. The loop stops itself once the
-// motion settles, so the shell does no animation work while at rest.
 func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if frame, ok := msg.(journeyFrameMsg); ok {
-		return m.advanceJourney(frame)
-	}
-	updated, cmd := m.route(msg)
-	next := updated.(rootShellModel)
-	if kick := next.kickJourney(); kick != nil {
-		return next, tea.Batch(cmd, kick)
-	}
-	return next, cmd
-}
-
-// kickJourney starts the spring toward the current journey target when the
-// rendered value has drifted from it and no frame loop is already running.
-func (m *rootShellModel) kickJourney() tea.Cmd {
-	if m.journeyAnimating {
-		return nil
-	}
-	target := m.overallJourneyProgress()
-	if math.Abs(target-m.journeyValue) < 0.001 {
-		m.journeyValue = target
-		return nil
-	}
-	m.journeyAnimating = true
-	return journeyFrame()
-}
-
-// advanceJourney steps the spring one frame toward its (possibly moving) target
-// and re-schedules until the motion settles, then goes idle.
-func (m rootShellModel) advanceJourney(_ journeyFrameMsg) (tea.Model, tea.Cmd) {
-	target := m.overallJourneyProgress()
-	m.journeyValue, m.journeyVel = m.journeySpring.Update(m.journeyValue, m.journeyVel, target)
-	if math.Abs(target-m.journeyValue) < 0.002 && math.Abs(m.journeyVel) < 0.002 {
-		m.journeyValue, m.journeyVel, m.journeyAnimating = target, 0, false
-		return m, nil
-	}
-	return m, journeyFrame()
+	return m.route(msg)
 }
 
 func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1159,8 +1153,12 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.directoryInput.Width = min(max(msg.Width-34, 30), 72)
 		m.packageInput.Width = min(max(msg.Width-34, 30), 56)
 		m.directoryPicker.Height = min(max(msg.Height-18, 5), 16)
+		m.followLifecycleTail()
 		return m, nil
 	case spinner.TickMsg:
+		if !m.spinnerActive() {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -1172,6 +1170,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The activity feed already shows the latest step; don't also push it into
 		// m.message, which the footer renders — that duplicated the line at the
 		// bottom of the screen.
+		m.followLifecycleTail()
 		return m, waitForActivity(m.activityCh)
 	case checkFinishedMsg:
 		if msg.err != nil {
@@ -1179,13 +1178,17 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = msg.err.Error()
 		} else {
 			m.results[msg.provider] = msg.result
+			if strings.TrimSpace(msg.result.Diagnostic) != "" {
+				m.providerDiagnostics[msg.provider] = msg.result.Diagnostic
+			}
 			if msg.result.ConnectivityOK {
 				if msg.provider == "salesforce" {
 					profile := firstNonEmptyString(msg.result.Discovery.Profile, msg.result.Discovery.Identity)
 					if profile != "" {
-						m.saveProviderOption(msg.provider, profile)
+						m.saveSalesforceDiscovery(msg.result.Discovery)
 						_ = os.Setenv("SF_ALIAS", profile)
 					}
+					delete(m.providerDiagnostics, "salesforce")
 				}
 				m.statuses[msg.provider] = connectionConnected
 				m.message = providerLabel(msg.provider) + " connected"
@@ -1202,6 +1205,65 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.message = "Authentication finished. Verifying connection..."
 		return m.beginChecks([]string{msg.provider})
+	case postDeployOpenFinishedMsg:
+		if msg.err != nil {
+			m.message = "Unable to open " + msg.label + ": " + msg.err.Error()
+		} else {
+			m.message = "Opened " + msg.label + "."
+		}
+		return m, nil
+	case scratchOrgFinishedMsg:
+		m.salesforceCreating = false
+		if msg.err != nil {
+			m.statuses["salesforce"] = connectionFailed
+			m.message = "Scratch-org creation failed. Review the guidance above or press d for the full Salesforce CLI error."
+			result := m.results["salesforce"]
+			result.Name = "salesforce"
+			result.Checks = []string{msg.err.Error()}
+			result.RequiresAttention = true
+			if failure, ok := msg.err.(*salesforceorg.Failure); ok {
+				m.providerDiagnostics["salesforce"] = failure.Diagnostic
+				result.Diagnostic = failure.Diagnostic
+			}
+			m.results["salesforce"] = result
+			return m, nil
+		}
+		m.saveSalesforceTarget(msg.alias, msg.info)
+		_ = os.Setenv("SF_ALIAS", msg.alias)
+		delete(m.providerDiagnostics, "salesforce")
+		m.message = "Scratch org created. Verifying status and expiration..."
+		return m.beginChecks([]string{"salesforce"})
+	case devHubListFinishedMsg:
+		if msg.err != nil {
+			result := m.results["salesforce"]
+			result.Name = "salesforce"
+			result.Checks = []string{msg.err.Error()}
+			result.RequiresAttention = true
+			if failure, ok := msg.err.(*salesforceorg.Failure); ok {
+				result.Diagnostic = failure.Diagnostic
+				m.providerDiagnostics["salesforce"] = failure.Diagnostic
+			}
+			m.results["salesforce"] = result
+			m.message = "Dev Hub discovery failed. Review the guidance above or press d for the full Salesforce CLI error."
+			return m, nil
+		}
+		m.devHubs = msg.hubs
+		if len(m.devHubs) == 0 {
+			m.message = "No authenticated Dev Hub found. Opening Salesforce login..."
+			cmd := exec.Command("sf", "org", "login", "web", "--set-default-dev-hub", "--alias", "box-dispatch-devhub")
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return devHubLoginFinishedMsg{err: err} })
+		}
+		m.cursor = preferredDevHubCursor(m.devHubs)
+		m.screen = screenDevHubs
+		m.message = "Choose which authenticated Dev Hub should create the scratch org."
+		return m, nil
+	case devHubLoginFinishedMsg:
+		if msg.err != nil {
+			m.message = "Dev Hub authentication failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.message = "Dev Hub authentication finished. Discovering available Dev Hubs..."
+		return m, tea.Batch(m.spinner.Tick, listDevHubsCmd())
 	case packageFinishedMsg:
 		m.packageStarted = false
 		if msg.err != nil {
@@ -1229,10 +1291,14 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !updated {
 			m.validationItems = append(m.validationItems, msg.item)
 		}
-		return m.startNextValidation()
+		next, cmd := m.startNextValidation()
+		result := next.(rootShellModel)
+		result.followLifecycleTail()
+		return result, cmd
 	case providerValidationProgressMsg:
 		if m.validateRunning && m.currentValidation == msg.provider && m.validationProgress[msg.provider] < 0.92 {
 			m.validationProgress[msg.provider] = math.Min(m.validationProgress[msg.provider]+0.035, 0.92)
+			m.followLifecycleTail()
 			return m, validationProgressCmd(msg.provider)
 		}
 		return m, nil
@@ -1248,7 +1314,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		return m.startNextDeployment()
+		next, cmd := m.startNextDeployment()
+		result := next.(rootShellModel)
+		result.followLifecycleTail()
+		return result, cmd
 	case providerDeployProgressMsg:
 		if m.deployStarted && m.currentDeployment == msg.provider && m.deploymentProgress[msg.provider] < 0.92 {
 			m.deploymentProgress[msg.provider] = math.Min(m.deploymentProgress[msg.provider]+0.035, 0.92)
@@ -1334,6 +1403,12 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmingDeploy = false
 				m.message = "Deployment cancelled. No provider configuration was changed."
 				return m, nil
+			case "down", "j":
+				m.scrollLifecycleResults(1)
+				return m, nil
+			case "up", "k":
+				m.scrollLifecycleResults(-1)
+				return m, nil
 			case "left", "right", "tab", "h", "l":
 				m.deployConfirmCursor = 1 - m.deployConfirmCursor
 				return m, nil
@@ -1348,12 +1423,95 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.screen == screenDevHubs {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "left", "q":
+				m.screen, m.cursor = screenProvider, 0
+				m.message = "Scratch-org creation cancelled."
+				return m, nil
+			case "up", "down", "j", "k", "tab":
+				m.moveCursor(key, len(m.devHubs))
+				return m, nil
+			case "enter", "right", " ", "spacebar":
+				if len(m.devHubs) == 0 || m.cursor >= len(m.devHubs) {
+					return m, nil
+				}
+				m.selectedDevHub = m.devHubs[m.cursor]
+				settings, _ := shellstate.LoadConnectionSettings()
+				settings.SalesforceDevHubAlias = m.selectedDevHub.Target()
+				_ = shellstate.SaveConnectionSettings(settings)
+				m.pendingScratchAlias = scratchOrgAlias(time.Now())
+				m.scratchConfirmCursor = 1
+				m.screen = screenScratchConfirm
+				m.message = "Review the selected Dev Hub and scratch-org allocation."
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+	if m.screen == screenScratchConfirm {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "q":
+				m.screen, m.cursor = screenProvider, 0
+				m.message = "Scratch-org creation cancelled."
+				return m, nil
+			case "left", "right", "tab", "h", "l":
+				m.scratchConfirmCursor = 1 - m.scratchConfirmCursor
+				return m, nil
+			case "enter", " ", "spacebar":
+				if m.scratchConfirmCursor != 0 {
+					m.screen, m.cursor = screenProvider, 0
+					m.message = "Scratch-org creation cancelled."
+					return m, nil
+				}
+				alias := m.pendingScratchAlias
+				m.screen, m.cursor = screenProvider, 0
+				m.salesforceCreating = true
+				m.statuses["salesforce"] = connectionChecking
+				devHub := m.selectedDevHub.Target()
+				m.message = "Creating a 30-day Developer scratch org using Dev Hub " + devHub + "..."
+				return m, tea.Batch(m.spinner.Tick, createScratchOrgCmd(alias, devHub))
+			}
+		}
+		return m, nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
 	}
 	if key.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.screen == screenDiagnostic {
+		switch key.String() {
+		case "esc", "left", "d":
+			m.screen = m.diagnosticReturn
+			m.diagnosticScroll = 0
+			return m, nil
+		case "down", "j":
+			m.scrollDiagnostic(1)
+			return m, nil
+		case "up", "k":
+			m.scrollDiagnostic(-1)
+			return m, nil
+		case "pgdown":
+			m.scrollDiagnostic(max(m.height-16, 5))
+			return m, nil
+		case "pgup":
+			m.scrollDiagnostic(-max(m.height-16, 5))
+			return m, nil
+		}
+	}
+	if key.String() == "d" && (m.screen == screenProvider || m.screen == screenValidate || m.screen == screenDeploy) {
+		if m.openDiagnostic() {
+			return m, nil
+		}
 	}
 	// While a long task runs, `e` expands/collapses the live activity feed.
 	if key.String() == "e" && m.taskRunning() && len(m.activityLog) > 0 {
@@ -1522,6 +1680,9 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case screenProvider:
+		if key.String() == "r" && m.provider == "salesforce" {
+			return m.beginChecks([]string{"salesforce"})
+		}
 		m.moveCursor(key, len(m.providerActions()))
 		if key.String() == "left" {
 			m.screen, m.cursor = screenDashboard, 0
@@ -1552,12 +1713,25 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case screenOptions:
-		options := m.results[m.provider].Discovery.Options
+		options := m.providerOptions()
 		m.moveCursor(key, len(options))
 		m.optionCursor = m.cursor
 		if (key.String() == "enter" || key.String() == "right") && len(options) > 0 {
-			m.saveProviderOption(m.provider, options[m.cursor])
+			selected := options[m.cursor]
+			if m.provider == "salesforce" && selected == salesforceLoginOption {
+				m.screen, m.cursor = screenProvider, 0
+				m.message = "Opening Salesforce login..."
+				cmd := exec.Command("sf", "org", "login", "web", "--set-default")
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return externalFinishedMsg{provider: "salesforce", err: err}
+				})
+			}
+			m.saveProviderOption(m.provider, selected)
 			m.screen, m.cursor = screenProvider, 0
+			if m.provider == "salesforce" {
+				m.message = "Salesforce org selected. Verifying connection..."
+				return m.beginChecks([]string{"salesforce"})
+			}
 			m.message = "Selection saved. Choose Check connection when ready."
 		}
 		if key.String() == "left" {
@@ -1646,6 +1820,14 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startPackage()
 		}
 	case screenValidate:
+		if key.String() == "down" || key.String() == "j" {
+			m.scrollLifecycleResults(1)
+			return m, nil
+		}
+		if key.String() == "up" || key.String() == "k" {
+			m.scrollLifecycleResults(-1)
+			return m, nil
+		}
 		if key.String() == "left" {
 			m.screen = screenPackage
 			return m, nil
@@ -1653,6 +1835,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "right" || (key.String() == "enter" && m.validateDone) {
 			if !m.validateDone {
 				m.message = "Complete validation before deployment."
+				return m, nil
+			}
+			if m.validationHasFailures() {
+				m.message = "Deployment is blocked because provider validation failed. Resolve the error and press r to validate again."
 				return m, nil
 			}
 			m.screen = screenDeploy
@@ -1665,6 +1851,14 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startValidation()
 		}
 	case screenDeploy:
+		if !m.deployDone && (key.String() == "down" || key.String() == "j") {
+			m.scrollLifecycleResults(1)
+			return m, nil
+		}
+		if !m.deployDone && (key.String() == "up" || key.String() == "k") {
+			m.scrollLifecycleResults(-1)
+			return m, nil
+		}
 		if m.deployDone {
 			switch key.String() {
 			case "down", "j":
@@ -1678,6 +1872,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deployAssetsScroll--
 				}
 				return m, nil
+			case "b":
+				return m.openPostDeployBox()
+			case "s":
+				return m.openPostDeploySalesforce()
 			}
 		}
 		if key.String() == "left" {
@@ -1782,6 +1980,14 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch actions[index] {
+	case "salesforce-done":
+		m.screen = screenDashboard
+		m.cursor = len(m.selectedProviders()) + 2
+		m.message = "Salesforce org ready. Continue when every selected service is connected."
+		return m, nil
+	case "salesforce-existing":
+		m.screen, m.cursor = screenOptions, 0
+		return m, nil
 	case "check":
 		return m.beginChecks([]string{m.provider})
 	case "choose":
@@ -1791,6 +1997,9 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		return m.openBoxCCGForm()
 	case "switch":
 		return m.openBoxSwitch()
+	case "scratch":
+		m.message = "Discovering authenticated Salesforce Dev Hubs..."
+		return m, tea.Batch(m.spinner.Tick, listDevHubsCmd())
 	case "connect":
 		if m.provider == "databricks" {
 			m.screen = screenDatabricksHost
@@ -1848,6 +2057,12 @@ func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m rootShellModel) providerActions() []string {
+	if m.provider == "salesforce" {
+		if m.statuses["salesforce"] == connectionConnected {
+			return []string{"salesforce-done", "salesforce-existing", "scratch"}
+		}
+		return []string{"salesforce-existing", "scratch", "back"}
+	}
 	actions := []string{"check"}
 	if len(m.results[m.provider].Discovery.Options) > 1 {
 		actions = append(actions, "choose")
@@ -1857,6 +2072,16 @@ func (m rootShellModel) providerActions() []string {
 	}
 	actions = append(actions, "connect", "back")
 	return actions
+}
+
+const salesforceLoginOption = "Sign in to another Salesforce org..."
+
+func (m rootShellModel) providerOptions() []string {
+	options := append([]string(nil), m.results[m.provider].Discovery.Options...)
+	if m.provider == "salesforce" {
+		options = append(options, salesforceLoginOption)
+	}
+	return options
 }
 
 // openBoxCCGForm captures a Box Client Credentials Grant app and its subject, so
@@ -2052,6 +2277,121 @@ func (m rootShellModel) saveProviderOption(provider, value string) {
 	_ = shellstate.SaveConnectionSettings(settings)
 }
 
+func (m rootShellModel) saveSalesforceTarget(alias string, info salesforceorg.Info) {
+	settings, _ := shellstate.LoadConnectionSettings()
+	settings.SalesforceAlias = firstNonEmptyString(alias, info.Alias, info.Username)
+	settings.SalesforceOrgID = info.ID
+	settings.SalesforceOrgStatus = info.EffectiveStatus()
+	settings.SalesforceExpirationDate = info.ExpirationDate
+	settings.SalesforceOrgType = "persistent"
+	if info.IsScratch() {
+		settings.SalesforceOrgType = "scratch"
+	}
+	_ = shellstate.SaveConnectionSettings(settings)
+}
+
+func (m rootShellModel) saveSalesforceDiscovery(discovery checker.ProviderDiscovery) {
+	settings, _ := shellstate.LoadConnectionSettings()
+	settings.SalesforceAlias = firstNonEmptyString(discovery.Profile, discovery.Identity)
+	settings.SalesforceOrgID = discovery.OrgID
+	settings.SalesforceOrgStatus = discovery.OrgStatus
+	settings.SalesforceExpirationDate = discovery.ExpiresAt
+	settings.SalesforceOrgType = discovery.OrgType
+	_ = shellstate.SaveConnectionSettings(settings)
+}
+
+func scratchOrgAlias(now time.Time) string {
+	return "box-dispatch-" + now.UTC().Format("20060102-150405")
+}
+
+func listDevHubsCmd() tea.Cmd {
+	return func() tea.Msg {
+		hubs, err := salesforceorg.ListDevHubs()
+		return devHubListFinishedMsg{hubs: hubs, err: err}
+	}
+}
+
+func preferredDevHubCursor(hubs []salesforceorg.DevHub) int {
+	settings, _ := shellstate.LoadConnectionSettings()
+	for i, hub := range hubs {
+		if hub.Target() == settings.SalesforceDevHubAlias {
+			return i
+		}
+	}
+	for i, hub := range hubs {
+		if hub.Connected() {
+			return i
+		}
+	}
+	return 0
+}
+
+func createScratchOrgCmd(alias, devHub string) tea.Cmd {
+	return func() tea.Msg {
+		info, err := salesforceorg.CreateScratch(alias, devHub)
+		return scratchOrgFinishedMsg{alias: alias, info: info, err: err}
+	}
+}
+
+const boxAdminConsoleURL = "https://app.box.com/master"
+
+func (m rootShellModel) openPostDeployBox() (tea.Model, tea.Cmd) {
+	cmd := browserOpenCommand(runtime.GOOS, boxAdminConsoleURL)
+	if cmd == nil {
+		m.message = "Opening the Box enterprise is not supported on this operating system."
+		return m, nil
+	}
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return postDeployOpenFinishedMsg{label: "Box enterprise", err: err}
+	})
+}
+
+func (m rootShellModel) openPostDeploySalesforce() (tea.Model, tea.Cmd) {
+	alias, ok := m.postDeploySalesforceTarget()
+	if !ok {
+		m.message = "No selected Salesforce scratch org is available to open."
+		return m, nil
+	}
+	cmd := exec.Command("sf", "org", "open", "--target-org", alias)
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return postDeployOpenFinishedMsg{label: "Salesforce scratch org", err: err}
+	})
+}
+
+func browserOpenCommand(goos, target string) *exec.Cmd {
+	switch goos {
+	case "darwin":
+		return exec.Command("open", target)
+	case "linux":
+		return exec.Command("xdg-open", target)
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		return nil
+	}
+}
+
+func (m rootShellModel) postDeploySalesforceTarget() (string, bool) {
+	if !slices.Contains(m.selectedProviders(), "salesforce") {
+		return "", false
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err == nil && strings.TrimSpace(settings.SalesforceAlias) != "" && strings.EqualFold(settings.SalesforceOrgType, "scratch") {
+		return settings.SalesforceAlias, true
+	}
+	discovery := m.results["salesforce"].Discovery
+	alias := firstNonEmptyString(discovery.Profile, discovery.Identity)
+	return alias, alias != "" && strings.EqualFold(discovery.OrgType, "scratch")
+}
+
+func (m rootShellModel) postDeployBoxEnterpriseSuffix() string {
+	enterpriseID := strings.TrimSpace(m.results["box"].Discovery.Enterprise)
+	if enterpriseID == "" {
+		return ""
+	}
+	return " (EID " + enterpriseID + ")"
+}
+
 func (m rootShellModel) savePlan() {
 	if m.selected == nil {
 		return
@@ -2131,6 +2471,12 @@ func (m rootShellModel) View() string {
 		body = m.viewBoxCCG(contentWidth)
 	case screenBoxSwitch:
 		body = m.viewBoxSwitch(contentWidth)
+	case screenDiagnostic:
+		body = m.viewDiagnostic(contentWidth)
+	case screenScratchConfirm:
+		body = m.viewScratchConfirm(contentWidth)
+	case screenDevHubs:
+		body = m.viewDevHubs(contentWidth)
 	}
 	return lipgloss.NewStyle().Margin(1, 3).Width(contentWidth).Render(m.header(contentWidth) + "\n\n" + body + "\n\n" + m.footer())
 }
@@ -2152,6 +2498,21 @@ func (m rootShellModel) header(width int) string {
 // the activity feed and its expand key are only active while there is work.
 func (m rootShellModel) taskRunning() bool {
 	return m.validateRunning || m.deployStarted || m.teardownStarted
+}
+
+// spinnerActive prevents a completed validation or deployment from scheduling
+// an endless chain of repaint ticks. The old unconditional TickMsg handler made
+// static checklists look as though they were still scrolling or looping.
+func (m rootShellModel) spinnerActive() bool {
+	if m.packageStarted || m.validateRunning || m.deployStarted || m.teardownStarted || m.salesforceCreating {
+		return true
+	}
+	for _, status := range m.statuses {
+		if status == connectionChecking {
+			return true
+		}
+	}
+	return false
 }
 
 // renderActivity draws the live "still working" feed: a spinner header and, by
@@ -2201,7 +2562,7 @@ func (m rootShellModel) stepper() string {
 	switch m.screen {
 	case screenComponents:
 		current = 0
-	case screenDashboard, screenProvider, screenOptions, screenDatabricksHost:
+	case screenDashboard, screenProvider, screenOptions, screenDatabricksHost, screenScratchConfirm, screenDevHubs:
 		current = 1
 	case screenTemplates:
 		current = 2
@@ -2248,7 +2609,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 	accentMark := lipgloss.NewStyle().Bold(true).Foreground(coral).Render(" »")
 	eyebrow := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("COMMUNITY-BUILT · OPEN SOURCE · PUNK ROCK 🤘")
 	description := lipgloss.NewStyle().Foreground(ice).Width(min(inner, 66)).Render("Open tools for the builders extending Box — from composable building blocks to industry solution accelerators.")
-	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   AGENTFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
+	tags := lipgloss.NewStyle().Bold(true).Foreground(muted).Render("BOX   ·   SALESFORCE   ·   DATABRICKS   ·   AWS BEDROCK AGENTCORE")
 
 	options := welcomeOptions
 	optionRows := make([]string, len(options))
@@ -2376,7 +2737,7 @@ func (m rootShellModel) viewComponents(width int) string {
 	if m.componentForm != nil {
 		form = m.componentForm.View()
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Build your solution stack") + "\n" + dimStyle.Render("A validated Huh multi-select keeps the platform plan consistent.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Build your solution stack") + "\n" + dimStyle.Render("Box is required. Add only the platforms this solution needs.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
 }
 
 func (m rootShellModel) viewTemplates(width int) string {
@@ -2384,7 +2745,7 @@ func (m rootShellModel) viewTemplates(width int) string {
 	if m.templateForm != nil {
 		form = m.templateForm.View()
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose an industry quickstart") + "\n" + dimStyle.Render("Huh provides keyboard selection, validation, and accessible form behavior.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose an industry quickstart") + "\n" + dimStyle.Render("Start from a validated solution template.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
 }
 
 func (m rootShellModel) viewDashboard(width int) string {
@@ -2397,8 +2758,8 @@ func (m rootShellModel) viewDashboard(width int) string {
 			connected++
 		}
 		line := fmt.Sprintf("  %-31s ", providerLabel(provider)) + m.statusLabel(provider)
-		if details := providerConnectionDetails(m.results[provider]); details != "" {
-			line += "\n      " + dimStyle.Render(details)
+		if summary := renderProviderConnectionSummary(m.results[provider]); summary != "" {
+			line += "\n" + summary
 		}
 		style := lipgloss.NewStyle().Width(width-10).Padding(0, 1)
 		if i == m.cursor {
@@ -2406,19 +2767,15 @@ func (m rootShellModel) viewDashboard(width int) string {
 		}
 		rows = append(rows, style.Render(line))
 	}
-	progress := float64(1) / 7
-	if len(providers) > 0 {
-		progress += (float64(connected) / float64(len(providers))) / 7
-	}
 	checkIndex := len(providers)
 	reviseIndex := checkIndex + 1
 	continueIndex := reviseIndex + 1
-	checkStyle, reviseStyle := panel.Copy().Padding(0, 1).Width((width-7)/2).Height(3), panel.Copy().Padding(0, 1).Width((width-7)/2).Height(3)
+	checkStyle, reviseStyle := panel.Copy().Padding(0, 1).Width((width-7)/2), panel.Copy().Padding(0, 1).Width((width-7)/2)
 	if m.cursor == checkIndex {
-		checkStyle = activePane.Copy().Padding(0, 1).Width((width - 7) / 2).Height(3)
+		checkStyle = activePane.Copy().Padding(0, 1).Width((width - 7) / 2)
 	}
 	if m.cursor == reviseIndex {
-		reviseStyle = activePane.Copy().Padding(0, 1).Width((width - 7) / 2).Height(3)
+		reviseStyle = activePane.Copy().Padding(0, 1).Width((width - 7) / 2)
 	}
 	continueStyle := panel.Copy().Padding(0, 1).Width(width - 4).Height(2)
 	continueText := dimStyle.Render("○  Continue to template selection  ·  Connect every selected service first")
@@ -2429,12 +2786,52 @@ func (m rootShellModel) viewDashboard(width int) string {
 		continueStyle = activePane.Copy().Padding(0, 1).Width(width - 4).Height(2)
 	}
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Connect selected services") + "\n" + dimStyle.Render("Confirm access before choosing an industry quickstart.") + "\n\n" +
-		m.progress.ViewAs(progress) + "  " + fmt.Sprintf("%d/%d connections", connected, len(providers)) + "\n\n" +
+		accent.Render(fmt.Sprintf("%d/%d connected", connected, len(providers))) + "\n\n" +
 		panel.Copy().Padding(0, 1).Width(width-4).Render(strings.Join(rows, "\n")) + "\n" +
 		lipgloss.JoinHorizontal(lipgloss.Top,
-			checkStyle.Render("◆  Recheck selected services\n   Run all connectivity checks"), " ",
-			reviseStyle.Render("↺  Revise component stack\n   Change selected services")) + "\n" +
+			checkStyle.Render("◆  Recheck connections"), " ",
+			reviseStyle.Render("↺  Change providers")) + "\n" +
 		continueStyle.Render(continueText)
+}
+
+func providerConnectionSummary(result checker.ProviderResult) string {
+	parts := make([]string, 0, 2)
+	add := func(label, value string) {
+		if strings.TrimSpace(value) != "" && len(parts) < 2 {
+			parts = append(parts, label+" "+value)
+		}
+	}
+	switch result.Name {
+	case "box":
+		add("user", result.Discovery.Identity)
+		add("enterprise", result.Discovery.Enterprise)
+	case "salesforce":
+		add("org", firstNonEmptyString(result.Discovery.Profile, result.Discovery.Identity))
+		if result.Discovery.ExpiresAt != "" {
+			add("expires", result.Discovery.ExpiresAt)
+		} else {
+			add("type", result.Discovery.OrgType)
+		}
+	case "databricks":
+		add("profile", firstNonEmptyString(result.Discovery.Profile, result.Discovery.Identity))
+		add("workspace", result.Discovery.Host)
+	case "aws":
+		add("profile", result.Discovery.Profile)
+		add("region", result.Discovery.Region)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func renderProviderConnectionSummary(result checker.ProviderResult) string {
+	summary := providerConnectionSummary(result)
+	if summary == "" {
+		return ""
+	}
+	lines := strings.Split(summary, "\n")
+	for i, line := range lines {
+		lines[i] = dimStyle.Copy().PaddingLeft(6).Render(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func providerConnectionDetails(result checker.ProviderResult) string {
@@ -2453,6 +2850,10 @@ func providerConnectionDetails(result checker.ProviderResult) string {
 	case "salesforce":
 		add("user", result.Discovery.Identity)
 		add("alias", result.Discovery.Profile)
+		add("type", result.Discovery.OrgType)
+		add("status", result.Discovery.OrgStatus)
+		add("expires", result.Discovery.ExpiresAt)
+		add("org ID", result.Discovery.OrgID)
 		add("org", result.Discovery.Host)
 	case "databricks":
 		add("user", result.Discovery.Identity)
@@ -2463,17 +2864,46 @@ func providerConnectionDetails(result checker.ProviderResult) string {
 		add("profile", result.Discovery.Profile)
 		add("region", result.Discovery.Region)
 	}
-	return strings.Join(parts, "  ·  ")
+	return strings.Join(parts, "\n")
+}
+
+// renderProviderConnectionDetails styles each physical line separately. A
+// single lipgloss Render over multiline text pads every line to the longest
+// value with default-background cells, which cuts black blocks into a selected
+// row's blue background.
+func renderProviderConnectionDetails(result checker.ProviderResult) string {
+	details := providerConnectionDetails(result)
+	if details == "" {
+		return ""
+	}
+	lines := strings.Split(details, "\n")
+	for i, line := range lines {
+		lines[i] = dimStyle.Copy().PaddingLeft(6).Render(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m rootShellModel) viewProvider(width int) string {
 	result := m.results[m.provider]
 	detail := "No check has been run."
-	if len(result.Checks) > 0 {
-		detail = strings.Join(result.Checks, "\n")
+	if m.provider == "salesforce" && m.statuses["salesforce"] == connectionConnected && providerConnectionDetails(result) != "" {
+		detail = titleStyle.Render("Current org") + "\n" + renderProviderConnectionDetails(result)
+	} else if len(result.Checks) > 0 {
+		checks := append([]string(nil), result.Checks...)
+		if m.provider == "salesforce" {
+			checks = slices.DeleteFunc(checks, func(check string) bool {
+				return strings.EqualFold(strings.TrimSpace(check), "salesforce tools discovered")
+			})
+		}
+		if len(checks) > 0 {
+			detail = strings.Join(checks, "\n")
+		}
 	}
 	actionLabels := map[string]string{
-		"check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+		"salesforce-done": "Continue with this org", "salesforce-existing": "Use a different Salesforce org", "check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "scratch": "Create or replace a 30-day scratch org", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+	}
+	if m.provider == "salesforce" && m.statuses["salesforce"] != connectionConnected {
+		actionLabels["salesforce-existing"] = "Use an existing Salesforce org"
 	}
 	rows := []string{}
 	for i, action := range m.providerActions() {
@@ -2488,7 +2918,7 @@ func (m rootShellModel) viewProvider(width int) string {
 }
 
 func (m rootShellModel) viewOptions(width int) string {
-	options := m.results[m.provider].Discovery.Options
+	options := m.providerOptions()
 	rows := make([]string, len(options))
 	for i, option := range options {
 		style := panel.Copy().Width(width - 4)
@@ -2497,7 +2927,13 @@ func (m rootShellModel) viewOptions(width int) string {
 		}
 		rows[i] = style.Render(option)
 	}
-	return titleStyle.Render("Choose "+providerLabel(m.provider)+" profile") + "\n\n" + strings.Join(rows, "\n")
+	title := "Choose " + providerLabel(m.provider) + " profile"
+	subtitle := ""
+	if m.provider == "salesforce" {
+		title = "Use an existing Salesforce org"
+		subtitle = dimStyle.Render("Choose a locally authenticated org or sign in to another one.") + "\n\n"
+	}
+	return titleStyle.Render(title) + "\n" + subtitle + strings.Join(rows, "\n")
 }
 
 func (m rootShellModel) viewDatabricksHost(width int) string {
@@ -2534,10 +2970,10 @@ func (m rootShellModel) viewConfig(width int) string {
 	destination := filepath.Join(m.directoryInput.Value(), m.packageInput.Value())
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Configure the solution package") + "\n" + dimStyle.Render("Choose a parent folder, edit the package name, then continue.") + "\n\n" +
 		summary + "\n" +
-		directoryStyle.Render(titleStyle.Render("1  Parent directory  ")+dimStyle.Render("[b browse]")+"\n"+m.directoryInput.View()) + "\n" +
+		directoryStyle.Render(titleStyle.Render("1  Parent directory")+"\n"+m.directoryInput.View()) + "\n" +
 		nameStyle.Render(titleStyle.Render("2  Package directory name")+"\n"+m.packageInput.View()) + "\n" +
-		strategyStyle.Render(titleStyle.Render("3  Deployment strategy  ")+dimStyle.Render("[←/→ change]")+"\n"+accent.Render(deploymentStrategyLabel(m.answers.deploymentStrategy))+"\n"+dimStyle.Render(m.deploymentNamePreview())) + "\n" +
-		boxStyle.Render(titleStyle.Render("4  Box components  ")+dimStyle.Render("[Enter configure]")+"\n"+accent.Render(strings.ToUpper(m.boxComponentMode))+dimStyle.Render(fmt.Sprintf(" · %d capabilities", len(m.boxCapabilities)))) + "\n" +
+		strategyStyle.Render(titleStyle.Render("3  Deployment strategy")+"\n"+accent.Render(deploymentStrategyLabel(m.answers.deploymentStrategy))+"\n"+dimStyle.Render(m.deploymentNamePreview())) + "\n" +
+		boxStyle.Render(titleStyle.Render("4  Box components")+"\n"+accent.Render(strings.ToUpper(m.boxComponentMode))+dimStyle.Render(fmt.Sprintf(" · %d capabilities", len(m.boxCapabilities)))) + "\n" +
 		continueStyle.Render(lipgloss.NewStyle().Bold(true).Foreground(coral).Render("5  Create package  →")+"\n"+dimStyle.Render(destination))
 }
 
@@ -2644,10 +3080,9 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 		rows = append(rows, dimStyle.Render("This template does not declare configurable Box capabilities."))
 	}
 	mode := accent.Render(strings.ToUpper(m.boxComponentMode))
-	controls := dimStyle.Render("a enable all · n disable all · d defaults · c customize · Space toggle · Enter save")
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Configure Box components") + "  " + mode + "\n" +
 		dimStyle.Render("Global modes affect supported rows only. Gold rows are visible references and cannot be selected.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n")) + "\n" + controls
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n"))
 }
 
 func (m rootShellModel) boxCapabilitySelected(capability solution.Capability) bool {
@@ -2669,9 +3104,8 @@ func (m rootShellModel) boxCapabilitySelected(capability solution.Capability) bo
 
 func (m rootShellModel) viewDirectoryPicker(width int) string {
 	content := titleStyle.Render("Browsing: ") + accent.Render(m.directoryPicker.CurrentDirectory) + "\n\n" + m.directoryPicker.View()
-	controls := dimStyle.Render("↑/↓ navigate  ·  Enter/→ open  ·  ← parent  ·  Space choose highlighted  ·  c choose current  ·  Esc cancel")
 	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose the parent directory") + "\n" + dimStyle.Render("Navigate the folder tree, then choose where Box Dispatch should create the package.") + "\n\n" +
-		activePane.Copy().Padding(1, 2).Width(width-4).Render(content) + "\n" + controls
+		activePane.Copy().Padding(1, 2).Width(width-4).Render(content)
 }
 
 func (m rootShellModel) viewPackage(width int) string {
@@ -2694,6 +3128,151 @@ func (m rootShellModel) viewPackage(width int) string {
 }
 
 func (m rootShellModel) viewValidate(width int) string {
+	prefix, suffix, lines, visible := m.validationViewport(width)
+	body := renderLifecycleViewport(lines, visible, m.lifecycleScroll)
+	return prefix + panel.Copy().Width(width-4).Padding(1, 2).Render(body) + suffix
+}
+
+func (m rootShellModel) validationHasFailures() bool {
+	for _, item := range m.validationItems {
+		if item.Status == lifecycle.StatusFailed {
+			return true
+		}
+	}
+	return false
+}
+
+func (m rootShellModel) lifecycleDiagnostic() (string, string) {
+	for _, item := range m.validationItems {
+		if strings.TrimSpace(item.Diagnostic) != "" {
+			title := providerLabel(item.Provider) + " full CLI diagnostics"
+			return title, item.Diagnostic
+		}
+	}
+	return "", ""
+}
+
+func (m *rootShellModel) openDiagnostic() bool {
+	title, body := "", ""
+	if m.screen == screenProvider {
+		body = m.providerDiagnostics[m.provider]
+		if body != "" {
+			title = providerLabel(m.provider) + " full CLI diagnostics"
+		}
+	} else {
+		title, body = m.lifecycleDiagnostic()
+	}
+	if strings.TrimSpace(body) == "" {
+		m.message = "No full diagnostic payload is available for this result."
+		return false
+	}
+	m.diagnosticTitle = title
+	m.diagnosticBody = body
+	m.diagnosticReturn = m.screen
+	m.diagnosticScroll = 0
+	m.screen = screenDiagnostic
+	m.message = "Sensitive token and secret fields are redacted."
+	return true
+}
+
+func (m rootShellModel) diagnosticLines(width int) []string {
+	wrapped := lipgloss.NewStyle().Width(max(width-10, 20)).Render(m.diagnosticBody)
+	return strings.Split(wrapped, "\n")
+}
+
+func (m rootShellModel) diagnosticCapacity() int {
+	return max(m.height-18, 5)
+}
+
+func (m *rootShellModel) scrollDiagnostic(delta int) {
+	width := min(max(m.width-8, 64), 112)
+	limit := max(len(m.diagnosticLines(width))-m.diagnosticCapacity(), 0)
+	m.diagnosticScroll = min(max(m.diagnosticScroll+delta, 0), limit)
+}
+
+func (m rootShellModel) viewDiagnostic(width int) string {
+	lines := m.diagnosticLines(width)
+	capacity := m.diagnosticCapacity()
+	start := min(max(m.diagnosticScroll, 0), max(len(lines)-capacity, 0))
+	end := min(start+capacity, len(lines))
+	shown := lines[start:end]
+	position := fmt.Sprintf("lines %d–%d of %d", start+1, end, len(lines))
+	if len(lines) == 0 {
+		shown = []string{"No diagnostic payload was returned."}
+		position = "no diagnostic lines"
+	}
+	return titleStyle.Render(m.diagnosticTitle) + "\n" +
+		dimStyle.Render("Complete sanitized Salesforce CLI payload. Stack and error.data are retained; credentials are redacted.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(shown, "\n")) + "\n" +
+		dimStyle.Render(position+" · ↑/↓ or PgUp/PgDn scroll · d/Esc returns")
+}
+
+func (m rootShellModel) viewScratchConfirm(width int) string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Create a 30-day Salesforce scratch org?")
+	detail := dimStyle.Copy().Width(width - 10).Render(
+		"Dispatch will create a Developer edition scratch org with the explicitly selected Dev Hub and make it the selected Salesforce target. This consumes one Dev Hub scratch-org allocation.",
+	)
+	selection := titleStyle.Render("Dev Hub  ") + firstNonEmptyString(m.selectedDevHub.Alias, m.selectedDevHub.Username) + "\n" +
+		titleStyle.Render("Alias    ") + m.pendingScratchAlias
+	create := confirmButton("Create scratch org", cyan, m.scratchConfirmCursor == 0)
+	cancel := confirmButton("Cancel", coral, m.scratchConfirmCursor == 1)
+	hint := dimStyle.Render("←/→ switch · Enter/Space confirm · Esc cancel")
+	body := title + "\n\n" + detail + "\n\n" + selection + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, create, "  ", cancel) + "\n\n" + hint
+	return m.stageHeader() + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(body)
+}
+
+func (m rootShellModel) viewDevHubs(width int) string {
+	rows := make([]string, 0, len(m.devHubs))
+	for i, hub := range m.devHubs {
+		status := lipgloss.NewStyle().Bold(true).Foreground(gold).Render("STATUS UNKNOWN")
+		if hub.Connected() {
+			status = lipgloss.NewStyle().Bold(true).Foreground(green).Render("● CONNECTED")
+		}
+		name := firstNonEmptyString(hub.Alias, hub.Username)
+		detail := titleStyle.Render(name) + "  " + status
+		if hub.Username != "" && hub.Username != name {
+			detail += "\n" + dimStyle.Render("user "+hub.Username)
+		}
+		if hub.OrgID != "" {
+			detail += "\n" + dimStyle.Render("org ID "+hub.OrgID)
+		}
+		style := panel.Copy().Width(width - 4)
+		if i == m.cursor {
+			style = activePane.Copy().Width(width - 4)
+		}
+		rows = append(rows, style.Render(detail))
+	}
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose a Salesforce Dev Hub") + "\n" +
+		dimStyle.Render("Dispatch passes this selection explicitly to sf org create scratch; no CLI-wide default is required.") + "\n\n" +
+		strings.Join(rows, "\n")
+}
+
+func (m rootShellModel) validationViewport(width int) (prefix, suffix string, lines []string, visible int) {
+	rows := m.validationRows(width)
+	status := "VALIDATION RESULTS"
+	if m.validateRunning {
+		status = m.spinner.View() + " VALIDATING PACKAGE AND PROVIDERS"
+	}
+	footer := accent.Render("Enter / →  Continue to Deploy    r  Validate again")
+	if m.validationHasFailures() {
+		footer = lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Deployment blocked: resolve failed validation") + "    " + accent.Render("r  Validate again")
+	}
+	if _, diagnostic := m.lifecycleDiagnostic(); diagnostic != "" {
+		footer += "    " + accent.Render("d  Full error details")
+	}
+	if m.validateRunning {
+		if activity := m.renderActivity(width - 4); activity != "" {
+			footer = activity
+		}
+	}
+	prefix = m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n"
+	suffix = "\n" + footer
+	lines = lifecycleResultLines(rows, "\n\n")
+	visible = m.lifecycleViewportCapacity(width, prefix, suffix)
+	return prefix, suffix, lines, visible
+}
+
+func (m rootShellModel) validationRows(width int) []string {
 	rows := []string{}
 	for _, provider := range m.selectedProviders() {
 		rows = append(rows, m.providerProgressRow(provider, m.validationProgress[provider], findLifecycleItem(m.validationItems, provider), provider == m.currentValidation, "validate", width-10))
@@ -2701,18 +3280,168 @@ func (m rootShellModel) viewValidate(width int) string {
 	if len(rows) == 0 {
 		rows = append(rows, dimStyle.Render("No validation results yet."))
 	}
-	status := "VALIDATION RESULTS"
-	if m.validateRunning {
-		status = m.spinner.View() + " VALIDATING PACKAGE AND PROVIDERS"
+	return rows
+}
+
+func lifecycleResultLines(rows []string, separator string) []string {
+	if len(rows) == 0 {
+		return nil
 	}
-	footer := accent.Render("Enter / →  Continue to Deploy    r  Validate again")
-	if m.validateRunning {
-		if activity := m.renderActivity(width - 4); activity != "" {
-			footer = activity
+	return strings.Split(strings.Join(rows, separator), "\n")
+}
+
+// lifecycleViewportCapacity measures the real shell chrome around an empty
+// results panel. Replacing the panel's single empty content row with N visible
+// rows adds N-1 lines, so the remaining terminal height is the exact viewport
+// capacity. A small floor keeps very short terminals usable.
+func (m rootShellModel) lifecycleViewportCapacity(width int, prefix, suffix string) int {
+	emptyPanel := panel.Copy().Width(width-4).Padding(1, 2).Render("")
+	framed := lipgloss.NewStyle().Margin(1, 3).Width(width).Render(
+		m.header(width) + "\n\n" + prefix + emptyPanel + suffix + "\n\n" + m.footer(),
+	)
+	return max(m.height-lipgloss.Height(framed)+1, 3)
+}
+
+func lifecycleViewportContentRows(total, visible int) int {
+	if total > visible {
+		return max(visible-1, 1) // reserve one line for the scroll position
+	}
+	return max(visible, 1)
+}
+
+func lifecycleScrollLimit(total, visible int) int {
+	return max(total-lifecycleViewportContentRows(total, visible), 0)
+}
+
+// clampLifecycleScroll advances within a bounded checklist without wrapping.
+// Repeated Down presses at the final row and repeated Up presses at the first
+// row are deliberate no-ops. Normalizing current first also recovers cleanly
+// when a terminal resize makes an old offset larger than the new viewport.
+func clampLifecycleScroll(current, delta, limit int) int {
+	current = min(max(current, 0), max(limit, 0))
+	if delta > 0 {
+		return min(current+delta, limit)
+	}
+	if delta < 0 {
+		return max(current+delta, 0)
+	}
+	return current
+}
+
+func renderLifecycleViewport(lines []string, visible, scroll int) string {
+	if len(lines) == 0 {
+		return dimStyle.Render("No provider results yet.")
+	}
+	contentRows := lifecycleViewportContentRows(len(lines), visible)
+	limit := lifecycleScrollLimit(len(lines), visible)
+	scroll = clampLifecycleScroll(scroll, 0, limit)
+	end := min(scroll+contentRows, len(lines))
+	shown := append([]string(nil), lines[scroll:end]...)
+	if len(lines) > visible {
+		up, down := "  ", "  "
+		if scroll > 0 {
+			up = "↑ "
+		}
+		if end < len(lines) {
+			down = "↓ "
+		}
+		position := fmt.Sprintf("%s%s lines %d–%d of %d · ↑/↓ scroll", up, down, scroll+1, end, len(lines))
+		if end == len(lines) {
+			position += " · end of checklist"
+		}
+		shown = append(shown, dimStyle.Render(position))
+	}
+	return strings.Join(shown, "\n")
+}
+
+func (m *rootShellModel) scrollLifecycleResults(delta int) {
+	limit, ok := m.lifecycleScrollLimit()
+	if !ok {
+		return
+	}
+	m.lifecycleScroll = clampLifecycleScroll(m.lifecycleScroll, delta, limit)
+	if delta < 0 {
+		// Like tail -f, moving away from the latest row pauses following until
+		// the operator navigates back to the bottom.
+		m.lifecycleFollowTail = false
+	} else if delta > 0 {
+		m.lifecycleFollowTail = m.lifecycleScroll == limit
+	}
+}
+
+func (m *rootShellModel) followLifecycleTail() {
+	if !m.lifecycleFollowTail {
+		return
+	}
+	if m.screen == screenValidate && m.validateRunning && m.currentValidation != "" {
+		if scroll, ok := m.activeValidationScroll(); ok {
+			m.lifecycleScroll = scroll
+			return
 		}
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n\n")) + "\n" + footer
+	limit, ok := m.lifecycleScrollLimit()
+	if ok {
+		m.lifecycleScroll = limit
+	}
+}
+
+// activeValidationScroll keeps the category currently advancing at the bottom
+// of the viewport. The checklist is pre-rendered, so blindly following its
+// absolute bottom would show pending work until validation was almost done.
+func (m rootShellModel) activeValidationScroll() (int, bool) {
+	width := min(max(m.width-8, 64), 112)
+	providers := m.selectedProviders()
+	providerIndex := slices.Index(providers, m.currentValidation)
+	if providerIndex < 0 {
+		return 0, false
+	}
+	rows := m.validationRows(width)
+	if providerIndex >= len(rows) {
+		return 0, false
+	}
+	rowLines := strings.Split(rows[providerIndex], "\n")
+	checklistHeader := -1
+	for index, line := range rowLines {
+		if strings.Contains(line, "DEPLOYMENT CHECKLIST") {
+			checklistHeader = index
+			break
+		}
+	}
+	targetInRow := 0
+	if checklistHeader >= 0 {
+		categoryCount := len(rowLines) - checklistHeader - 1
+		if categoryCount > 0 {
+			progress := math.Min(math.Max(m.validationProgress[m.currentValidation], 0), 1)
+			categoryIndex := int(math.Ceil(progress*float64(categoryCount))) - 1
+			categoryIndex = min(max(categoryIndex, 0), categoryCount-1)
+			targetInRow = checklistHeader + 1 + categoryIndex
+		} else {
+			targetInRow = checklistHeader
+		}
+	}
+	target := targetInRow
+	for index := 0; index < providerIndex; index++ {
+		target += len(strings.Split(rows[index], "\n")) + 1 // one blank separator line
+	}
+	_, _, lines, visible := m.validationViewport(width)
+	contentRows := lifecycleViewportContentRows(len(lines), visible)
+	limit := lifecycleScrollLimit(len(lines), visible)
+	return clampLifecycleScroll(target-contentRows+1, 0, limit), true
+}
+
+func (m rootShellModel) lifecycleScrollLimit() (int, bool) {
+	width := min(max(m.width-8, 64), 112)
+	var lines []string
+	visible := 0
+	switch m.screen {
+	case screenValidate:
+		_, _, lines, visible = m.validationViewport(width)
+	case screenDeploy:
+		_, _, lines, visible = m.deployProviderViewport(width)
+	default:
+		return 0, false
+	}
+	return lifecycleScrollLimit(len(lines), visible), true
 }
 
 // viewTeardown previews exactly what a reset will delete, then reports the
@@ -2903,9 +3632,27 @@ func (m rootShellModel) viewDeploy(width int) string {
 // and the action block below it. Keeping them separate lets deployTableCapacity
 // measure the surrounding chrome so the assets table is sized to fit the screen.
 func (m rootShellModel) deployHeadAction(width int) (head, action string) {
-	rows := []string{}
-	deployable := 0
-	rowSep := "\n\n"
+	prefix, action, lines, visible := m.deployProviderViewport(width)
+	body := strings.Join(lines, "\n")
+	if !m.deployDone {
+		body = renderLifecycleViewport(lines, visible, m.lifecycleScroll)
+	}
+	head = prefix + panel.Copy().Width(width-4).Padding(1, 2).Render(body)
+	return head, action
+}
+
+func (m rootShellModel) deployProviderViewport(width int) (prefix, action string, lines []string, visible int) {
+	rows, deployable, rowSep := m.deployProviderRows(width)
+	action = m.deployAction(width, deployable)
+	prefix = m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n"
+	lines = lifecycleResultLines(rows, rowSep)
+	visible = m.lifecycleViewportCapacity(width, prefix, "\n"+action)
+	return prefix, action, lines, visible
+}
+
+func (m rootShellModel) deployProviderRows(width int) (rows []string, deployable int, rowSep string) {
+	rows = []string{}
+	rowSep = "\n\n"
 	for _, item := range m.validationItems {
 		if item.Status == lifecycle.StatusMissing && item.Deployable {
 			deployable++
@@ -2922,7 +3669,11 @@ func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 	if len(rows) == 0 {
 		rows = append(rows, dimStyle.Render("Validate the package before deployment."))
 	}
-	action = accent.Render(fmt.Sprintf("Enter / →  Deploy %d supported missing configuration set(s)", deployable))
+	return rows, deployable, rowSep
+}
+
+func (m rootShellModel) deployAction(width, deployable int) string {
+	action := accent.Render(fmt.Sprintf("Enter / →  Deploy %d supported missing configuration set(s)", deployable))
 	if m.confirmingDeploy {
 		action = activePane.Copy().Width(width - 4).Render(m.renderDeployConfirm(width - 8))
 	}
@@ -2939,12 +3690,17 @@ func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 		} else {
 			action += "\n" + lipgloss.NewStyle().Foreground(green).Render("✓ Deployment audit exported")
 			action += "\n" + dimStyle.Render(m.deploymentAuditPath)
-			action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
 		}
+		action += "\n" + accent.Render("b  Open Box enterprise"+m.postDeployBoxEnterpriseSuffix())
+		if alias, ok := m.postDeploySalesforceTarget(); ok {
+			action += "\n" + accent.Render("s  Open Salesforce scratch org ("+alias+")")
+		}
+		action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
 	}
-	head = m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n" +
-		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, rowSep))
-	return head, action
+	if _, diagnostic := m.lifecycleDiagnostic(); diagnostic != "" {
+		action += "\n" + accent.Render("d  View full Salesforce CLI diagnostics")
+	}
+	return action
 }
 
 // deployTableCapacity returns how many asset rows fit beneath the deploy chrome
@@ -3225,7 +3981,22 @@ func renderComponentChecklist(item lifecycle.Item, phase string, active bool, pr
 		names = append(names, name)
 	}
 	order := item.ComponentOrder
-	slices.SortStableFunc(names, func(a, b string) int { return slices.Index(order, a) - slices.Index(order, b) })
+	slices.SortStableFunc(names, func(a, b string) int {
+		aIndex, bIndex := slices.Index(order, a), slices.Index(order, b)
+		switch {
+		case aIndex >= 0 && bIndex >= 0:
+			return aIndex - bIndex
+		case aIndex >= 0:
+			return -1
+		case bIndex >= 0:
+			return 1
+		default:
+			// Salesforce does not declare a Box-style component order. Its
+			// categories must still be deterministic: map iteration order changes
+			// between renders and previously made scrolling look like it wrapped.
+			return strings.Compare(strings.ToLower(a), strings.ToLower(b))
+		}
+	})
 	deployableNames := make([]string, 0, len(names))
 	for _, name := range names {
 		if groups[name].deployable > 0 {
@@ -3345,12 +4116,13 @@ func (m rootShellModel) statusLabel(provider string) string {
 func (m rootShellModel) footer() string {
 	bindings := contextualHelp{
 		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
-		key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "steps")),
-		key.NewBinding(key.WithKeys("enter", " "), key.WithHelp("enter/space", "select")),
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "back")),
 	}
 	if m.screen == screenConfig {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("tab", "up", "down"), key.WithHelp("tab/↑/↓", "change field")),
+			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "adjust")),
 			key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse folders")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open/continue")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
@@ -3363,6 +4135,16 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "parent")),
 			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "choose")),
 			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "current")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
+	if m.screen == screenBoxComponents {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
+			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
+			key.NewBinding(key.WithKeys("a", "n", "d", "c"), key.WithHelp("a/n/d/c", "modes")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		}
 	}
 	if m.screen == screenComponents {
@@ -3374,6 +4156,16 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "home")),
 		}
 	}
+	if m.screen == screenDeploy && m.deployDone {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll assets")),
+			key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "open Box")),
+		}
+		if _, ok := m.postDeploySalesforceTarget(); ok {
+			bindings = append(bindings, key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "open Salesforce")))
+		}
+		bindings = append(bindings, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "home")))
+	}
 	if m.screen == screenBoxSwitch {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
@@ -3381,6 +4173,30 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "remove")),
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "back")),
 		}
+	}
+	if m.screen == screenDiagnostic {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
+			key.NewBinding(key.WithKeys("esc", "left", "d"), key.WithHelp("esc/←/d", "back")),
+		}
+	} else if m.screen == screenScratchConfirm {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "switch")),
+			key.NewBinding(key.WithKeys("enter", " "), key.WithHelp("enter/space", "confirm")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	} else if m.screen == screenDevHubs {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "choose hub")),
+			key.NewBinding(key.WithKeys("enter", "right"), key.WithHelp("enter/→", "select")),
+			key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "back")),
+		}
+	} else if (m.screen == screenProvider && m.providerDiagnostics[m.provider] != "") || ((m.screen == screenValidate || m.screen == screenDeploy) && func() bool { _, detail := m.lifecycleDiagnostic(); return detail != "" }()) {
+		bindings = append(bindings, key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "full error")))
+	}
+	if m.screen == screenProvider && m.provider == "salesforce" {
+		bindings = append(bindings, key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recheck")))
 	}
 	quitHelp := "home"
 	if m.screen == screenWelcome {
@@ -3406,7 +4222,7 @@ func providerLabel(provider string) string {
 	case "box":
 		return "Box"
 	case "salesforce":
-		return "Agentforce"
+		return "Salesforce"
 	case "databricks":
 		return "Databricks"
 	case "aws":
@@ -3431,42 +4247,5 @@ func max(a, b int) int {
 }
 
 func (m rootShellModel) stageHeader() string {
-	if m.screen == screenDashboard {
-		return m.stepper()
-	}
-	// The spring-eased value glides between steps; percent tracks it so the
-	// number counts up in step with the bar.
-	value := m.journeyValue
-	percent := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(fmt.Sprintf("%3.0f%%", value*100))
-	return m.stepper() + "\n\n" + dimStyle.Render("OVERALL PROGRESS") + "  " + percent + "\n" + m.progress.ViewAs(value)
-}
-
-func (m rootShellModel) overallJourneyProgress() float64 {
-	switch m.screen {
-	case screenComponents:
-		return 0.08
-	case screenDashboard, screenProvider, screenOptions, screenDatabricksHost:
-		return 0.18
-	case screenTemplates:
-		return 0.35
-	case screenConfig, screenDirectoryPicker:
-		return 0.48
-	case screenPackage:
-		if m.packageDone {
-			return 0.65
-		}
-		return 0.55
-	case screenValidate:
-		if m.validateDone {
-			return 0.82
-		}
-		return 0.72
-	case screenDeploy:
-		if m.deployDone {
-			return 1
-		}
-		return 0.9
-	default:
-		return 0
-	}
+	return m.stepper()
 }
