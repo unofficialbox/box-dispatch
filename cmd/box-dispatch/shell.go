@@ -479,7 +479,7 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 		templateID:         activeTemplateID,
 		directory:          filepath.Dir(cwd),
 		packageName:        packageNameForTemplate(templates, activeTemplateID),
-		deploymentStrategy: solution.StrategyCreateNew,
+		deploymentStrategy: solution.StrategyReuse,
 	}
 	m := rootShellModel{
 		screen:              screenWelcome,

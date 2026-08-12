@@ -32,7 +32,7 @@
       },
       "box": {
         "deployment_defaults": {
-          "global_strategy": "create_new",
+          "global_strategy": "reuse",
           "naming": {
             "suffix": "{run_id}",
             "pattern": "{name} - {suffix}"

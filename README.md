@@ -39,7 +39,9 @@ The default shell presents one five-stage path:
 
 1. **Choose** — select a solution quickstart and its providers together.
 2. **Connect** — verify access only for those providers.
-3. **Configure** — choose the destination, naming strategy, and supported Box capabilities.
+3. **Configure** — choose the destination, deployment strategy, and supported Box capabilities.
+   **Reuse existing** is selected by default; switch to **Create new** when the deployment needs
+   a uniquely named workspace.
 4. **Review** — preview the complete plan before anything is created or changed.
 5. **Deploy** — assemble the package, validate provider state and prerequisites, install required
    managed packages, deploy supported missing configuration, and verify permission assignments.
@@ -213,6 +215,9 @@ Generated solution packages use BCL for their complete package contract:
 - `dispatch.bcl` — template, workspace, sample-content, capability, managed-package and
   permission-set prerequisites, and deployment-order definition
 - `.dispatch/deployment.bcl` — component selection, naming strategy, and rollback settings
+
+New deployment settings default to `reuse`, so matching resources are reused rather than copied
+under a run-specific name. Select `create_new` explicitly when isolation is required.
 
 JSON solution manifests and deployment settings are unsupported. An invalid `dispatch.bcl`
 fails explicitly, and `deployment_config` must reference a package-relative `.bcl` file.

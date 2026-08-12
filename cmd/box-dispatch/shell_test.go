@@ -20,6 +20,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
 
@@ -31,6 +32,20 @@ func updatedShell(t *testing.T, model rootShellModel, key tea.KeyType) rootShell
 		t.Fatalf("Update returned %T, want rootShellModel", updated)
 	}
 	return result
+}
+
+func TestShellDefaultsToReuseExistingDeployment(t *testing.T) {
+	model := newSetupOnlyShell()
+	if got := model.answers.deploymentStrategy; got != solution.StrategyReuse {
+		t.Fatalf("deployment strategy = %q, want %q", got, solution.StrategyReuse)
+	}
+	if got := deploymentStrategyLabel(model.answers.deploymentStrategy); got != "REUSE EXISTING" {
+		t.Fatalf("deployment strategy label = %q, want REUSE EXISTING", got)
+	}
+	model.cycleDeploymentStrategy(1)
+	if got := model.answers.deploymentStrategy; got != solution.StrategyCreateNew {
+		t.Fatalf("cycled deployment strategy = %q, want %q", got, solution.StrategyCreateNew)
+	}
 }
 
 func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
