@@ -248,6 +248,7 @@ type providerTeardownProgressMsg struct {
 
 type wizardAnswers struct {
 	components         []string
+	quickstarts        []string
 	templateID         string
 	directory          string
 	packageName        string
@@ -472,6 +473,7 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	cwd, _ := os.Getwd()
 	answers := &wizardAnswers{
 		components:         selectedComponents,
+		quickstarts:        []string{activeTemplateID},
 		templateID:         activeTemplateID,
 		directory:          filepath.Dir(cwd),
 		packageName:        packageNameForTemplate(templates, activeTemplateID),
@@ -632,8 +634,9 @@ func packageNameForTemplate(templates []templateChoice, id string) string {
 func (m *rootShellModel) rebuildComponentForm() {
 	templateOptions := make([]huh.Option[string], 0, len(m.templates))
 	for _, template := range m.templates {
-		templateOptions = append(templateOptions, huh.NewOption(template.name, template.id))
+		templateOptions = append(templateOptions, huh.NewOption(template.name, template.id).Selected(template.id == m.answers.templateID))
 	}
+	m.answers.quickstarts = []string{m.answers.templateID}
 	componentOptions := make([]huh.Option[string], 0, len(m.components))
 	for _, component := range m.components {
 		label := component.name
@@ -644,12 +647,19 @@ func (m *rootShellModel) rebuildComponentForm() {
 	}
 	m.componentForm = huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[string]().
+			huh.NewMultiSelect[string]().
 				Key("template").
 				Title("Choose a solution quickstart").
-				Description("Start from a proven architecture or the Box Dispatch solution template.").
+				Description("Highlight with arrows, then press Space to select one.").
 				Options(templateOptions...).
-				Value(&m.answers.templateID),
+				Limit(1).
+				Value(&m.answers.quickstarts).
+				Validate(func(values []string) error {
+					if len(values) != 1 {
+						return errors.New("choose one solution quickstart")
+					}
+					return nil
+				}),
 			huh.NewMultiSelect[string]().
 				Key("components").
 				Title("Choose platform components").
@@ -826,6 +836,10 @@ func (m rootShellModel) chooseDirectory(path string) (tea.Model, tea.Cmd) {
 }
 
 func (m *rootShellModel) syncComponentAnswers() error {
+	if len(m.answers.quickstarts) != 1 {
+		return errors.New("choose one solution quickstart")
+	}
+	m.answers.templateID = m.answers.quickstarts[0]
 	if !slices.Contains(m.answers.components, "box") {
 		return errors.New("Box is required for every Box Dispatch solution")
 	}
@@ -1736,6 +1750,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "enter" || key.String() == "right" {
 			if m.cursor == 0 {
 				m.screen = screenComponents
+				m.message = ""
 				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			}
 			history, err := deploymentaudit.ListDeployments()
@@ -1792,9 +1807,20 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case screenComponents:
-		if key.String() == "left" {
+		if key.String() == "left" || key.String() == "esc" {
 			m.screen, m.cursor = screenWelcome, 0
 			return m, nil
+		}
+		if key.String() == "tab" || key.String() == "shift+tab" {
+			if m.componentForm.GetFocusedField().GetKey() == "template" {
+				return m, m.componentForm.NextField()
+			}
+			return m, m.componentForm.PrevField()
+		}
+		if key.String() == " " || key.String() == "spacebar" || key.String() == "x" {
+			if selected, cmd := m.selectHoveredQuickstart(); selected {
+				return m, cmd
+			}
 		}
 		if key.String() == "right" {
 			if err := m.syncComponentAnswers(); err != nil {
@@ -1840,6 +1866,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "left" {
 			m.rebuildComponentForm()
 			m.screen, m.cursor = screenComponents, 0
+			m.message = ""
 			return m, m.formCommand(m.componentForm, accessibleChooseForm)
 		}
 		if key.String() == "right" {
@@ -1859,6 +1886,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursor == len(m.selectedProviders())+1 {
 				m.rebuildComponentForm()
 				m.screen, m.cursor = screenComponents, 0
+				m.message = ""
 				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			} else if m.allSelectedConnected() {
 				return m.selectTemplateAndConfigure()
@@ -2098,6 +2126,38 @@ func (m *rootShellModel) moveCursor(key tea.KeyMsg, count int) {
 	case "down", "j", "tab":
 		m.cursor = (m.cursor + 1) % count
 	}
+}
+
+// selectHoveredQuickstart gives the quickstart list radio-button semantics:
+// arrows move the cursor, while Space commits exactly one selection. Rebuilding
+// the form updates the visible checkmark without moving the cursor.
+func (m *rootShellModel) selectHoveredQuickstart() (bool, tea.Cmd) {
+	if m.componentForm == nil {
+		return false, nil
+	}
+	field, ok := m.componentForm.GetFocusedField().(*huh.MultiSelect[string])
+	if !ok || field.GetKey() != "template" {
+		return false, nil
+	}
+	hovered, ok := field.Hovered()
+	if !ok {
+		return true, nil
+	}
+	m.answers.templateID = hovered
+	m.rebuildComponentForm()
+	cmds := []tea.Cmd{m.componentForm.Init()}
+	form, cmd := m.componentForm.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m.componentForm = form.(*huh.Form)
+	cmds = append(cmds, cmd)
+	for _, template := range m.templates {
+		if template.id == hovered {
+			break
+		}
+		form, cmd := m.componentForm.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m.componentForm = form.(*huh.Form)
+		cmds = append(cmds, cmd)
+	}
+	return true, tea.Batch(cmds...)
 }
 
 func (m rootShellModel) beginChecks(providers []string) (tea.Model, tea.Cmd) {
@@ -4442,7 +4502,13 @@ func (m rootShellModel) footer() string {
 		}
 	}
 	if m.screen == screenComponents {
-		bindings = append(bindings, key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")))
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "rows")),
+			key.NewBinding(key.WithKeys("tab", "shift+tab"), key.WithHelp("tab", "switch panel")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "next/continue")),
+			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select/toggle")),
+			key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "back")),
+		}
 	}
 	if m.screen == screenHistory {
 		bindings = contextualHelp{
