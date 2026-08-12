@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -10,9 +11,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/bcl"
 	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
@@ -33,6 +36,7 @@ type Item struct {
 	Source               string              `json:"source"`
 	Status               Status              `json:"status"`
 	Detail               string              `json:"detail"`
+	Diagnostic           string              `json:"diagnostic,omitempty"`
 	Deployable           bool                `json:"deployable"`
 	DeployableComponents []string            `json:"deployable_components,omitempty"`
 	AdapterPending       []string            `json:"adapter_pending,omitempty"`
@@ -124,7 +128,7 @@ func ValidateProvider(root, provider string, report Reporter) (Item, error) {
 		return item, nil
 	}
 	if provider == "salesforce" {
-		return validateSalesforce(root, item)
+		return validateSalesforce(root, item, report)
 	}
 	if provider == "box" {
 		report.step("Inspecting existing Box configuration in the tenant")
@@ -149,15 +153,30 @@ func PlanProvider(root, provider string) (Item, error) {
 		Status:   StatusPending,
 		Detail:   "Waiting to validate packaged configuration.",
 	}
+	if provider == "salesforce" {
+		manifest, err := solution.Load(root)
+		if err != nil {
+			return item, err
+		}
+		item.ComponentOrder = []string{"Managed Package"}
+		for _, requirement := range manifest.Salesforce.RequiredPackages {
+			item.Planned = append(item.Planned, salesforcePackageComponent(requirement))
+		}
+		for _, requirement := range manifest.Salesforce.RequiredPermissionSets {
+			item.Planned = append(item.Planned, salesforcePermissionSetComponent(requirement))
+		}
+	}
 	if count == 0 {
-		item.Planned = []string{"Provider configuration"}
+		if len(item.Planned) == 0 {
+			item.Planned = []string{"Provider configuration"}
+		}
 		return item, nil
 	}
 	components, err := providerComponentEntries(root, provider, count)
 	if err != nil {
 		return item, err
 	}
-	item.Planned = components
+	item.Planned = append(item.Planned, components...)
 	if provider == "box" {
 		manifest, err := solution.Load(root)
 		if err != nil {
@@ -190,6 +209,15 @@ func providerComponentEntries(root, provider string, count int) ([]string, error
 		slices.SortStableFunc(entries, func(a, b string) int { return manifest.Rank(a) - manifest.Rank(b) })
 		return entries, nil
 	}
+	if provider == "salesforce" {
+		entries, err := salesforcePlannedComponents(root)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) > 0 {
+			return entries, nil
+		}
+	}
 	componentType := map[string]string{
 		"salesforce": "Salesforce metadata",
 		"databricks": "DatabricksAsset",
@@ -203,6 +231,64 @@ func providerComponentEntries(root, provider string, count int) ([]string, error
 		entries[i] = fmt.Sprintf("%s:file-%d", componentType, i+1)
 	}
 	return entries, nil
+}
+
+// salesforcePlannedComponents inventories local Metadata API descriptor files
+// without contacting an org or requiring Salesforce CLI. The XML root element
+// is the metadata type, which gives Validate a real category checklist from its
+// first frame instead of replacing one generic row only after validation ends.
+func salesforcePlannedComponents(root string) ([]string, error) {
+	project := findSalesforceProject(root)
+	if project == "" {
+		return nil, nil
+	}
+	source := filepath.Join(project, "force-app")
+	entries := []string{}
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case "node_modules", ".git":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), "-meta.xml") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		decoder := xml.NewDecoder(bytes.NewReader(data))
+		metadataType := ""
+		for {
+			token, tokenErr := decoder.Token()
+			if tokenErr != nil {
+				return fmt.Errorf("parse Salesforce metadata descriptor %s: %w", entry.Name(), tokenErr)
+			}
+			if start, ok := token.(xml.StartElement); ok {
+				metadataType = strings.TrimSpace(start.Name.Local)
+				break
+			}
+		}
+		if metadataType == "" {
+			return nil
+		}
+		relative, relErr := filepath.Rel(source, path)
+		if relErr != nil {
+			return relErr
+		}
+		entries = append(entries, metadataType+":"+filepath.ToSlash(strings.TrimSuffix(relative, "-meta.xml")))
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	slices.Sort(entries)
+	return entries, err
 }
 
 func boxComponentEntries(root string, manifest solution.Manifest, selection solution.ComponentSelection) ([]string, error) {
@@ -612,6 +698,29 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 		item.Status, item.Detail = StatusFailed, "No Salesforce alias is selected."
 		return item
 	}
+	report.step("Checking Salesforce org status and expiration")
+	orgInfo, inspectErr := salesforceorg.Inspect(settings.SalesforceAlias, time.Now())
+	if inspectErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Salesforce deployment stopped before sending metadata: " + inspectErr.Error()
+		if failure, ok := inspectErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item
+	}
+	manifest, manifestErr := solution.Load(root)
+	if manifestErr != nil {
+		item.Status, item.Detail = StatusFailed, "Unable to read Salesforce deployment prerequisites: "+manifestErr.Error()
+		return item
+	}
+	if packageErr := ensureSalesforcePackages(settings.SalesforceAlias, manifest.Salesforce.RequiredPackages, report); packageErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Salesforce deployment stopped before sending metadata: " + packageErr.Error()
+		if failure, ok := packageErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item
+	}
 	report.step("Building Salesforce UI bundles")
 	if buildErr := buildSalesforceUIBundles(project); buildErr != nil {
 		item.Status, item.Detail = StatusFailed, buildErr.Error()
@@ -623,7 +732,7 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 	output, runErr := cmd.CombinedOutput()
 	if runErr != nil {
 		item.Status = StatusFailed
-		item.Detail = summarizeSalesforceError(output, runErr)
+		item.Detail, item.Diagnostic = salesforceErrorDetails(output, runErr)
 		return item
 	}
 	var deployResponse struct {
@@ -654,6 +763,15 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 		deployURL = instanceURL + "/" + deployResponse.Result.ID
 	}
 	addResource(&item, "Salesforce metadata", "metadata_deployment", "Salesforce metadata deployment", deployResponse.Result.ID, deployURL)
+	report.step("Assigning required Salesforce permission sets")
+	if permissionErr := ensureSalesforcePermissionSets(settings.SalesforceAlias, orgInfo.Username, manifest.Salesforce.RequiredPermissionSets); permissionErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Salesforce metadata deployed, but required permission-set assignment failed: " + permissionErr.Error()
+		if failure, ok := permissionErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item
+	}
 	item.Status, item.Detail = StatusPresent, "Salesforce metadata deployed successfully."
 	item.Present = append(item.Present, item.Missing...)
 	slices.Sort(item.Present)
@@ -842,7 +960,16 @@ type salesforceObject struct {
 	} `xml:"fields"`
 }
 
-func validateSalesforce(root string, item Item) (Item, error) {
+type installedSalesforcePackage struct {
+	SubscriberPackageID            string `json:"SubscriberPackageId"`
+	SubscriberPackageName          string `json:"SubscriberPackageName"`
+	SubscriberPackageNamespace     string `json:"SubscriberPackageNamespace"`
+	SubscriberPackageVersionID     string `json:"SubscriberPackageVersionId"`
+	SubscriberPackageVersionName   string `json:"SubscriberPackageVersionName"`
+	SubscriberPackageVersionNumber string `json:"SubscriberPackageVersionNumber"`
+}
+
+func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	settings, err := shellstate.LoadConnectionSettings()
 	if err != nil {
 		return item, err
@@ -854,6 +981,47 @@ func validateSalesforce(root string, item Item) (Item, error) {
 	project := findSalesforceProject(root)
 	if project == "" {
 		item.Status, item.Detail = StatusManual, "No Salesforce project was found in the package."
+		return item, nil
+	}
+	report.step("Checking Salesforce org status and expiration")
+	orgInfo, inspectErr := salesforceorg.Inspect(settings.SalesforceAlias, time.Now())
+	if inspectErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Salesforce validation stopped before reading metadata: " + inspectErr.Error()
+		if failure, ok := inspectErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item, nil
+	}
+	manifestContract, manifestErr := solution.Load(root)
+	if manifestErr != nil {
+		item.Status, item.Detail = StatusFailed, "Unable to read Salesforce deployment prerequisites: "+manifestErr.Error()
+		return item, nil
+	}
+	item.ComponentOrder = []string{"Managed Package"}
+	report.step("Checking required Salesforce managed packages")
+	installedPackages, packageErr := listInstalledSalesforcePackages(settings.SalesforceAlias)
+	if packageErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Unable to inspect installed Salesforce packages: " + packageErr.Error()
+		if failure, ok := packageErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item, nil
+	}
+	report.step("Checking required Salesforce permission sets")
+	permissionInventory, permissionErr := readSalesforceUserPermissionInventory(settings.SalesforceAlias, orgInfo.Username)
+	if permissionErr != nil {
+		item.Status = StatusFailed
+		item.Detail = "Unable to inspect Salesforce permission-set assignments: " + permissionErr.Error()
+		if failure, ok := permissionErr.(*salesforceorg.Failure); ok {
+			item.Diagnostic = failure.Diagnostic
+		}
+		return item, nil
+	}
+	if !strings.EqualFold(permissionInventory.Profile, "System Administrator") {
+		item.Status = StatusFailed
+		item.Detail = fmt.Sprintf("The authenticated Salesforce deployment user %s has profile %q. Select a System Administrator connection so Dispatch can install prerequisites and assign the required permission sets.", orgInfo.Username, permissionInventory.Profile)
 		return item, nil
 	}
 	if buildErr := buildSalesforceUIBundles(project); buildErr != nil {
@@ -872,7 +1040,9 @@ func validateSalesforce(root string, item Item) (Item, error) {
 	generate := exec.Command("sf", "project", "generate", "manifest", "--source-dir", "force-app", "--type", "package", "--output-dir", manifestDir, "--json")
 	generate.Dir = project
 	if output, runErr := generate.CombinedOutput(); runErr != nil {
-		item.Status, item.Detail = StatusFailed, "Unable to inventory packaged Salesforce metadata: "+summarizeSalesforceError(output, runErr)
+		item.Status = StatusFailed
+		summary, diagnostic := salesforceErrorDetails(output, runErr)
+		item.Detail, item.Diagnostic = "Unable to inventory packaged Salesforce metadata: "+summary, diagnostic
 		return item, nil
 	}
 	manifest := filepath.Join(manifestDir, "package.xml")
@@ -885,14 +1055,293 @@ func validateSalesforce(root string, item Item) (Item, error) {
 	retrieve.Dir = project
 	output, runErr := retrieve.CombinedOutput()
 	if runErr != nil {
-		item.Status, item.Detail = StatusFailed, "Unable to read Salesforce metadata: "+summarizeSalesforceError(output, runErr)
+		item.Status = StatusFailed
+		summary, diagnostic := salesforceErrorDetails(output, runErr)
+		item.Detail, item.Diagnostic = "Unable to read Salesforce metadata: "+summary, diagnostic
 		return item, nil
 	}
 	existing, err := readSalesforceInventory(output, retrievedDir)
 	if err != nil {
 		return item, err
 	}
-	return classifySalesforceInventory(item, expected, existing, settings.SalesforceAlias), nil
+	result := classifySalesforceInventory(item, expected, existing, settings.SalesforceAlias)
+	result = addSalesforcePackageResults(result, manifestContract.Salesforce.RequiredPackages, installedPackages, settings.SalesforceAlias)
+	return addSalesforcePermissionSetResults(result, manifestContract.Salesforce.RequiredPermissionSets, permissionInventory.Assigned, settings.SalesforceAlias), nil
+}
+
+func listInstalledSalesforcePackages(target string) ([]installedSalesforcePackage, error) {
+	output, runErr := exec.Command("sf", "package", "installed", "list", "--target-org", target, "--json").CombinedOutput()
+	if runErr != nil {
+		return nil, salesforceorg.NewFailure("Salesforce CLI could not list installed packages for "+target+". Recheck the org connection and retry.", output, runErr)
+	}
+	var payload struct {
+		Result []installedSalesforcePackage `json:"result"`
+	}
+	if parseErr := decodeSalesforceJSON(output, &payload); parseErr != nil {
+		return nil, salesforceorg.NewFailure("Salesforce CLI returned an unreadable installed-package inventory for "+target+". Update the Salesforce CLI and retry.", output, parseErr)
+	}
+	return payload.Result, nil
+}
+
+func missingSalesforcePackages(required []solution.SalesforcePackageRequirement, installed []installedSalesforcePackage) []solution.SalesforcePackageRequirement {
+	missing := make([]solution.SalesforcePackageRequirement, 0, len(required))
+	for _, requirement := range required {
+		satisfied := false
+		for _, candidate := range installed {
+			identityMatches := strings.EqualFold(strings.TrimSpace(candidate.SubscriberPackageNamespace), strings.TrimSpace(requirement.Namespace))
+			if requirement.Namespace == "" {
+				identityMatches = candidate.SubscriberPackageID == requirement.PackageID || strings.EqualFold(candidate.SubscriberPackageName, requirement.Name)
+			}
+			if !identityMatches {
+				continue
+			}
+			if requirement.VersionID == "" || candidate.SubscriberPackageVersionID == requirement.VersionID {
+				satisfied = true
+			}
+			break
+		}
+		if !satisfied {
+			missing = append(missing, requirement)
+		}
+	}
+	return missing
+}
+
+func salesforcePackageComponent(requirement solution.SalesforcePackageRequirement) string {
+	name := strings.TrimSpace(requirement.Name)
+	if name == "" {
+		name = strings.TrimSpace(requirement.Namespace)
+	}
+	version := firstNonEmpty(requirement.VersionName, requirement.VersionNumber)
+	if version != "unnamed" {
+		name += " " + version
+	}
+	return "Managed Package:" + strings.TrimSpace(name)
+}
+
+func salesforcePermissionSetComponent(requirement solution.SalesforcePermissionSetRequirement) string {
+	label := firstNonEmpty(requirement.Label, requirement.Name)
+	return "Permission Set Assignment:" + strings.TrimSpace(label)
+}
+
+type salesforceUserPermissionInventory struct {
+	Profile  string
+	Assigned map[string]bool
+}
+
+func readSalesforceUserPermissionInventory(target, username string) (salesforceUserPermissionInventory, error) {
+	query := "SELECT Profile.Name, (SELECT PermissionSet.Name, PermissionSet.NamespacePrefix FROM PermissionSetAssignments) FROM User WHERE Username = '" + escapeSOQLString(username) + "'"
+	output, runErr := exec.Command("sf", "data", "query", "--query", query, "--target-org", target, "--json").CombinedOutput()
+	if runErr != nil {
+		return salesforceUserPermissionInventory{}, salesforceorg.NewFailure("Salesforce CLI could not inspect permission sets for the authenticated deployment user. Recheck the org connection and retry.", output, runErr)
+	}
+	return decodeSalesforceUserPermissionInventory(output, username)
+}
+
+func decodeSalesforceUserPermissionInventory(output []byte, username string) (salesforceUserPermissionInventory, error) {
+	var payload struct {
+		Result struct {
+			Records []struct {
+				Profile struct {
+					Name string `json:"Name"`
+				} `json:"Profile"`
+				PermissionSetAssignments struct {
+					Records []struct {
+						PermissionSet struct {
+							Name            string `json:"Name"`
+							NamespacePrefix string `json:"NamespacePrefix"`
+						} `json:"PermissionSet"`
+					} `json:"records"`
+				} `json:"PermissionSetAssignments"`
+			} `json:"records"`
+		} `json:"result"`
+	}
+	if parseErr := decodeSalesforceJSON(output, &payload); parseErr != nil {
+		return salesforceUserPermissionInventory{}, salesforceorg.NewFailure("Salesforce CLI returned an unreadable permission-set inventory. Update the Salesforce CLI and retry.", output, parseErr)
+	}
+	if len(payload.Result.Records) != 1 {
+		return salesforceUserPermissionInventory{}, &salesforceorg.Failure{Summary: "Salesforce did not return exactly one authenticated deployment user for " + username + ". Reconnect the intended org and retry."}
+	}
+	record := payload.Result.Records[0]
+	assigned := map[string]bool{}
+	for _, assignment := range record.PermissionSetAssignments.Records {
+		name := strings.TrimSpace(assignment.PermissionSet.Name)
+		if namespace := strings.TrimSpace(assignment.PermissionSet.NamespacePrefix); namespace != "" {
+			name = namespace + "__" + name
+		}
+		if name != "" {
+			assigned[strings.ToLower(name)] = true
+		}
+	}
+	return salesforceUserPermissionInventory{Profile: strings.TrimSpace(record.Profile.Name), Assigned: assigned}, nil
+}
+
+func escapeSOQLString(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value)
+}
+
+func missingSalesforcePermissionSets(required []solution.SalesforcePermissionSetRequirement, assigned map[string]bool) []solution.SalesforcePermissionSetRequirement {
+	missing := make([]solution.SalesforcePermissionSetRequirement, 0, len(required))
+	for _, requirement := range required {
+		if !assigned[strings.ToLower(strings.TrimSpace(requirement.Name))] {
+			missing = append(missing, requirement)
+		}
+	}
+	return missing
+}
+
+func addSalesforcePermissionSetResults(item Item, required []solution.SalesforcePermissionSetRequirement, assigned map[string]bool, alias string) Item {
+	missing := missingSalesforcePermissionSets(required, assigned)
+	for _, requirement := range required {
+		component := salesforcePermissionSetComponent(requirement)
+		if assigned[strings.ToLower(strings.TrimSpace(requirement.Name))] {
+			if !slices.Contains(item.Present, component) {
+				item.Present = append(item.Present, component)
+			}
+			continue
+		}
+		if !slices.Contains(item.Missing, component) {
+			item.Missing = append(item.Missing, component)
+		}
+		if !slices.Contains(item.DeployableComponents, component) {
+			item.DeployableComponents = append(item.DeployableComponents, component)
+		}
+	}
+	slices.Sort(item.Present)
+	slices.Sort(item.Missing)
+	slices.Sort(item.DeployableComponents)
+	if len(missing) > 0 {
+		item.Status = StatusMissing
+		item.Deployable = true
+		item.Detail = fmt.Sprintf("%d components already exist; %d deployment steps remain for Salesforce org %s. Dispatch installs managed packages first, deploys metadata, then assigns required permission sets to the authenticated System Administrator.", len(item.Present), len(item.Missing), alias)
+	}
+	return item
+}
+
+func ensureSalesforcePermissionSets(target, username string, required []solution.SalesforcePermissionSetRequirement) error {
+	if len(required) == 0 {
+		return nil
+	}
+	inventory, err := readSalesforceUserPermissionInventory(target, username)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(inventory.Profile, "System Administrator") {
+		return &salesforceorg.Failure{Summary: fmt.Sprintf("The authenticated Salesforce deployment user %s has profile %q, not System Administrator. Select the intended administrator connection and retry.", username, inventory.Profile)}
+	}
+	missing := missingSalesforcePermissionSets(required, inventory.Assigned)
+	if len(missing) == 0 {
+		return nil
+	}
+	args := []string{"org", "assign", "permset", "--target-org", target, "--on-behalf-of", username, "--json"}
+	for _, requirement := range missing {
+		args = append(args, "--name", requirement.Name)
+	}
+	output, runErr := exec.Command("sf", args...).CombinedOutput()
+	if runErr != nil {
+		summary, diagnostic := salesforceErrorDetails(output, runErr)
+		return &salesforceorg.Failure{Summary: "Unable to assign required Salesforce permission sets: " + summary, Diagnostic: diagnostic}
+	}
+	verified, err := readSalesforceUserPermissionInventory(target, username)
+	if err != nil {
+		return err
+	}
+	if remaining := missingSalesforcePermissionSets(required, verified.Assigned); len(remaining) > 0 {
+		return &salesforceorg.Failure{Summary: "Salesforce CLI completed permission-set assignment, but " + firstNonEmpty(remaining[0].Label, remaining[0].Name) + " is still not assigned to the authenticated System Administrator. Review the full Salesforce CLI diagnostic and retry."}
+	}
+	return nil
+}
+
+func addMissingSalesforcePackages(item Item, missing []solution.SalesforcePackageRequirement, alias string) Item {
+	if len(missing) == 0 {
+		return item
+	}
+	for _, requirement := range missing {
+		component := salesforcePackageComponent(requirement)
+		item.Missing = append(item.Missing, component)
+		item.DeployableComponents = append(item.DeployableComponents, component)
+	}
+	slices.Sort(item.Missing)
+	slices.Sort(item.DeployableComponents)
+	item.Status = StatusMissing
+	item.Deployable = true
+	description := make([]string, 0, len(missing))
+	for _, requirement := range missing {
+		label := firstNonEmpty(requirement.Name, requirement.Namespace)
+		if requirement.VersionNumber != "" {
+			label += " " + requirement.VersionNumber
+		} else if requirement.VersionName != "" {
+			label += " " + requirement.VersionName
+		}
+		description = append(description, label)
+	}
+	item.Detail = fmt.Sprintf("%d metadata components already exist; %d deployment steps remain for Salesforce org %s. Dispatch will install %s before metadata deployment.", len(item.Present), len(item.Missing), alias, strings.Join(description, ", "))
+	return item
+}
+
+func addSalesforcePackageResults(item Item, required []solution.SalesforcePackageRequirement, installed []installedSalesforcePackage, alias string) Item {
+	missing := missingSalesforcePackages(required, installed)
+	for _, requirement := range required {
+		if len(missingSalesforcePackages([]solution.SalesforcePackageRequirement{requirement}, installed)) != 0 {
+			continue
+		}
+		component := salesforcePackageComponent(requirement)
+		if !slices.Contains(item.Present, component) {
+			item.Present = append(item.Present, component)
+		}
+	}
+	slices.Sort(item.Present)
+	return addMissingSalesforcePackages(item, missing, alias)
+}
+
+func ensureSalesforcePackages(target string, required []solution.SalesforcePackageRequirement, report Reporter) error {
+	if len(required) == 0 {
+		return nil
+	}
+	installed, err := listInstalledSalesforcePackages(target)
+	if err != nil {
+		return err
+	}
+	missing := missingSalesforcePackages(required, installed)
+	for _, requirement := range missing {
+		if strings.TrimSpace(requirement.VersionID) == "" {
+			return &salesforceorg.Failure{Summary: "Required Salesforce package " + firstNonEmpty(requirement.Name, requirement.Namespace) + " does not declare an installable 04t version ID in dispatch.bcl."}
+		}
+		report.step("Installing " + strings.TrimPrefix(salesforcePackageComponent(requirement), "Managed Package:"))
+		args := salesforcePackageInstallArgs(requirement, target)
+		output, runErr := exec.Command("sf", args...).CombinedOutput()
+		if runErr != nil {
+			summary, diagnostic := salesforceErrorDetails(output, runErr)
+			return &salesforceorg.Failure{Summary: "Unable to install " + firstNonEmpty(requirement.Name, requirement.Namespace) + ": " + summary, Diagnostic: diagnostic}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	installed, err = listInstalledSalesforcePackages(target)
+	if err != nil {
+		return err
+	}
+	if remaining := missingSalesforcePackages(required, installed); len(remaining) > 0 {
+		return &salesforceorg.Failure{Summary: "Salesforce CLI completed the package install, but " + firstNonEmpty(remaining[0].Name, remaining[0].Namespace) + " is still not present at the required version. Review the full Salesforce CLI diagnostic and retry."}
+	}
+	return nil
+}
+
+func salesforcePackageInstallArgs(requirement solution.SalesforcePackageRequirement, target string) []string {
+	securityType := strings.TrimSpace(requirement.SecurityType)
+	if securityType == "" {
+		securityType = "AdminsOnly"
+	}
+	return []string{
+		"package", "install",
+		"--package", requirement.VersionID,
+		"--target-org", target,
+		"--security-type", securityType,
+		"--wait", "30",
+		"--no-prompt",
+		"--json",
+	}
 }
 
 func readSalesforceManifest(path string) (map[string]bool, error) {
@@ -915,7 +1364,7 @@ func readSalesforceManifest(path string) (map[string]bool, error) {
 
 func readSalesforceInventory(output []byte, retrievedDir string) (map[string]bool, error) {
 	var payload salesforceRetrieve
-	if err := json.Unmarshal(output, &payload); err != nil {
+	if err := decodeSalesforceJSON(output, &payload); err != nil {
 		return nil, fmt.Errorf("parse Salesforce inventory: %w", err)
 	}
 	result := map[string]bool{}
@@ -948,6 +1397,17 @@ func readSalesforceInventory(output []byte, retrievedDir string) (map[string]boo
 	return result, err
 }
 
+// decodeSalesforceJSON tolerates notices written before a JSON response. The
+// Salesforce CLI currently prints update warnings to stderr even with --json;
+// CombinedOutput places that warning before the JSON payload.
+func decodeSalesforceJSON(output []byte, target any) error {
+	start := bytes.IndexByte(output, '{')
+	if start < 0 {
+		return fmt.Errorf("Salesforce CLI output did not contain JSON")
+	}
+	return json.NewDecoder(bytes.NewReader(output[start:])).Decode(target)
+}
+
 func classifySalesforceInventory(item Item, expected, existing map[string]bool, alias string) Item {
 	for component := range expected {
 		if existing[component] {
@@ -975,6 +1435,9 @@ type uiBundleConfig struct {
 }
 
 func buildSalesforceUIBundles(project string) error {
+	if ignoreErr := ensureSalesforceProjectForceIgnore(project); ignoreErr != nil {
+		return fmt.Errorf("prepare Salesforce deploy exclusions: %w", ignoreErr)
+	}
 	root := filepath.Join(project, "force-app", "main", "default", "uiBundles")
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
@@ -1023,24 +1486,37 @@ func buildSalesforceUIBundles(project string) error {
 	return nil
 }
 
+// ensureSalesforceProjectForceIgnore mirrors the exclusion included by
+// Salesforce's official project generator. UI Bundle dependencies are installed
+// under force-app for local builds, but node_modules must not be packed into the
+// Metadata API request (which has a 50 MB request limit).
+func ensureSalesforceProjectForceIgnore(project string) error {
+	path := filepath.Join(project, ".forceignore")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "node_modules/" {
+			return nil
+		}
+	}
+	if len(data) == 0 {
+		data = []byte("# Exclude local UI Bundle build dependencies from Salesforce deploys.\n")
+	} else if data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	data = append(data, []byte("node_modules/\n")...)
+	return os.WriteFile(path, data, 0o644)
+}
+
 func summarizeSalesforceError(output []byte, runErr error) string {
-	var payload struct {
-		Name    string   `json:"name"`
-		Message string   `json:"message"`
-		Actions []string `json:"actions"`
-	}
-	if json.Unmarshal(output, &payload) == nil && payload.Message != "" {
-		parts := []string{}
-		if payload.Name != "" {
-			parts = append(parts, payload.Name)
-		}
-		parts = append(parts, payload.Message)
-		if len(payload.Actions) > 0 {
-			parts = append(parts, "Next: "+strings.Join(payload.Actions, " "))
-		}
-		return strings.Join(parts, ": ")
-	}
-	return summarizeCommandOutput(output, runErr)
+	summary, _ := salesforceErrorDetails(output, runErr)
+	return summary
+}
+
+func salesforceErrorDetails(output []byte, runErr error) (string, string) {
+	return salesforceorg.CLIErrorDetails(output, runErr)
 }
 
 func summarizeCommandOutput(output []byte, runErr error) string {
@@ -1158,7 +1634,7 @@ func providerName(provider string) string {
 	case "box":
 		return "Box configuration"
 	case "salesforce":
-		return "Agentforce metadata"
+		return "Salesforce metadata"
 	case "databricks":
 		return "Databricks assets"
 	case "aws":

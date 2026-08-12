@@ -9,6 +9,9 @@
 # Shell state written to a repo-relative path when the tool runs in-tree
 .dispatch/
 .windlass/
+# Salesforce CLI local auth/export artifacts. These can contain live credentials.
+.sfdx/
+scratch-auth.json
 config/runtime/environment.json
 config/runtime/bootstrap-state.json
 config/runtime/generated/

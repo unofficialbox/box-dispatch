@@ -4,7 +4,7 @@
   <img src="docs/landing.png" alt="box-dispatch interactive launch shell — the welcome screen with the BOX DISPATCH wordmark, deployment menu, and the SELECT STACK › CONNECT › PICK QUICKSTART › SHIP route" width="900">
 </p>
 
-`box-dispatch` is the CLI for **box-dispatch**, a set of building blocks and accelerators for Box-backed solution stacks (Box, Salesforce/Agentforce, Databricks, AWS Bedrock AgentCore).
+`box-dispatch` is the CLI for **box-dispatch**, a set of building blocks and accelerators for Box-backed solution stacks (Box, Salesforce, Databricks, AWS Bedrock AgentCore).
 
 This repo starts with a fast setup/check experience and expands toward scenario install and deployment workflows.
 
@@ -91,6 +91,9 @@ box-dispatch check --platform aws
 - `publish-check` - validate blockers before handoff
 - `import` - import a deployment manifest into runtime config
 
+The staged plan for simplifying the interactive flow and default command help is tracked in
+[`docs/EXECPLAN_CLI_UX_STREAMLINING.md`](docs/EXECPLAN_CLI_UX_STREAMLINING.md).
+
 ## Configuration
 
 Runtime configuration is isolated by profile. Use either:
@@ -119,10 +122,65 @@ an unsupported capability visible only shows a locked reference row—it cannot 
 or deployed. See [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md) and the tracked
 [`config/runtime/ui-settings.example.bcl`](config/runtime/ui-settings.example.bcl).
 
+### Salesforce org lifecycle safety
+
+The launch shell treats Salesforce org health as part of connectivity, not as a one-time
+login result. It inspects the selected org at **Connect**, immediately before **Validate**,
+and immediately before **Deploy**. A cached Salesforce CLI profile for a deleted, expired,
+or otherwise inactive scratch org is rejected before any metadata request is sent.
+
+**Connect > Salesforce** presents only the next useful choices: continue with the connected
+org, use an existing Salesforce org, or create/replace a 30-day scratch org. Choosing a local
+Salesforce CLI profile validates it immediately; the same screen can open Salesforce login
+for a new profile. Press `r` to recheck the current org without adding another menu action.
+
+Scratch-org creation discovers authenticated Dev Hubs and asks which one to use. If none are
+available, Dispatch opens Dev Hub authentication inside the scratch-org flow, then resumes
+discovery. The selected Dev Hub is passed explicitly to Salesforce CLI, so a CLI-wide default
+is not required. Creation is confirmation-gated and the selected Dev Hub plus generated alias,
+org ID, org type, status, and expiration date are persisted in
+`.dispatch/connection-settings.bcl`; no Salesforce access token is stored.
+Scratch-org creation itself remains provider-neutral. During solution validation, Dispatch
+checks the managed-package versions declared in `dispatch.bcl` and shows missing packages as
+explicit deployment prerequisites. After the operator confirms **Deploy**, Dispatch installs
+or upgrades each pinned `04t` package version non-interactively before sending solution
+metadata. The bundled CLM contract requires Box for Salesforce 5.43.0.1
+(`04tKi000000gPNZIA2`) with admin-only access. The same contract declares the five
+required Box and CLM permission sets. Validation checks their assignment on the
+authenticated **System Administrator**; after metadata deployment makes local permission
+sets available, Dispatch assigns only the missing sets and verifies the result. Existing
+manual assignments are reported as present and are not recreated.
+
+After a deployment, press `b` to open the Box Admin Console for the connected enterprise.
+When the selected Salesforce target is a scratch org, press `s` to open it through Salesforce
+CLI. The Box browser session determines the enterprise shown; Dispatch includes the connected
+EID in the action label so the operator can confirm the target.
+
+Normal failures show a concise remediation message. Press `d` when offered to open the full
+Salesforce CLI JSON diagnostic, including `stack` and `error.data`; token-, secret-, password-,
+and session-shaped fields are redacted.
+
+```mermaid
+flowchart LR
+    A["Connect Salesforce"] --> B["Inspect org status and expiration"]
+    B -->|"active"| C["Persist non-secret lifecycle metadata in BCL"]
+    B -->|"deleted or expired"| D["Block metadata work and offer replacement"]
+    D --> E["Discover and choose authenticated Dev Hub"]
+    E --> F1["Confirm 30-day scratch-org creation"]
+    F1 --> B
+    C --> F["Preflight again before Validate"]
+    F --> G["Inventory required managed-package versions"]
+    G --> H1["Confirm Deploy"]
+    H1 --> I["Install missing pinned packages"]
+    I --> J["Send solution metadata"]
+    J --> K["Assign and verify required permission sets"]
+    B --> H["d: full sanitized CLI diagnostics"]
+```
+
 Generated solution packages use BCL for their complete package contract:
 
-- `dispatch.bcl` — template, workspace, sample-content, capability, and deployment-order
-  definition
+- `dispatch.bcl` — template, workspace, sample-content, capability, managed-package and
+  permission-set prerequisites, and deployment-order definition
 - `.dispatch/deployment.bcl` — component selection, naming strategy, and rollback settings
 
 JSON solution manifests and deployment settings are unsupported. An invalid `dispatch.bcl`

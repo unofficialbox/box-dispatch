@@ -3,7 +3,7 @@
 ## 1) Foundation
 - The CLI configures and deploys a solution composed of:
   - Box (unstructured data + data-aware AI agents)
-  - Salesforce/Agentforce (structured records + frontend + agent orchestration)
+  - Salesforce (structured records + frontend + optional agent orchestration)
   - Databricks (analytics and AI feature workloads)
   - AWS Bedrock AgentCore (runtime agent orchestration)
 - Source of truth for each solution run is a user-supplied Git repo containing scenario templates and environment manifests.

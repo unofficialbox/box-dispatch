@@ -8,11 +8,16 @@ package config
 // BoxCCGClientSecret is a credential. The whole record is written 0600, but it
 // is on-disk plaintext, so the store is only as private as the file.
 type ConnectionSettings struct {
-	SalesforceAlias   string `json:"salesforceAlias,omitempty"`
-	DatabricksHost    string `json:"databricksHost,omitempty"`
-	DatabricksProfile string `json:"databricksProfile,omitempty"`
-	AWSProfile        string `json:"awsProfile,omitempty"`
-	AWSRegion         string `json:"awsRegion,omitempty"`
+	SalesforceAlias          string `json:"salesforceAlias,omitempty"`
+	SalesforceOrgID          string `json:"salesforceOrgId,omitempty"`
+	SalesforceOrgType        string `json:"salesforceOrgType,omitempty"`
+	SalesforceOrgStatus      string `json:"salesforceOrgStatus,omitempty"`
+	SalesforceExpirationDate string `json:"salesforceExpirationDate,omitempty"`
+	SalesforceDevHubAlias    string `json:"salesforceDevHubAlias,omitempty"`
+	DatabricksHost           string `json:"databricksHost,omitempty"`
+	DatabricksProfile        string `json:"databricksProfile,omitempty"`
+	AWSProfile               string `json:"awsProfile,omitempty"`
+	AWSRegion                string `json:"awsRegion,omitempty"`
 
 	// Box Client Credentials Grant app. The subject determines who the token acts
 	// as: box_subject_type "user" keeps created resources owned by that user,

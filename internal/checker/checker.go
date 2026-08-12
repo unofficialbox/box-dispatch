@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
@@ -34,6 +35,11 @@ type ProviderDiscovery struct {
 	Region     string   `json:"region,omitempty"`     // AWS region
 	Options    []string `json:"options,omitempty"`    // selectable authenticated profiles/aliases
 	AuthType   string   `json:"auth_type,omitempty"`  // Box auth of the active connection: OAuth2 | CCG | JWT
+	OrgID      string   `json:"org_id,omitempty"`     // Salesforce organization ID
+	OrgStatus  string   `json:"org_status,omitempty"` // Salesforce Active / Connected / Deleted status
+	OrgType    string   `json:"org_type,omitempty"`   // Salesforce scratch or persistent
+	ExpiresAt  string   `json:"expires_at,omitempty"` // Salesforce scratch expiration date
+	Diagnostic string   `json:"-"`                    // sanitized provider CLI detail, promoted to ProviderResult
 }
 
 type ProviderResult struct {
@@ -46,6 +52,7 @@ type ProviderResult struct {
 	Blocked           bool              `json:"blocked"`
 	RequiresAttention bool              `json:"requires_attention"`
 	Discovery         ProviderDiscovery `json:"discovery"`
+	Diagnostic        string            `json:"diagnostic,omitempty"`
 }
 
 type CheckReport struct {
@@ -137,6 +144,7 @@ func checkProvider(p provider, cfg CheckConfig) ProviderResult {
 	ok, detail, discovered := p.connect()
 	res.ConnectivityOK = ok
 	res.Checks = append(res.Checks, detail)
+	res.Diagnostic = discovered.Diagnostic
 	mergeDiscovery(&res.Discovery, discovered)
 	if !ok {
 		res.RequiresAttention = true
@@ -160,6 +168,10 @@ func mergeDiscovery(dst *ProviderDiscovery, src ProviderDiscovery) {
 		{&dst.Host, src.Host},
 		{&dst.Region, src.Region},
 		{&dst.AuthType, src.AuthType},
+		{&dst.OrgID, src.OrgID},
+		{&dst.OrgStatus, src.OrgStatus},
+		{&dst.OrgType, src.OrgType},
+		{&dst.ExpiresAt, src.ExpiresAt},
 	} {
 		if strings.TrimSpace(field.from) != "" {
 			*field.into = field.from
@@ -310,36 +322,31 @@ func connectivityBoxBearer(token string) (bool, string, ProviderDiscovery) {
 func connectivitySalesforce() (bool, string, ProviderDiscovery) {
 	var discovery ProviderDiscovery
 	alias := strings.TrimSpace(os.Getenv("SF_ALIAS"))
-	args := []string{"org", "display", "--json"}
-	if alias != "" {
-		args = append(args, "-o", alias)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	out, err := runCommandOutput(ctx, "sf", args...)
+	info, err := salesforceorg.Inspect(alias, time.Now())
 	if err != nil {
-		return false, "sf org display failed: " + salesforceCLIError(out), discovery
-	}
-	var payload struct {
-		Result struct {
-			Username    string `json:"username"`
-			Alias       string `json:"alias"`
-			InstanceURL string `json:"instanceUrl"`
-		} `json:"result"`
-	}
-	if err := decodeCLIJSON(out, &payload); err != nil {
-		return false, "sf org display returned unreadable JSON", discovery
-	}
-	if payload.Result.Username != "" {
-		discovery.Identity = payload.Result.Username
-		discovery.Profile = payload.Result.Alias
-		discovery.Host = payload.Result.InstanceURL
-		if discovery.Profile == "" {
-			discovery.Profile = alias
+		if failure, ok := err.(*salesforceorg.Failure); ok {
+			discovery.Diagnostic = failure.Diagnostic
 		}
-		return true, fmt.Sprintf("salesforce org connected: %s", payload.Result.Username), discovery
+		return false, err.Error(), discovery
 	}
-	return true, "salesforce cli responded", discovery
+	discovery.Identity = info.Username
+	discovery.Profile = info.Alias
+	discovery.Host = info.InstanceURL
+	discovery.OrgID = info.ID
+	discovery.OrgStatus = info.EffectiveStatus()
+	discovery.ExpiresAt = info.ExpirationDate
+	discovery.OrgType = "persistent"
+	if info.IsScratch() {
+		discovery.OrgType = "scratch"
+	}
+	if discovery.Profile == "" {
+		discovery.Profile = alias
+	}
+	detail := fmt.Sprintf("salesforce org connected: %s", info.Username)
+	if info.IsScratch() && info.ExpirationDate != "" {
+		detail += " (scratch org, expires " + info.ExpirationDate + ")"
+	}
+	return true, detail, discovery
 }
 
 // salesforceOptions lists the aliases/usernames the Salesforce CLI is authenticated against.
@@ -357,8 +364,11 @@ func salesforceOptions() []string {
 				Username string `json:"username"`
 			} `json:"nonScratchOrgs"`
 			ScratchOrgs []struct {
-				Alias    string `json:"alias"`
-				Username string `json:"username"`
+				Alias          string `json:"alias"`
+				Username       string `json:"username"`
+				Status         string `json:"status"`
+				ExpirationDate string `json:"expirationDate"`
+				DevHubID       string `json:"devHubId"`
 			} `json:"scratchOrgs"`
 		} `json:"result"`
 	}
@@ -377,6 +387,12 @@ func salesforceOptions() []string {
 		add(org.Alias, org.Username)
 	}
 	for _, org := range payload.Result.ScratchOrgs {
+		if salesforceorg.HealthFailure(salesforceorg.Info{
+			Alias: org.Alias, Username: org.Username, Status: org.Status,
+			ExpirationDate: org.ExpirationDate, DevHubID: org.DevHubID,
+		}, time.Now()) != nil {
+			continue
+		}
 		add(org.Alias, org.Username)
 	}
 	return dedupe(options)

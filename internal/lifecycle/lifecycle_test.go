@@ -207,10 +207,28 @@ func TestValidateUsesReceiptsAndMarksUnsupportedAssets(t *testing.T) {
 }
 
 func TestSummarizeSalesforceErrorOmitsStack(t *testing.T) {
-	output := []byte(`{"name":"ExpectedSourceFilesError","message":"dist is missing","actions":["Run npm build"],"stack":"very long stack"}`)
+	output := []byte("Warning: @salesforce/cli update available.\n" + `{"name":"ExpectedSourceFilesError","message":"dist is missing","actions":["Run npm build"],"stack":"very long stack"}`)
 	detail := summarizeSalesforceError(output, os.ErrInvalid)
 	if detail != "ExpectedSourceFilesError: dist is missing: Next: Run npm build" {
 		t.Fatalf("unexpected summary: %q", detail)
+	}
+	_, diagnostic := salesforceErrorDetails(output, os.ErrInvalid)
+	if !strings.Contains(diagnostic, "very long stack") {
+		t.Fatalf("full diagnostic omitted Salesforce stack: %q", diagnostic)
+	}
+}
+
+func TestReadSalesforceInventorySkipsCLIWarning(t *testing.T) {
+	output := []byte("Warning: @salesforce/cli update available.\n" + `{"result":{"fileProperties":[{"fullName":"CLM_Demo","type":"CustomApplication"},{"fullName":"unpackaged/package.xml","type":"Package"}]}}`)
+	existing, err := readSalesforceInventory(output, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !existing["CustomApplication:CLM_Demo"] {
+		t.Fatalf("inventory = %v, want packaged CustomApplication", existing)
+	}
+	if existing["Package:unpackaged/package.xml"] {
+		t.Fatalf("inventory = %v, package manifest should be ignored", existing)
 	}
 }
 
@@ -228,6 +246,39 @@ func TestSalesforceUIBundleWithExistingOutputNeedsNoBuild(t *testing.T) {
 	}
 	if err := buildSalesforceUIBundles(project); err != nil {
 		t.Fatalf("existing UI Bundle output should not rebuild: %v", err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(project, ".forceignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ignore), "node_modules/") {
+		t.Fatalf("UI Bundle deploy exclusions missing node_modules: %q", ignore)
+	}
+}
+
+func TestSalesforceProjectForceIgnorePreservesExistingRules(t *testing.T) {
+	project := t.TempDir()
+	path := filepath.Join(project, ".forceignore")
+	if err := os.WriteFile(path, []byte("dist/local-only.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSalesforceProjectForceIgnore(project); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "dist/local-only.txt") || strings.Count(got, "node_modules/") != 1 {
+		t.Fatalf("unexpected .forceignore contents: %q", got)
+	}
+	if err := ensureSalesforceProjectForceIgnore(project); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if strings.Count(string(data), "node_modules/") != 1 {
+		t.Fatalf("node_modules exclusion duplicated: %q", data)
 	}
 }
 
@@ -247,6 +298,148 @@ func TestSalesforceInventoryDeploysOnlyWhenComponentsAreMissing(t *testing.T) {
 	result := classifySalesforceInventory(item, expected, existing, "demo")
 	if result.Status != StatusMissing || !result.Deployable || len(result.Present) != 1 || len(result.Missing) != 1 {
 		t.Fatalf("inventory result = %#v, want one existing and one missing component", result)
+	}
+}
+
+func TestSalesforcePlanIncludesManagedPackageFromStart(t *testing.T) {
+	root := t.TempDir()
+	if err := solution.WriteBundled(root, "clm"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(root, "salesforce-project")
+	if err := os.MkdirAll(filepath.Join(project, "force-app", "main", "default", "classes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "sfdx-project.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "force-app", "main", "default", "classes", "Demo.cls-meta.xml"), []byte(`<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"><apiVersion>66.0</apiVersion></ApexClass>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item, err := PlanProvider(root, "salesforce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(item.Planned, "Managed Package:Box for Salesforce 5.43") {
+		t.Fatalf("Salesforce plan omitted managed package: %#v", item.Planned)
+	}
+	if !slices.ContainsFunc(item.Planned, func(component string) bool { return strings.HasPrefix(component, "ApexClass:") }) {
+		t.Fatalf("Salesforce plan omitted local metadata categories: %#v", item.Planned)
+	}
+	if len(item.ComponentOrder) == 0 || item.ComponentOrder[0] != "Managed Package" {
+		t.Fatalf("Salesforce component order = %#v", item.ComponentOrder)
+	}
+	if !slices.Contains(item.Planned, "Permission Set Assignment:Box Admin (All Licenses)") || !slices.Contains(item.Planned, "Permission Set Assignment:CLM Demo Operator") {
+		t.Fatalf("Salesforce plan omitted required permission-set assignments: %#v", item.Planned)
+	}
+}
+
+func TestSalesforcePackageInventoryRequiresExactVersion(t *testing.T) {
+	required := []solution.SalesforcePackageRequirement{{
+		Name: "Box for Salesforce", Namespace: "box", PackageID: "033700000004yvWAAQ",
+		VersionID: "04tKi000000gPNZIA2", VersionName: "5.43", VersionNumber: "5.43.0.1",
+	}}
+	installed := []installedSalesforcePackage{{
+		SubscriberPackageID: "033700000004yvWAAQ", SubscriberPackageName: "Box for Salesforce",
+		SubscriberPackageNamespace: "box", SubscriberPackageVersionID: "04tOlder",
+	}}
+	if missing := missingSalesforcePackages(required, installed); len(missing) != 1 {
+		t.Fatalf("older package satisfied exact prerequisite: %#v", missing)
+	}
+	installed[0].SubscriberPackageVersionID = "04tKi000000gPNZIA2"
+	if missing := missingSalesforcePackages(required, installed); len(missing) != 0 {
+		t.Fatalf("exact package version was reported missing: %#v", missing)
+	}
+}
+
+func TestMissingSalesforcePackageBecomesDeployablePrerequisite(t *testing.T) {
+	item := classifySalesforceInventory(
+		Item{Provider: "salesforce", Name: "Salesforce metadata"},
+		map[string]bool{"ApexClass:BoxEmailAttachmentUploader": true},
+		map[string]bool{"ApexClass:BoxEmailAttachmentUploader": true},
+		"scratch",
+	)
+	requirement := solution.SalesforcePackageRequirement{
+		Name: "Box for Salesforce", Namespace: "box", VersionID: "04tKi000000gPNZIA2",
+		VersionName: "5.43", VersionNumber: "5.43.0.1",
+	}
+	result := addMissingSalesforcePackages(item, []solution.SalesforcePackageRequirement{requirement}, "scratch")
+	if result.Status != StatusMissing || !result.Deployable || !slices.Contains(result.Missing, "Managed Package:Box for Salesforce 5.43") {
+		t.Fatalf("package prerequisite result = %#v", result)
+	}
+	for _, want := range []string{"Box for Salesforce 5.43.0.1", "before metadata deployment"} {
+		if !strings.Contains(result.Detail, want) {
+			t.Fatalf("detail %q does not contain %q", result.Detail, want)
+		}
+	}
+}
+
+func TestInstalledSalesforcePackageRemainsVisibleInChecklist(t *testing.T) {
+	requirement := solution.SalesforcePackageRequirement{
+		Name: "Box for Salesforce", Namespace: "box", VersionID: "04tKi000000gPNZIA2", VersionName: "5.43",
+	}
+	installed := []installedSalesforcePackage{{
+		SubscriberPackageNamespace: "box", SubscriberPackageVersionID: "04tKi000000gPNZIA2",
+	}}
+	result := addSalesforcePackageResults(Item{Provider: "salesforce", Status: StatusPresent}, []solution.SalesforcePackageRequirement{requirement}, installed, "scratch")
+	if !slices.Contains(result.Present, "Managed Package:Box for Salesforce 5.43") || len(result.Missing) != 0 {
+		t.Fatalf("installed managed package checklist result = %#v", result)
+	}
+}
+
+func TestSalesforcePackageInstallArgsAreNonInteractiveAndVersionPinned(t *testing.T) {
+	requirement := solution.SalesforcePackageRequirement{VersionID: "04tKi000000gPNZIA2", SecurityType: "AdminsOnly"}
+	args := strings.Join(salesforcePackageInstallArgs(requirement, "scratch"), " ")
+	for _, want := range []string{"package install", "--package 04tKi000000gPNZIA2", "--target-org scratch", "--security-type AdminsOnly", "--wait 30", "--no-prompt", "--json"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("install args %q do not contain %q", args, want)
+		}
+	}
+}
+
+func TestDecodeSalesforceUserPermissionInventoryNormalizesNamespaces(t *testing.T) {
+	payload := []byte(`{
+  "status": 0,
+  "result": {
+    "records": [{
+      "Profile": {"Name": "System Administrator"},
+      "PermissionSetAssignments": {"records": [
+        {"PermissionSet": {"Name": "Box_Admin_All_Licenses", "NamespacePrefix": "box"}},
+        {"PermissionSet": {"Name": "CLM_Demo_Operator", "NamespacePrefix": null}}
+      ]}
+    }]
+  }
+}`)
+	inventory, err := decodeSalesforceUserPermissionInventory(payload, "admin@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory.Profile != "System Administrator" || !inventory.Assigned["box__box_admin_all_licenses"] || !inventory.Assigned["clm_demo_operator"] {
+		t.Fatalf("permission inventory = %#v", inventory)
+	}
+}
+
+func TestMissingSalesforcePermissionSetsBecomeDeployableChecklistRows(t *testing.T) {
+	required := []solution.SalesforcePermissionSetRequirement{
+		{Name: "box__Box_Admin_All_Licenses", Label: "Box Admin (All Licenses)"},
+		{Name: "CLM_Demo_Operator", Label: "CLM Demo Operator"},
+	}
+	assigned := map[string]bool{"box__box_admin_all_licenses": true}
+	result := addSalesforcePermissionSetResults(Item{Provider: "salesforce", Status: StatusPresent}, required, assigned, "scratch")
+	if result.Status != StatusMissing || !result.Deployable {
+		t.Fatalf("permission-set result = %#v, want deployable missing", result)
+	}
+	if !slices.Contains(result.Present, "Permission Set Assignment:Box Admin (All Licenses)") || !slices.Contains(result.Missing, "Permission Set Assignment:CLM Demo Operator") {
+		t.Fatalf("permission-set checklist result = %#v", result)
+	}
+	if !strings.Contains(result.Detail, "authenticated System Administrator") {
+		t.Fatalf("permission-set guidance is not explicit about its target user: %q", result.Detail)
+	}
+}
+
+func TestSOQLStringEscaping(t *testing.T) {
+	if got, want := escapeSOQLString(`admin'o\\example.test`), `admin\'o\\\\example.test`; got != want {
+		t.Fatalf("escaped SOQL = %q, want %q", got, want)
 	}
 }
 

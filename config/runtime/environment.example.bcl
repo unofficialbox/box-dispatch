@@ -63,8 +63,8 @@
       }
     },
     "salesforce-agentforce": {
-      "displayName": "Agentforce",
-      "role": "Structured data, human experience, and agents",
+      "displayName": "Salesforce",
+      "role": "CRM, structured records, and customer workflows",
       "env": {
         "SF_ALIAS": "${SF_ALIAS}",
         "SF_PROJECT_DIR": "${SF_PROJECT_DIR}",

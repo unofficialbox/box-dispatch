@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
@@ -230,6 +232,13 @@ func destroySalesforceMetadata(root string, resources []ResourceReference) (Tear
 		result.Detail = "No Salesforce alias is selected; nothing was removed."
 		for _, resource := range resources {
 			result.Outcomes = append(result.Outcomes, TeardownOutcome{Resource: resource, Error: "no Salesforce alias selected"})
+		}
+		return result, nil
+	}
+	if _, inspectErr := salesforceorg.Inspect(settings.SalesforceAlias, time.Now()); inspectErr != nil {
+		result.Detail = "Salesforce metadata removal stopped before sending a destructive deploy: " + inspectErr.Error()
+		for _, resource := range resources {
+			result.Outcomes = append(result.Outcomes, TeardownOutcome{Resource: resource, Error: inspectErr.Error()})
 		}
 		return result, nil
 	}

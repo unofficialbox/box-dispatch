@@ -28,10 +28,11 @@ func isolateRoot(t *testing.T) string {
 func TestConnectionSettingsRoundTripAsBCL(t *testing.T) {
 	root := isolateRoot(t)
 	want := config.ConnectionSettings{
-		SalesforceAlias:   "agentforce",
-		DatabricksProfile: "clm",
-		AWSProfile:        "demo",
-		AWSRegion:         "us-east-1",
+		SalesforceAlias:       "agentforce",
+		SalesforceDevHubAlias: "devhub",
+		DatabricksProfile:     "clm",
+		AWSProfile:            "demo",
+		AWSRegion:             "us-east-1",
 	}
 	if err := SaveConnectionSettings(want); err != nil {
 		t.Fatal(err)

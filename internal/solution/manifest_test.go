@@ -71,6 +71,30 @@ func TestLoadBundledManifestFromBCL(t *testing.T) {
 	if len(manifest.Box.Capabilities) != 11 {
 		t.Fatalf("got %d bundled capabilities, want 11", len(manifest.Box.Capabilities))
 	}
+	if packages := manifest.Salesforce.RequiredPackages; len(packages) != 1 || packages[0].VersionID != "04tKi000000gPNZIA2" || packages[0].VersionNumber != "5.43.0.1" {
+		t.Fatalf("bundled Salesforce prerequisites = %#v", packages)
+	}
+	if permissionSets := manifest.Salesforce.RequiredPermissionSets; len(permissionSets) != 5 || permissionSets[0].Name != "box__Box_Admin_All_Licenses" || permissionSets[4].Name != "CLM_Demo_Operator" {
+		t.Fatalf("bundled Salesforce permission sets = %#v", permissionSets)
+	}
+}
+
+func TestCLMManifestMigratesSalesforcePackagePrerequisite(t *testing.T) {
+	manifest, err := decodeManifestPayload([]byte(`{
+  "schema_version": "1.0",
+  "template_id": "clm",
+  "box": {"capabilities": []}
+}`), "legacy CLM manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := manifest.Salesforce.RequiredPackages
+	if len(packages) != 1 || packages[0].Namespace != "box" || packages[0].VersionID != "04tKi000000gPNZIA2" {
+		t.Fatalf("migrated prerequisites = %#v", packages)
+	}
+	if permissionSets := manifest.Salesforce.RequiredPermissionSets; len(permissionSets) != 5 {
+		t.Fatalf("migrated permission sets = %#v", permissionSets)
+	}
 }
 
 func TestWriteManifestWritesCanonicalBCLAndRemovesObsoleteJSON(t *testing.T) {

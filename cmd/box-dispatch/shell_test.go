@@ -1,12 +1,14 @@
 package main
 
 import (
-	"math"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
@@ -14,6 +16,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
@@ -53,6 +56,20 @@ func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 	}
 	if _, exists := result.statuses["aws"]; exists {
 		t.Fatal("unselected AWS was scheduled for checking")
+	}
+}
+
+func TestBuildPageUsesSalesforceProviderName(t *testing.T) {
+	model := newSetupOnlyShell()
+	names := make([]string, 0, len(model.components))
+	for _, component := range model.components {
+		names = append(names, component.name)
+	}
+	if !slices.Contains(names, "Salesforce") {
+		t.Fatalf("Build component catalog is missing Salesforce: %v", names)
+	}
+	if slices.Contains(names, "Agentforce") {
+		t.Fatalf("Build component catalog still contains Agentforce: %v", names)
 	}
 }
 
@@ -96,7 +113,10 @@ func TestSuccessfulSalesforceCheckPersistsTargetOrg(t *testing.T) {
 		result: checker.ProviderResult{
 			Name:           "salesforce",
 			ConnectivityOK: true,
-			Discovery:      checker.ProviderDiscovery{Identity: "scratch-user@example.test"},
+			Discovery: checker.ProviderDiscovery{
+				Identity: "scratch-user@example.test", Profile: "dispatch-scratch", OrgID: "00Dtest",
+				OrgType: "scratch", OrgStatus: "Active", ExpiresAt: "2026-09-09",
+			},
 		},
 	})
 	result := updated.(rootShellModel)
@@ -107,11 +127,258 @@ func TestSuccessfulSalesforceCheckPersistsTargetOrg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.SalesforceAlias != "scratch-user@example.test" {
+	if settings.SalesforceAlias != "dispatch-scratch" {
 		t.Fatalf("saved Salesforce target = %q", settings.SalesforceAlias)
 	}
-	if os.Getenv("SF_ALIAS") != "scratch-user@example.test" {
+	if settings.SalesforceOrgID != "00Dtest" || settings.SalesforceOrgType != "scratch" || settings.SalesforceOrgStatus != "Active" || settings.SalesforceExpirationDate != "2026-09-09" {
+		t.Fatalf("saved Salesforce lifecycle metadata = %#v", settings)
+	}
+	if os.Getenv("SF_ALIAS") != "dispatch-scratch" {
 		t.Fatalf("SF_ALIAS = %q", os.Getenv("SF_ALIAS"))
+	}
+}
+
+func TestSalesforceScratchCreationRequiresExplicitConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+	actions := model.providerActions()
+	index := -1
+	for i, action := range actions {
+		if action == "scratch" {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatalf("Salesforce actions do not include scratch creation: %v", actions)
+	}
+	updated, cmd := model.runProviderAction(index)
+	model = updated.(rootShellModel)
+	if cmd == nil || model.screen != screenProvider {
+		t.Fatalf("scratch action = screen %v cmd %v, want Dev Hub discovery", model.screen, cmd)
+	}
+
+	hubs := []salesforceorg.DevHub{
+		{Alias: "dev", Username: "dev@example.com", OrgID: "00Ddev", ConnectedStatus: "Connected"},
+		{Alias: "devhub", Username: "hub@example.com", OrgID: "00Dhub", ConnectedStatus: "Connected"},
+	}
+	updated, _ = model.Update(devHubListFinishedMsg{hubs: hubs})
+	model = updated.(rootShellModel)
+	if model.screen != screenDevHubs || len(model.devHubs) != 2 {
+		t.Fatalf("Dev Hub discovery = screen %v hubs %v", model.screen, model.devHubs)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(rootShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.screen != screenScratchConfirm || model.scratchConfirmCursor != 1 || model.selectedDevHub.Alias != "devhub" {
+		t.Fatalf("Dev Hub selection = screen %v cursor %d hub %#v", model.screen, model.scratchConfirmCursor, model.selectedDevHub)
+	}
+	if !strings.HasPrefix(model.pendingScratchAlias, "box-dispatch-") {
+		t.Fatalf("scratch alias = %q", model.pendingScratchAlias)
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SalesforceDevHubAlias != "devhub" {
+		t.Fatalf("saved Dev Hub = %q", settings.SalesforceDevHubAlias)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(rootShellModel)
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if cmd == nil || model.screen != screenProvider || !model.salesforceCreating {
+		t.Fatal("confirmed scratch creation did not schedule the Salesforce CLI command")
+	}
+}
+
+func TestScratchCreationFailureOffersFullDiagnosticView(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height = 120, 40
+	model.provider = "salesforce"
+	model.screen = screenProvider
+	model.results["salesforce"] = checker.ProviderResult{
+		Name: "salesforce", Discovery: checker.ProviderDiscovery{Options: []string{"dev", "devhub"}},
+	}
+	failure := &salesforceorg.Failure{
+		Summary:    "Salesforce Dev Hub \"devhub\" could not create the scratch org.",
+		Diagnostic: `{"name":"NoDefaultDevHub","stack":"complete stack trace"}`,
+	}
+	updated, _ := model.Update(scratchOrgFinishedMsg{alias: "box-dispatch-test", err: failure})
+	model = updated.(rootShellModel)
+	if model.statuses["salesforce"] != connectionFailed || !strings.Contains(model.message, "failed") {
+		t.Fatalf("creation failure not surfaced: status %v message %q", model.statuses["salesforce"], model.message)
+	}
+	if !containsStr(model.providerActions(), "salesforce-existing") {
+		t.Fatalf("creation failure discarded authenticated profile options: %v", model.providerActions())
+	}
+	if strings.Contains(model.message, failure.Summary) {
+		t.Fatalf("footer duplicates the panel error: %q", model.message)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model = updated.(rootShellModel)
+	if model.screen != screenDiagnostic || !strings.Contains(model.View(), "complete stack trace") {
+		t.Fatalf("full diagnostic view was not opened: screen %v", model.screen)
+	}
+}
+
+func TestSalesforceProviderActionsAreStreamlinedByStatus(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+
+	if got := model.providerActions(); !slices.Equal(got, []string{"salesforce-existing", "scratch", "back"}) {
+		t.Fatalf("disconnected actions = %v", got)
+	}
+
+	model.statuses["salesforce"] = connectionConnected
+	if got := model.providerActions(); !slices.Equal(got, []string{"salesforce-done", "salesforce-existing", "scratch"}) {
+		t.Fatalf("connected actions = %v", got)
+	}
+}
+
+func TestChoosingSalesforceOrgImmediatelyRechecks(t *testing.T) {
+	isolateShellRoot(t)
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenOptions
+	model.results["salesforce"] = checker.ProviderResult{
+		Name: "salesforce",
+		Discovery: checker.ProviderDiscovery{
+			Options: []string{"dispatch-dev", "dispatch-scratch"},
+		},
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if cmd == nil || model.screen != screenProvider || model.statuses["salesforce"] != connectionChecking {
+		t.Fatalf("org selection = screen %v status %v cmd %v", model.screen, model.statuses["salesforce"], cmd)
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SalesforceAlias != "dispatch-dev" {
+		t.Fatalf("saved Salesforce alias = %q", settings.SalesforceAlias)
+	}
+}
+
+func TestSalesforceOptionsCombineProfilesAndSignIn(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenOptions
+	model.results["salesforce"] = checker.ProviderResult{
+		Name: "salesforce",
+		Discovery: checker.ProviderDiscovery{
+			Options: []string{"dispatch-dev"},
+		},
+	}
+
+	view := model.viewOptions(100)
+	for _, expected := range []string{"Use an existing Salesforce org", "dispatch-dev", salesforceLoginOption} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Salesforce options do not contain %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestConnectedSalesforceViewShowsCurrentOrgSummary(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+	model.statuses["salesforce"] = connectionConnected
+	model.results["salesforce"] = checker.ProviderResult{
+		Name:   "salesforce",
+		Checks: []string{"salesforce tools discovered", "salesforce org connected"},
+		Discovery: checker.ProviderDiscovery{
+			Identity: "scratch@example.test", Profile: "dispatch-scratch", OrgType: "scratch",
+			OrgStatus: "Active", ExpiresAt: "2026-09-10", Host: "https://example.test",
+		},
+	}
+
+	view := model.viewProvider(100)
+	for _, expected := range []string{"Current org", "dispatch-scratch", "expires 2026-09-10", "Continue with this org"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("connected Salesforce view does not contain %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "salesforce tools discovered") {
+		t.Fatalf("connected Salesforce view leaked raw checker log:\n%s", view)
+	}
+}
+
+func TestScratchFlowAuthenticatesDevHubOnlyWhenNeeded(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+
+	updated, cmd := model.Update(devHubListFinishedMsg{})
+	model = updated.(rootShellModel)
+	if cmd == nil || model.screen != screenProvider || !strings.Contains(model.message, "Opening Salesforce login") {
+		t.Fatalf("missing Dev Hub = screen %v message %q cmd %v", model.screen, model.message, cmd)
+	}
+}
+
+func TestSalesforceProviderRecheckShortcut(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.provider = "salesforce"
+	model.screen = screenProvider
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = updated.(rootShellModel)
+	if cmd == nil || model.statuses["salesforce"] != connectionChecking {
+		t.Fatalf("recheck shortcut = status %v cmd %v", model.statuses["salesforce"], cmd)
+	}
+}
+
+func TestFailedConnectionCheckOffersFullDiagnosticView(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height = 120, 40
+	model.provider = "salesforce"
+	model.screen = screenProvider
+	updated, _ := model.Update(checkFinishedMsg{provider: "salesforce", result: checker.ProviderResult{
+		Name: "salesforce", ConnectivityOK: false, Diagnostic: `{"stack":"connection stack"}`,
+		Checks: []string{"Salesforce scratch org is deleted."},
+	}})
+	model = updated.(rootShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model = updated.(rootShellModel)
+	if model.screen != screenDiagnostic || !strings.Contains(model.View(), "connection stack") {
+		t.Fatalf("connection diagnostic did not open: screen %v", model.screen)
+	}
+}
+
+func TestFailedValidationBlocksDeployAndOpensDiagnostic(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height = 120, 40
+	model.screen = screenValidate
+	model.validateDone = true
+	model.validationItems = []lifecycle.Item{{
+		Provider: "salesforce", Status: lifecycle.StatusFailed,
+		Detail: "Scratch org is deleted.", Diagnostic: `{"stack":"complete validation stack"}`,
+	}}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(rootShellModel)
+	if model.screen != screenValidate || !strings.Contains(model.message, "blocked") {
+		t.Fatalf("failed validation advanced to deploy: screen %v message %q", model.screen, model.message)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model = updated.(rootShellModel)
+	if model.screen != screenDiagnostic || !strings.Contains(model.View(), "complete validation stack") {
+		t.Fatalf("validation diagnostic did not open: screen %v", model.screen)
 	}
 }
 
@@ -275,6 +542,20 @@ func TestValidateRunsAutomaticallyOnlyOnFirstEntry(t *testing.T) {
 	}
 }
 
+func TestSpinnerStopsSchedulingTicksWhenWorkFinishes(t *testing.T) {
+	model := newSetupOnlyShell()
+	updated, cmd := model.Update(spinner.TickMsg{})
+	if cmd != nil {
+		t.Fatal("idle shell scheduled another spinner tick")
+	}
+	model = updated.(rootShellModel)
+	model.validateRunning = true
+	_, cmd = model.Update(spinner.TickMsg{})
+	if cmd == nil {
+		t.Fatal("active validation did not keep the spinner running")
+	}
+}
+
 func TestValidationTracksProgressPerProvider(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.components[1].selected = true
@@ -308,16 +589,17 @@ func TestConnectBlocksConfigurationUntilAllSelectedServicesConnect(t *testing.T)
 	}
 }
 
-func TestOverallJourneyProgressIsAvailableOnEveryWorkflowStage(t *testing.T) {
+func TestWorkflowHeaderUsesStepsWithoutArtificialProgress(t *testing.T) {
 	model := newSetupOnlyShell()
 	stages := []shellScreen{screenComponents, screenTemplates, screenConfig, screenPackage, screenValidate, screenDeploy}
 	for _, stage := range stages {
 		model.screen = stage
-		if model.overallJourneyProgress() <= 0 {
-			t.Fatalf("stage %v has no overall journey progress", stage)
+		header := model.stageHeader()
+		if header == "" {
+			t.Fatalf("stage %v has no workflow header", stage)
 		}
-		if !strings.Contains(model.stageHeader(), "OVERALL PROGRESS") {
-			t.Fatalf("stage %v does not render overall progress", stage)
+		if strings.Contains(header, "OVERALL PROGRESS") || strings.Contains(header, "%") {
+			t.Fatalf("stage %v renders navigation position as progress: %q", stage, header)
 		}
 	}
 }
@@ -487,24 +769,122 @@ func TestShellSourcesScenariosFromSeededConfig(t *testing.T) {
 func TestProviderConnectionDetailsRendersDiscoveredIdentity(t *testing.T) {
 	box := providerConnectionDetails(checker.ProviderResult{
 		Name:      "box",
-		Discovery: checker.ProviderDiscovery{Identity: "kadams@boxdemo.com", Account: "385982796", Enterprise: "5105484"},
+		Discovery: checker.ProviderDiscovery{AuthType: "CCG", Identity: "kadams@boxdemo.com", Account: "385982796", Enterprise: "5105484"},
 	})
-	for _, expected := range []string{"user kadams@boxdemo.com", "UID 385982796", "EID 5105484"} {
-		if !strings.Contains(box, expected) {
-			t.Fatalf("box detail %q does not contain %q", box, expected)
-		}
+	wantBox := "auth CCG\nuser kadams@boxdemo.com\nUID 385982796\nEID 5105484"
+	if box != wantBox {
+		t.Fatalf("box detail = %q, want %q", box, wantBox)
 	}
 
 	salesforce := providerConnectionDetails(checker.ProviderResult{
-		Name:      "salesforce",
-		Discovery: checker.ProviderDiscovery{Identity: "kadams@agentforce.com", Profile: "agentforce"},
+		Name: "salesforce",
+		Discovery: checker.ProviderDiscovery{
+			Identity: "kadams@agentforce.com", Profile: "agentforce", OrgType: "scratch",
+			OrgStatus: "Active", ExpiresAt: "2026-09-09", OrgID: "00Dtest",
+		},
 	})
-	if !strings.Contains(salesforce, "alias agentforce") {
-		t.Fatalf("salesforce detail missing alias: %q", salesforce)
+	wantSalesforce := "user kadams@agentforce.com\nalias agentforce\ntype scratch\nstatus Active\nexpires 2026-09-09\norg ID 00Dtest"
+	if salesforce != wantSalesforce {
+		t.Fatalf("salesforce detail = %q, want %q", salesforce, wantSalesforce)
 	}
 	// Empty fields are omitted rather than rendered as dangling labels.
-	if strings.Contains(salesforce, "org ") {
+	if strings.Contains(salesforce, "\norg ") && !strings.Contains(salesforce, "\norg ID ") {
 		t.Fatalf("salesforce detail rendered an empty org: %q", salesforce)
+	}
+
+	for _, test := range []struct {
+		name   string
+		result checker.ProviderResult
+		want   string
+	}{
+		{
+			name: "databricks",
+			result: checker.ProviderResult{Name: "databricks", Discovery: checker.ProviderDiscovery{
+				Identity: "data@example.com", Profile: "clm", Host: "https://workspace.example.com",
+			}},
+			want: "user data@example.com\nprofile clm\nworkspace https://workspace.example.com",
+		},
+		{
+			name: "aws",
+			result: checker.ProviderResult{Name: "aws", Discovery: checker.ProviderDiscovery{
+				Account: "123456789012", Profile: "demo", Region: "us-east-1",
+			}},
+			want: "account 123456789012\nprofile demo\nregion us-east-1",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := providerConnectionDetails(test.result); got != test.want {
+				t.Fatalf("detail = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRenderProviderConnectionDetailsDoesNotPadLinesToLongestValue(t *testing.T) {
+	rendered := renderProviderConnectionDetails(checker.ProviderResult{
+		Name: "box",
+		Discovery: checker.ProviderDiscovery{
+			AuthType: "CCG", Identity: "kadams@boxdemo.com", Account: "385982796", Enterprise: "5105484",
+		},
+	})
+	lines := strings.Split(rendered, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d detail lines, want 4: %q", len(lines), rendered)
+	}
+	if lipgloss.Width(lines[0]) == lipgloss.Width(lines[1]) {
+		t.Fatalf("short and long detail lines were padded to the same width: %q", rendered)
+	}
+	for _, line := range lines {
+		if strings.HasSuffix(line, " ") {
+			t.Fatalf("detail line has background-breaking trailing padding: %q", line)
+		}
+	}
+}
+
+func TestProviderConnectionSummaryShowsOnlyEssentialIdentity(t *testing.T) {
+	box := providerConnectionSummary(checker.ProviderResult{
+		Name: "box",
+		Discovery: checker.ProviderDiscovery{
+			AuthType: "CCG", Identity: "kadams@boxdemo.com", Account: "385982796", Enterprise: "5105484",
+		},
+	})
+	if box != "user kadams@boxdemo.com\nenterprise 5105484" {
+		t.Fatalf("Box summary = %q", box)
+	}
+	if strings.Contains(box, "CCG") || strings.Contains(box, "385982796") {
+		t.Fatalf("Box summary contains advanced details: %q", box)
+	}
+
+	salesforce := providerConnectionSummary(checker.ProviderResult{
+		Name: "salesforce",
+		Discovery: checker.ProviderDiscovery{
+			Identity: "scratch@example.test", Profile: "dispatch-scratch", OrgType: "scratch",
+			ExpiresAt: "2026-09-10", OrgID: "00Dtest", Host: "https://example.test",
+		},
+	})
+	if salesforce != "org dispatch-scratch\nexpires 2026-09-10" {
+		t.Fatalf("Salesforce summary = %q", salesforce)
+	}
+	if strings.Contains(salesforce, "00Dtest") || strings.Contains(salesforce, "https://") {
+		t.Fatalf("Salesforce summary contains advanced details: %q", salesforce)
+	}
+}
+
+func TestPrimaryScreensDoNotExposeImplementationOrDuplicateControls(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height = 112, 50
+
+	if view := model.viewComponents(112); strings.Contains(view, "Huh") {
+		t.Fatalf("component screen exposes its form implementation:\n%s", view)
+	}
+	if view := model.viewTemplates(112); strings.Contains(view, "Huh") {
+		t.Fatalf("template screen exposes its form implementation:\n%s", view)
+	}
+	if view := model.viewBoxComponents(112); strings.Contains(view, "Enter save") || strings.Contains(view, "a enable all") {
+		t.Fatalf("Box component body duplicates footer controls:\n%s", view)
+	}
+	if view := model.viewDirectoryPicker(112); strings.Contains(view, "Space choose highlighted") || strings.Contains(view, "Esc cancel") {
+		t.Fatalf("directory picker body duplicates footer controls:\n%s", view)
 	}
 }
 
@@ -531,38 +911,6 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	// Product branding lives in the shared header rather than the welcome body.
 	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {
 		t.Fatalf("header does not carry product branding: %q", header)
-	}
-}
-
-func TestOverallProgressSpringConvergesAndSettles(t *testing.T) {
-	m := newSetupOnlyShell()
-	m.screen = screenValidate // journey target 0.72
-
-	// The value starts adrift from the target, so a kick must arm a frame loop.
-	if cmd := m.kickJourney(); cmd == nil || !m.journeyAnimating {
-		t.Fatal("kickJourney did not start the animation when value drifted from target")
-	}
-
-	var model tea.Model = m
-	settled := false
-	for i := 0; i < 600; i++ { // ~10s of frames — far more than needed
-		updated, _ := model.(rootShellModel).advanceJourney(journeyFrameMsg{})
-		model = updated
-		if !model.(rootShellModel).journeyAnimating {
-			settled = true
-			break
-		}
-	}
-	rm := model.(rootShellModel)
-	if !settled {
-		t.Fatal("spring never settled")
-	}
-	if math.Abs(rm.journeyValue-0.72) > 0.005 {
-		t.Fatalf("settled journeyValue = %f, want ~0.72", rm.journeyValue)
-	}
-	// Once settled, a re-kick at the same target must not restart the loop.
-	if cmd := rm.kickJourney(); cmd != nil {
-		t.Fatal("kickJourney restarted animation despite already being at target")
 	}
 }
 
@@ -598,6 +946,293 @@ func TestDeployViewFitsAndScrollReverses(t *testing.T) {
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
 	if up := model.(rootShellModel).deployAssetsScroll; up != down-1 {
 		t.Fatalf("scroll up did not reverse down: down=%d up=%d", down, up)
+	}
+}
+
+func TestDeployCompletionOffersBoxAndSelectedScratchOrg(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{SalesforceAlias: "dispatch-scratch", SalesforceOrgType: "scratch"}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newSetupOnlyShell()
+	for i := range m.components {
+		m.components[i].selected = m.components[i].provider == "box" || m.components[i].provider == "salesforce"
+	}
+	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 50
+	m.deploymentAuditPath = "/tmp/deployment.json"
+	m.results["box"] = checker.ProviderResult{Discovery: checker.ProviderDiscovery{Enterprise: "5105484"}}
+	action := m.deployAction(112, 0)
+	for _, want := range []string{"Open Box enterprise (EID 5105484)", "Open Salesforce scratch org (dispatch-scratch)", "Return to Box Dispatch home"} {
+		if !strings.Contains(action, want) {
+			t.Fatalf("deployment completion action omitted %q:\n%s", want, action)
+		}
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if cmd == nil || updated.(rootShellModel).screen != screenDeploy {
+		t.Fatal("Salesforce open action did not return an executable command on the deployment screen")
+	}
+}
+
+func TestDeployCompletionHidesSalesforceOpenForPersistentOrg(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{SalesforceAlias: "production", SalesforceOrgType: "persistent"}); err != nil {
+		t.Fatal(err)
+	}
+	m := newSetupOnlyShell()
+	for i := range m.components {
+		m.components[i].selected = m.components[i].provider == "box" || m.components[i].provider == "salesforce"
+	}
+	m.screen, m.deployDone = screenDeploy, true
+	if action := m.deployAction(112, 0); strings.Contains(action, "Open Salesforce scratch org") {
+		t.Fatalf("persistent org received scratch-org open action:\n%s", action)
+	}
+}
+
+func TestBrowserOpenCommands(t *testing.T) {
+	tests := map[string][]string{
+		"darwin":  {"open", boxAdminConsoleURL},
+		"linux":   {"xdg-open", boxAdminConsoleURL},
+		"windows": {"rundll32", "url.dll,FileProtocolHandler", boxAdminConsoleURL},
+	}
+	for goos, want := range tests {
+		cmd := browserOpenCommand(goos, boxAdminConsoleURL)
+		if cmd == nil || !slices.Equal(cmd.Args, want) {
+			t.Fatalf("%s open command = %#v, want %#v", goos, cmd, want)
+		}
+	}
+	if cmd := browserOpenCommand("plan9", boxAdminConsoleURL); cmd != nil {
+		t.Fatalf("unsupported operating system returned command %#v", cmd.Args)
+	}
+}
+
+func TestValidationAndDeployChecklistsStayInsideTerminal(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.components[1].selected = true
+	m.width, m.height = 120, 44
+	m.validateDone = true
+	m.validationProgress = map[string]float64{"box": 1, "salesforce": 1}
+
+	missing := make([]string, 36)
+	order := make([]string, 36)
+	for i := range missing {
+		order[i] = fmt.Sprintf("MetadataType%02d", i)
+		missing[i] = order[i] + ":Example"
+	}
+	m.validationItems = []lifecycle.Item{
+		{Provider: "box", Status: lifecycle.StatusPresent, Detail: "Box configuration is present."},
+		{
+			Provider: "salesforce", Status: lifecycle.StatusMissing, Detail: "36 components need deployment.", Deployable: true,
+			Missing: missing, DeployableComponents: append([]string(nil), missing...), ComponentOrder: order,
+		},
+	}
+
+	assertFitsAndScrolls := func(screen shellScreen, confirm bool) {
+		t.Helper()
+		m.screen, m.confirmingDeploy, m.lifecycleScroll = screen, confirm, 0
+		view := m.View()
+		if lines := strings.Count(view, "\n") + 1; lines > m.height {
+			t.Fatalf("screen %v overflows terminal: %d lines > height %d", screen, lines, m.height)
+		}
+		if !strings.Contains(view, "↑/↓ scroll") {
+			t.Fatalf("screen %v did not expose the bounded checklist viewport", screen)
+		}
+
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		down := updated.(rootShellModel)
+		if down.lifecycleScroll == 0 {
+			t.Fatalf("screen %v did not scroll checklist down", screen)
+		}
+		updated, _ = down.Update(tea.KeyMsg{Type: tea.KeyUp})
+		if up := updated.(rootShellModel).lifecycleScroll; up != down.lifecycleScroll-1 {
+			t.Fatalf("screen %v scroll up did not reverse down: down=%d up=%d", screen, down.lifecycleScroll, up)
+		}
+	}
+
+	assertFitsAndScrolls(screenValidate, false)
+	assertFitsAndScrolls(screenDeploy, true)
+}
+
+func TestSalesforceValidationChecklistStopsAtLastRow(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.components[1].selected = true
+	m.screen = screenValidate
+	m.width, m.height = 120, 36
+	m.validateDone = true
+	m.validationProgress = map[string]float64{"box": 1, "salesforce": 1}
+
+	missing := make([]string, 36)
+	order := make([]string, 36)
+	for i := range missing {
+		order[i] = fmt.Sprintf("MetadataType%02d", i)
+		missing[i] = order[i] + ":Example"
+	}
+	m.validationItems = []lifecycle.Item{
+		{Provider: "box", Status: lifecycle.StatusPresent, Detail: "Box configuration is present."},
+		{
+			Provider: "salesforce", Status: lifecycle.StatusMissing, Detail: "36 components need deployment.", Deployable: true,
+			Missing: missing, DeployableComponents: append([]string(nil), missing...), ComponentOrder: order,
+		},
+	}
+
+	var model tea.Model = m
+	for range 100 {
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	atEnd := model.(rootShellModel)
+	if atEnd.lifecycleScroll == 0 {
+		t.Fatal("Salesforce checklist returned to its first row after repeated Down presses")
+	}
+	endView := atEnd.View()
+	if !strings.Contains(endView, "MetadataType35") || strings.Contains(endView, "MetadataType00") {
+		t.Fatalf("checklist did not stop on its final rows:\n%s", endView)
+	}
+	if !strings.Contains(endView, "end of checklist") {
+		t.Fatalf("final viewport does not identify the checklist boundary:\n%s", endView)
+	}
+
+	model, _ = atEnd.Update(tea.KeyMsg{Type: tea.KeyDown})
+	afterExtraDown := model.(rootShellModel)
+	if afterExtraDown.lifecycleScroll != atEnd.lifecycleScroll || afterExtraDown.View() != endView {
+		t.Fatalf("Down at the final row moved or wrapped the checklist: before=%d after=%d", atEnd.lifecycleScroll, afterExtraDown.lifecycleScroll)
+	}
+	if !afterExtraDown.lifecycleFollowTail {
+		t.Fatal("reaching the final row did not resume live-tail behavior")
+	}
+}
+
+func TestClampLifecycleScrollNeverWraps(t *testing.T) {
+	if got := clampLifecycleScroll(7, 1, 7); got != 7 {
+		t.Fatalf("Down at end = %d, want 7", got)
+	}
+	if got := clampLifecycleScroll(0, -1, 7); got != 0 {
+		t.Fatalf("Up at start = %d, want 0", got)
+	}
+	if got := clampLifecycleScroll(99, 1, 7); got != 7 {
+		t.Fatalf("resized out-of-range offset = %d, want 7", got)
+	}
+}
+
+func TestLiveValidationFollowsTailUntilOperatorScrollsUp(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.components[1].selected = true
+	m.screen = screenValidate
+	m.width, m.height = 120, 34
+	m.validateRunning = true
+	m.lifecycleFollowTail = true
+	m.currentValidation = "salesforce"
+	m.validationProgress = map[string]float64{"box": 1, "salesforce": 0.05}
+
+	missing := make([]string, 36)
+	order := make([]string, 36)
+	for i := range missing {
+		order[i] = fmt.Sprintf("MetadataType%02d", i)
+		missing[i] = order[i] + ":Example"
+	}
+	m.validationItems = []lifecycle.Item{
+		{Provider: "box", Status: lifecycle.StatusPresent, Detail: "Box configuration is present."},
+		{
+			Provider: "salesforce", Status: lifecycle.StatusMissing, Detail: "Validating Salesforce metadata.", Deployable: true,
+			Missing: missing, DeployableComponents: append([]string(nil), missing...), ComponentOrder: order,
+		},
+	}
+	m.followLifecycleTail()
+	limit, ok := m.lifecycleScrollLimit()
+	initialOffset := m.lifecycleScroll
+	if !ok || initialOffset >= limit {
+		t.Fatalf("initial active-row follow = %d, limit = %d, ok = %v", initialOffset, limit, ok)
+	}
+
+	updated, _ := m.Update(activityMsg{provider: "salesforce", line: "Reading Salesforce metadata"})
+	tailing := updated.(rootShellModel)
+	if tailing.lifecycleScroll >= limit {
+		t.Fatalf("early activity jumped to the pending tail: scroll=%d limit=%d", tailing.lifecycleScroll, limit)
+	}
+	for range 12 {
+		updated, _ = tailing.Update(providerValidationProgressMsg{provider: "salesforce"})
+		tailing = updated.(rootShellModel)
+	}
+	if tailing.lifecycleScroll <= initialOffset || tailing.lifecycleScroll >= limit {
+		t.Fatalf("active-row follow did not advance with progress: initial=%d current=%d limit=%d", initialOffset, tailing.lifecycleScroll, limit)
+	}
+
+	updated, _ = tailing.Update(tea.KeyMsg{Type: tea.KeyUp})
+	paused := updated.(rootShellModel)
+	if paused.lifecycleFollowTail || paused.lifecycleScroll >= tailing.lifecycleScroll {
+		t.Fatalf("Up did not pause live tail: before=%d after=%d follow=%v", tailing.lifecycleScroll, paused.lifecycleScroll, paused.lifecycleFollowTail)
+	}
+	pausedOffset := paused.lifecycleScroll
+	updated, _ = paused.Update(activityMsg{provider: "salesforce", line: "Comparing packaged components"})
+	paused = updated.(rootShellModel)
+	if paused.lifecycleScroll != pausedOffset {
+		t.Fatalf("new activity moved a manually paused checklist: before=%d after=%d", pausedOffset, paused.lifecycleScroll)
+	}
+
+	for range 100 {
+		updated, _ = paused.Update(tea.KeyMsg{Type: tea.KeyDown})
+		paused = updated.(rootShellModel)
+	}
+	limit, _ = paused.lifecycleScrollLimit()
+	if paused.lifecycleScroll != limit || !paused.lifecycleFollowTail {
+		t.Fatalf("returning to bottom did not resume tail: scroll=%d limit=%d follow=%v", paused.lifecycleScroll, limit, paused.lifecycleFollowTail)
+	}
+}
+
+func TestSalesforceChecklistOrderIsStableWithoutConfiguredOrder(t *testing.T) {
+	item := lifecycle.Item{
+		Provider:             "salesforce",
+		Status:               lifecycle.StatusMissing,
+		Missing:              []string{"Layout:Demo", "ApexClass:Demo", "CustomObject:Demo", "PermissionSet:Demo", "CustomField:Demo.Field__c"},
+		DeployableComponents: []string{"Layout:Demo", "ApexClass:Demo", "CustomObject:Demo", "PermissionSet:Demo", "CustomField:Demo.Field__c"},
+	}
+	wantOrder := []string{"ApexClass", "CustomField", "CustomObject", "Layout", "PermissionSet"}
+	first := renderComponentChecklist(item, "validate", false, 1, "", 100)
+	previous := -1
+	for _, name := range wantOrder {
+		index := strings.Index(first, name)
+		if index <= previous {
+			t.Fatalf("Salesforce checklist is not in deterministic fallback order: %q", first)
+		}
+		previous = index
+	}
+	for range 50 {
+		if got := renderComponentChecklist(item, "validate", false, 1, "", 100); got != first {
+			t.Fatalf("Salesforce checklist order changed between renders:\nfirst: %q\nnext:  %q", first, got)
+		}
+	}
+}
+
+func TestSalesforceManagedPackageIsFirstDeploymentChecklistRow(t *testing.T) {
+	item := lifecycle.Item{
+		Provider:             "salesforce",
+		Status:               lifecycle.StatusMissing,
+		ComponentOrder:       []string{"Managed Package"},
+		Missing:              []string{"ApexClass:Demo", "Managed Package:Box for Salesforce 5.43", "CustomObject:Demo__c"},
+		DeployableComponents: []string{"ApexClass:Demo", "Managed Package:Box for Salesforce 5.43", "CustomObject:Demo__c"},
+	}
+	checklist := renderComponentChecklist(item, "deploy", false, 0, "", 100)
+	packageIndex := strings.Index(checklist, "Managed Package")
+	apexIndex := strings.Index(checklist, "ApexClass")
+	objectIndex := strings.Index(checklist, "CustomObject")
+	if packageIndex < 0 || packageIndex > apexIndex || packageIndex > objectIndex {
+		t.Fatalf("managed package is not the first deployment prerequisite:\n%s", checklist)
 	}
 }
 

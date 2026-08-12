@@ -17,10 +17,11 @@ import (
 var bundled embed.FS
 
 type Manifest struct {
-	SchemaVersion    string      `json:"schema_version"`
-	TemplateID       string      `json:"template_id"`
-	DeploymentConfig string      `json:"deployment_config"`
-	Box              BoxManifest `json:"box"`
+	SchemaVersion    string             `json:"schema_version"`
+	TemplateID       string             `json:"template_id"`
+	DeploymentConfig string             `json:"deployment_config"`
+	Box              BoxManifest        `json:"box"`
+	Salesforce       SalesforceManifest `json:"salesforce,omitempty"`
 }
 
 const (
@@ -121,6 +122,44 @@ type BoxManifest struct {
 	Workspace          Workspace             `json:"workspace"`
 	SampleContent      []SampleFile          `json:"sample_content,omitempty"`
 	Capabilities       []Capability          `json:"capabilities"`
+}
+
+// SalesforceManifest declares prerequisites that must exist before packaged
+// Salesforce metadata can compile. Keeping these in the solution contract lets
+// validation show the install as deployment work instead of discovering the
+// missing namespace after a doomed metadata request.
+type SalesforceManifest struct {
+	RequiredPackages       []SalesforcePackageRequirement       `json:"required_packages,omitempty"`
+	RequiredPermissionSets []SalesforcePermissionSetRequirement `json:"required_permission_sets,omitempty"`
+}
+
+type SalesforcePackageRequirement struct {
+	Name          string `json:"name"`
+	Namespace     string `json:"namespace,omitempty"`
+	PackageID     string `json:"package_id,omitempty"`
+	VersionID     string `json:"version_id"`
+	VersionName   string `json:"version_name,omitempty"`
+	VersionNumber string `json:"version_number,omitempty"`
+	SecurityType  string `json:"security_type,omitempty"`
+}
+
+// SalesforcePermissionSetRequirement declares a permission set that Dispatch
+// assigns to the authenticated Salesforce deployment user after metadata is
+// available. Name is the API name accepted by `sf org assign permset`; Label is
+// the customer-facing checklist text.
+type SalesforcePermissionSetRequirement struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+}
+
+func clmSalesforcePermissionSets() []SalesforcePermissionSetRequirement {
+	return []SalesforcePermissionSetRequirement{
+		{Name: "box__Box_Admin_All_Licenses", Label: "Box Admin (All Licenses)"},
+		{Name: "box__Docgen_Template_Manager", Label: "Box Doc Gen Template Manager"},
+		{Name: "box__Box_Sign_Admin", Label: "Box Sign"},
+		{Name: "CLM_Box_Automate_Integration", Label: "CLM Box Automate Integration"},
+		{Name: "CLM_Demo_Operator", Label: "CLM Demo Operator"},
+	}
 }
 
 type SampleFile struct {
@@ -508,6 +547,23 @@ func deploymentSettingsDocument(settings DeploymentSettings) (bcl.BCLDocument, e
 // metadata while removing them from deployment defaults. UI visibility is a
 // separate BCL-backed Dispatch preference and never grants deploy support.
 func normalizeCapabilityCatalog(manifest Manifest) Manifest {
+	// Older CLM manifests predate explicit Salesforce prerequisites. Migrate
+	// them in memory so existing zero-user packages gain the same contract as
+	// newly generated packages and persist it on their next package build.
+	if manifest.TemplateID == "clm" && len(manifest.Salesforce.RequiredPackages) == 0 {
+		manifest.Salesforce.RequiredPackages = []SalesforcePackageRequirement{{
+			Name:          "Box for Salesforce",
+			Namespace:     "box",
+			PackageID:     "033700000004yvWAAQ",
+			VersionID:     "04tKi000000gPNZIA2",
+			VersionName:   "5.43",
+			VersionNumber: "5.43.0.1",
+			SecurityType:  "AdminsOnly",
+		}}
+	}
+	if manifest.TemplateID == "clm" && len(manifest.Salesforce.RequiredPermissionSets) == 0 {
+		manifest.Salesforce.RequiredPermissionSets = clmSalesforcePermissionSets()
+	}
 	capabilityIDs := map[string]bool{}
 	for _, capability := range manifest.Box.Capabilities {
 		if !capability.CanDeploy() {
