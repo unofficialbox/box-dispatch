@@ -113,11 +113,12 @@ const (
 )
 
 type componentChoice struct {
-	provider string
-	name     string
-	role     string
-	selected bool
-	required bool
+	provider   string
+	name       string
+	role       string
+	selected   bool
+	required   bool
+	comingSoon bool
 }
 
 type templateChoice struct {
@@ -353,6 +354,7 @@ type rootShellModel struct {
 	lifecycleFollowTail   bool // live validation/deployment follows the newest checklist row
 	deployStarted         bool
 	deployDone            bool
+	deployShowDetails     bool // progressive disclosure for provider checklists and deployed resources
 	confirmingDeploy      bool
 	deployConfirmCursor   int // 0 = affirmative (Deploy), 1 = Cancel
 	deployConfirmTitle    string
@@ -445,7 +447,7 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	}
 	if provider != "" {
 		for i := range components {
-			components[i].selected = components[i].provider == "box" || components[i].provider == provider
+			components[i].selected = components[i].provider == "box" || (!components[i].comingSoon && components[i].provider == provider)
 		}
 	}
 
@@ -601,8 +603,8 @@ func defaultComponents() []componentChoice {
 	return []componentChoice{
 		{provider: "box", name: "Box", role: "Content, unstructured data, and AI", selected: true, required: true},
 		{provider: "salesforce", name: "Salesforce", role: "CRM, structured records, and customer workflows"},
-		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence"},
-		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration"},
+		{provider: "databricks", name: "Databricks", role: "Analytics, models, and data intelligence", comingSoon: true},
+		{provider: "aws", name: "AWS Bedrock AgentCore", role: "Agent runtime and orchestration", comingSoon: true},
 	}
 }
 
@@ -642,8 +644,10 @@ func (m *rootShellModel) rebuildComponentForm() {
 		label := component.name
 		if component.required {
 			label += "  ·  REQUIRED"
+		} else if component.comingSoon {
+			label = dimStyle.Render(label + "  (Coming soon)")
 		}
-		componentOptions = append(componentOptions, huh.NewOption(label, component.provider).Selected(slices.Contains(m.answers.components, component.provider)))
+		componentOptions = append(componentOptions, huh.NewOption(label, component.provider).Selected(!component.comingSoon && slices.Contains(m.answers.components, component.provider)))
 	}
 	m.componentForm = huh.NewForm(
 		huh.NewGroup(
@@ -669,6 +673,11 @@ func (m *rootShellModel) rebuildComponentForm() {
 				Validate(func(values []string) error {
 					if !slices.Contains(values, "box") {
 						return errors.New("Box is required for every Box Dispatch solution")
+					}
+					for _, component := range m.components {
+						if component.comingSoon && slices.Contains(values, component.provider) {
+							return fmt.Errorf("%s is coming soon and cannot be selected yet", component.name)
+						}
 					}
 					return nil
 				}),
@@ -843,8 +852,16 @@ func (m *rootShellModel) syncComponentAnswers() error {
 	if !slices.Contains(m.answers.components, "box") {
 		return errors.New("Box is required for every Box Dispatch solution")
 	}
+	m.answers.components = slices.DeleteFunc(m.answers.components, func(provider string) bool {
+		for _, component := range m.components {
+			if component.provider == provider {
+				return component.comingSoon
+			}
+		}
+		return false
+	})
 	for i := range m.components {
-		m.components[i].selected = slices.Contains(m.answers.components, m.components[i].provider)
+		m.components[i].selected = !m.components[i].comingSoon && slices.Contains(m.answers.components, m.components[i].provider)
 	}
 	return nil
 }
@@ -935,6 +952,7 @@ func (m rootShellModel) startDeploymentPipeline() (tea.Model, tea.Cmd) {
 	m.packageStarted = false
 	m.validateStarted, m.validateRunning, m.validateDone = false, false, false
 	m.deployStarted, m.deployDone = false, false
+	m.deployShowDetails = false
 	m.validationItems = nil
 	if m.packageDone {
 		m.deploymentPhase = deploymentPhaseValidate
@@ -997,6 +1015,7 @@ func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
 	m.lifecycleScroll = 0
 	m.lifecycleFollowTail = true
 	m.deployAssetsScroll = 0
+	m.deployShowDetails = false
 	m.deploymentBaseline = append([]lifecycle.Item(nil), m.validationItems...)
 	m.deploymentStartedAt = time.Now().UTC()
 	m.deploymentCompletedAt = time.Time{}
@@ -1051,9 +1070,7 @@ func (m rootShellModel) renderDeployConfirm(width int) string {
 	deploy := confirmButton(m.deployConfirmAffirm, cyan, m.deployConfirmCursor == 0)
 	cancel := confirmButton("Cancel", coral, m.deployConfirmCursor == 1)
 	buttons := lipgloss.JoinHorizontal(lipgloss.Top, deploy, "  ", cancel)
-	hint := dimStyle.Render("←/→ switch · Enter/Space confirm · Esc cancel")
-
-	return title + "\n\n" + desc + "\n\n" + buttons + "\n\n" + hint
+	return title + "\n\n" + desc + "\n\n" + buttons
 }
 
 // confirmButton renders one confirm button in its fixed hue: filled (white on
@@ -1817,7 +1834,15 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.componentForm.PrevField()
 		}
+		if key.String() == "ctrl+a" && m.componentForm.GetFocusedField().GetKey() == "components" {
+			m.message = "Choose available providers individually; Databricks and AWS Bedrock AgentCore are coming soon."
+			return m, nil
+		}
 		if key.String() == " " || key.String() == "spacebar" || key.String() == "x" {
+			if component, unavailable := m.hoveredComingSoonComponent(); unavailable {
+				m.message = component.name + " is coming soon and cannot be selected yet."
+				return m, nil
+			}
 			if selected, cmd := m.selectHoveredQuickstart(); selected {
 				return m, cmd
 			}
@@ -2060,24 +2085,37 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startValidation()
 		}
 	case screenDeploy:
-		if !m.deployDone && (key.String() == "down" || key.String() == "j") {
+		if key.String() == "v" && !m.confirmingDeploy && m.deploymentPhase != deploymentPhaseReview && m.deploymentPhase != deploymentPhasePackage {
+			m.deployShowDetails = !m.deployShowDetails
+			m.lifecycleScroll = 0
+			m.deployAssetsScroll = 0
+			if m.deployShowDetails {
+				m.message = "Showing detailed provider results and deployed resources."
+			} else {
+				m.message = "Showing the focused deployment summary."
+			}
+			return m, nil
+		}
+		if m.deployShowDetails && !m.deployDone && (key.String() == "down" || key.String() == "j") {
 			m.scrollLifecycleResults(1)
 			return m, nil
 		}
-		if !m.deployDone && (key.String() == "up" || key.String() == "k") {
+		if m.deployShowDetails && !m.deployDone && (key.String() == "up" || key.String() == "k") {
 			m.scrollLifecycleResults(-1)
 			return m, nil
 		}
 		if m.deployDone {
 			switch key.String() {
 			case "down", "j":
-				total := len(m.deployedAssets())
-				if maxScroll := total - m.deployTableCapacity(); m.deployAssetsScroll < maxScroll {
-					m.deployAssetsScroll++
+				if m.deployShowDetails {
+					total := len(m.deployedAssets())
+					if maxScroll := total - m.deployTableCapacity(); m.deployAssetsScroll < maxScroll {
+						m.deployAssetsScroll++
+					}
 				}
 				return m, nil
 			case "up", "k":
-				if m.deployAssetsScroll > 0 {
+				if m.deployShowDetails && m.deployAssetsScroll > 0 {
 					m.deployAssetsScroll--
 				}
 				return m, nil
@@ -2126,6 +2164,29 @@ func (m *rootShellModel) moveCursor(key tea.KeyMsg, count int) {
 	case "down", "j", "tab":
 		m.cursor = (m.cursor + 1) % count
 	}
+}
+
+// hoveredComingSoonComponent reports whether the highlighted provider option is
+// a read-only roadmap item. Huh does not currently expose disabled multi-select
+// options, so Dispatch intercepts the toggle before the form mutates its value.
+func (m rootShellModel) hoveredComingSoonComponent() (componentChoice, bool) {
+	if m.componentForm == nil {
+		return componentChoice{}, false
+	}
+	field, ok := m.componentForm.GetFocusedField().(*huh.MultiSelect[string])
+	if !ok || field.GetKey() != "components" {
+		return componentChoice{}, false
+	}
+	provider, ok := field.Hovered()
+	if !ok {
+		return componentChoice{}, false
+	}
+	for _, component := range m.components {
+		if component.provider == provider && component.comingSoon {
+			return component, true
+		}
+	}
+	return componentChoice{}, false
 }
 
 // selectHoveredQuickstart gives the quickstart list radio-button semantics:
@@ -2649,7 +2710,7 @@ func (m rootShellModel) savePlan() {
 func (m rootShellModel) selectedProviders() []string {
 	providers := make([]string, 0, len(m.components))
 	for _, item := range m.components {
-		if item.selected {
+		if item.selected && !item.comingSoon {
 			providers = append(providers, item.provider)
 		}
 	}
@@ -3584,9 +3645,21 @@ func (m rootShellModel) validationViewport(width int) (prefix, suffix string, li
 			footer = activity
 		}
 	}
-	prefix = m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n"
+	if m.screen == screenDeploy {
+		status = "Validating providers"
+		if m.validationHasFailures() {
+			status = "Validation stopped"
+		}
+		prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Checking provider state and deployment prerequisites.") + "\n\n"
+	} else {
+		prefix = m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n"
+	}
 	suffix = "\n" + footer
-	lines = lifecycleResultLines(rows, "\n\n")
+	separator := "\n\n"
+	if m.screen == screenDeploy && !m.deployShowDetails {
+		separator = "\n"
+	}
+	lines = lifecycleResultLines(rows, separator)
 	visible = m.lifecycleViewportCapacity(width, prefix, suffix)
 	return prefix, suffix, lines, visible
 }
@@ -3594,7 +3667,12 @@ func (m rootShellModel) validationViewport(width int) (prefix, suffix string, li
 func (m rootShellModel) validationRows(width int) []string {
 	rows := []string{}
 	for _, provider := range m.selectedProviders() {
-		rows = append(rows, m.providerProgressRow(provider, m.validationProgress[provider], findLifecycleItem(m.validationItems, provider), provider == m.currentValidation, "validate", width-10))
+		item := findLifecycleItem(m.validationItems, provider)
+		if m.screen == screenDeploy && !m.deployShowDetails {
+			rows = append(rows, m.focusedProviderRow(provider, m.validationProgress[provider], item, provider == m.currentValidation, "validate", width-10))
+		} else {
+			rows = append(rows, m.providerProgressRow(provider, m.validationProgress[provider], item, provider == m.currentValidation, "validate", width-10))
+		}
 	}
 	if len(rows) == 0 {
 		rows = append(rows, dimStyle.Render("No validation results yet."))
@@ -3941,44 +4019,123 @@ func (m rootShellModel) clampedTeardownScroll(total, visible int) int {
 
 func (m rootShellModel) viewDeploy(width int) string {
 	if m.confirmingDeploy && m.deploymentPhase == deploymentPhaseReview {
-		return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" +
+		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" +
 			dimStyle.Render("One confirmation starts package assembly, validation, prerequisites, and provider deployment.") + "\n\n" +
 			activePane.Copy().Width(width-4).Render(m.renderDeployConfirm(width-8))
 	}
 	if m.deploymentPhase == deploymentPhasePackage {
-		status := m.spinner.View() + " ASSEMBLING PACKAGE"
+		status := m.spinner.View() + " Assembling the selected solution package"
 		if !m.packageStarted {
-			status = "○ PACKAGE ASSEMBLY STOPPED"
+			status = "○ Package assembly stopped"
 		}
-		steps := []string{
-			lipgloss.NewStyle().Bold(true).Foreground(gold).Render(status),
-			"",
-			lipgloss.NewStyle().Foreground(gold).Render("◆  Assemble package"),
-			dimStyle.Render("○  Validate providers and prerequisites"),
-			dimStyle.Render("○  Apply supported missing configuration"),
-		}
-		body := panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(steps, "\n"))
+		body := panel.Copy().Width(width-4).Padding(1, 2).Render(lipgloss.NewStyle().Bold(true).Foreground(gold).Render(status))
 		if activity := m.renderActivity(width - 4); activity != "" {
 			body += "\n" + activity
 		}
-		return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" + dimStyle.Render("Dispatch is running the reviewed deployment pipeline.") + "\n\n" + body
+		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Assembling package") + "\n" + dimStyle.Render("Preparing the reviewed solution for validation.") + "\n\n" + body
 	}
 	if m.deploymentPhase == deploymentPhaseValidate || (m.deploymentPhase == deploymentPhaseFailed && m.validateDone) {
 		return m.viewValidate(width)
 	}
 	if m.deploymentPhase == deploymentPhaseFailed {
-		return m.stageHeader() + "\n\n" + titleStyle.Render("Deployment stopped") + "\n\n" +
+		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Deployment stopped") + "\n\n" +
 			panel.Copy().BorderForeground(coral).Width(width-4).Padding(1, 2).Render(lipgloss.NewStyle().Foreground(coral).Render(m.message)) + "\n" +
 			accent.Render("←  Return to Review")
 	}
 	head, action := m.deployHeadAction(width)
 	assets := ""
-	if m.deployDone {
+	if m.deployDone && m.deployShowDetails {
 		if table := m.renderDeployedAssetsTable(width, m.deployTableCapacity()); table != "" {
 			assets = "\n" + table
 		}
 	}
 	return head + assets + "\n" + action
+}
+
+// deployPipelineStrip is the stable local orientation for the unified Deploy
+// stage. It stays in place while the content below changes from assembly to
+// validation, apply and completion, so the operator never has to reconstruct
+// where the long-running workflow is.
+func (m rootShellModel) deployPipelineStrip() string {
+	labels := []string{"ASSEMBLE", "VALIDATE", "APPLY", "FINISH"}
+	active := 0
+	switch m.deploymentPhase {
+	case deploymentPhaseValidate:
+		active = 1
+	case deploymentPhaseApply:
+		active = 2
+	case deploymentPhaseComplete:
+		active = 3
+	case deploymentPhaseFailed:
+		if m.packageDone {
+			active = 1
+		}
+		if m.validateDone && !m.validationHasFailures() {
+			active = 2
+		}
+	}
+	failedAt := -1
+	if m.deploymentPhase == deploymentPhaseFailed {
+		failedAt = active
+	} else if m.deploymentPhase == deploymentPhaseComplete && m.deploymentFailureCount() > 0 {
+		failedAt = 3
+	}
+	parts := make([]string, 0, len(labels)*2-1)
+	for index, label := range labels {
+		if index > 0 {
+			parts = append(parts, dimStyle.Render(" ─ "))
+		}
+		style, marker := dimStyle, "○"
+		switch {
+		case index == failedAt:
+			style, marker = lipgloss.NewStyle().Bold(true).Foreground(coral), "×"
+		case index < active || (m.deploymentPhase == deploymentPhaseComplete && index <= active):
+			style, marker = lipgloss.NewStyle().Bold(true).Foreground(green), "✓"
+		case index == active && m.deploymentPhase != deploymentPhaseReview:
+			style, marker = lipgloss.NewStyle().Bold(true).Foreground(gold), m.spinner.View()
+		}
+		parts = append(parts, style.Render(marker+" "+label))
+	}
+	return strings.Join(parts, "")
+}
+
+func (m rootShellModel) deploymentFailureCount() int {
+	failed := 0
+	for _, item := range m.validationItems {
+		if item.Status == lifecycle.StatusFailed {
+			failed++
+		}
+	}
+	return failed
+}
+
+func (m rootShellModel) deploymentOutcomeTitle() string {
+	if failed := m.deploymentFailureCount(); failed > 0 {
+		return "Deployment finished with errors"
+	}
+	return "Deployment complete"
+}
+
+func (m rootShellModel) deploymentOutcomeCounts() (created, existing, failed int) {
+	for _, asset := range m.deployedAssets() {
+		if asset.created {
+			created++
+		} else {
+			existing++
+		}
+	}
+	return created, existing, m.deploymentFailureCount()
+}
+
+func (m rootShellModel) deploymentDurationSuffix() string {
+	if m.deploymentStartedAt.IsZero() || m.deploymentCompletedAt.IsZero() {
+		return ""
+	}
+	duration := m.deploymentCompletedAt.Sub(m.deploymentStartedAt).Round(time.Second)
+	if duration < 0 {
+		return ""
+	}
+	return " · " + duration.String()
 }
 
 // deployHeadAction builds the two fixed parts of the deploy screen — everything
@@ -3998,7 +4155,11 @@ func (m rootShellModel) deployHeadAction(width int) (head, action string) {
 func (m rootShellModel) deployProviderViewport(width int) (prefix, action string, lines []string, visible int) {
 	rows, deployable, rowSep := m.deployProviderRows(width)
 	action = m.deployAction(width, deployable)
-	prefix = m.stageHeader() + "\n\n" + titleStyle.Render("Deploy missing configuration") + "\n" + dimStyle.Render("Box Dispatch runs only native deploy adapters and leaves unsupported/manual work explicit.") + "\n\n"
+	title, subtitle := "Applying configuration", "Only supported missing configuration will be applied."
+	if m.deployDone {
+		title, subtitle = m.deploymentOutcomeTitle(), "The deployment is finished. Open a destination or review the detailed resources."
+	}
+	prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(title) + "\n" + dimStyle.Render(subtitle) + "\n\n"
 	lines = lifecycleResultLines(rows, rowSep)
 	visible = m.lifecycleViewportCapacity(width, prefix, "\n"+action)
 	return prefix, action, lines, visible
@@ -4018,7 +4179,12 @@ func (m rootShellModel) deployProviderRows(width int) (rows []string, deployable
 			rowSep = "\n"
 			continue
 		}
-		rows = append(rows, m.providerProgressRow(item.Provider, m.deploymentProgress[item.Provider], &item, item.Provider == m.currentDeployment, "deploy", width-10))
+		if m.deployShowDetails {
+			rows = append(rows, m.providerProgressRow(item.Provider, m.deploymentProgress[item.Provider], &item, item.Provider == m.currentDeployment, "deploy", width-10))
+		} else {
+			rows = append(rows, m.focusedProviderRow(item.Provider, m.deploymentProgress[item.Provider], &item, item.Provider == m.currentDeployment, "deploy", width-10))
+			rowSep = "\n"
+		}
 	}
 	if len(rows) == 0 {
 		rows = append(rows, dimStyle.Render("Validate the package before deployment."))
@@ -4038,21 +4204,21 @@ func (m rootShellModel) deployAction(width, deployable int) string {
 		}
 		action = activity
 	} else if m.deployDone {
-		action = lipgloss.NewStyle().Bold(true).Foreground(green).Render("Deployment run complete")
+		created, existing, failed := m.deploymentOutcomeCounts()
+		tone, marker := green, "✓"
+		if failed > 0 {
+			tone, marker = coral, "×"
+		}
+		action = lipgloss.NewStyle().Bold(true).Foreground(tone).Render(marker + " " + m.deploymentOutcomeTitle())
+		action += "\n" + dimStyle.Render(fmt.Sprintf("%d created · %d already present · %d failed%s", created, existing, failed, m.deploymentDurationSuffix()))
 		if m.deploymentAuditPath == "" {
-			action += "\n" + accent.Render("Enter / →  Export deployment audit log")
+			action += "\n" + lipgloss.NewStyle().Foreground(coral).Render("× Audit export needs attention")
 		} else {
-			action += "\n" + lipgloss.NewStyle().Foreground(green).Render("✓ Deployment audit exported")
-			action += "\n" + dimStyle.Render(m.deploymentAuditPath)
+			action += "\n" + lipgloss.NewStyle().Foreground(green).Render("✓ Audit saved")
+			if m.deployShowDetails {
+				action += "\n" + dimStyle.Render(m.deploymentAuditPath)
+			}
 		}
-		action += "\n" + accent.Render("b  Open Box enterprise"+m.postDeployBoxEnterpriseSuffix())
-		if alias, ok := m.postDeploySalesforceTarget(); ok {
-			action += "\n" + accent.Render("s  Open Salesforce scratch org ("+alias+")")
-		}
-		action += "\n" + accent.Render("Enter / →  Return to Box Dispatch home")
-	}
-	if _, diagnostic := m.lifecycleDiagnostic(); diagnostic != "" {
-		action += "\n" + accent.Render("d  View full Salesforce CLI diagnostics")
 	}
 	return action
 }
@@ -4277,6 +4443,49 @@ func (m rootShellModel) providerProgressRow(provider string, value float64, item
 		row += "\n" + renderComponentChecklist(*item, phase, active, value, m.spinner.View(), width)
 	}
 	return row
+}
+
+// focusedProviderRow is the default Deploy presentation: completed and waiting
+// providers collapse to one line, while only the provider doing work expands.
+// The animated gradient is intentionally shown without a numeric percentage;
+// provider CLIs do not expose measurable completion and timer-derived numbers
+// would imply precision Dispatch does not have.
+func (m rootShellModel) focusedProviderRow(provider string, value float64, item *lifecycle.Item, active bool, phase string, width int) string {
+	if item != nil && item.Status == lifecycle.StatusFailed {
+		return m.providerSummaryLine(*item, width)
+	}
+	if !active {
+		if value >= 1 {
+			if item == nil {
+				item = &lifecycle.Item{Provider: provider}
+			}
+			return m.providerSummaryLine(*item, width)
+		}
+		return dimStyle.Render("○  ") + titleStyle.Render(providerLabel(provider)) + dimStyle.Render("  WAITING")
+	}
+	bar := m.progress
+	bar.ShowPercentage = false
+	detail := "Working through provider configuration"
+	if item != nil {
+		count := len(item.Planned)
+		if count == 0 {
+			count = len(item.Missing) + len(item.Present)
+		}
+		if phase == "validate" {
+			detail = "Checking provider state and prerequisites"
+			if count > 0 {
+				detail = fmt.Sprintf("Checking %d configuration component(s)", count)
+			}
+		} else {
+			count = len(item.DeployableComponents)
+			detail = "Applying supported missing configuration"
+			if count > 0 {
+				detail = fmt.Sprintf("Applying %d supported missing component(s)", count)
+			}
+		}
+	}
+	header := titleStyle.Render(providerLabel(provider)) + "  " + lipgloss.NewStyle().Bold(true).Foreground(gold).Render(m.spinner.View()+" IN PROGRESS")
+	return header + "\n" + bar.ViewAs(value) + "\n" + dimStyle.Copy().Width(width).Render(detail)
 }
 
 // providerSummaryLine is the compact one-line provider state shown on the
@@ -4517,15 +4726,46 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "home")),
 		}
 	}
-	if m.screen == screenDeploy && m.deployDone {
+	if m.screen == screenDeploy && m.confirmingDeploy {
 		bindings = contextualHelp{
-			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll assets")),
-			key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "open Box")),
+			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "switch")),
+			key.NewBinding(key.WithKeys("enter", " "), key.WithHelp("enter/space", "confirm")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		}
-		if _, ok := m.postDeploySalesforceTarget(); ok {
-			bindings = append(bindings, key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "open Salesforce")))
+	} else if m.screen == screenDeploy && !m.deployDone && m.deploymentPhase != deploymentPhaseReview {
+		bindings = contextualHelp{}
+		if m.deploymentPhase != deploymentPhasePackage {
+			label := "details"
+			if m.deployShowDetails {
+				label = "summary"
+			}
+			bindings = append(bindings, key.NewBinding(key.WithKeys("v"), key.WithHelp("v", label)))
 		}
-		bindings = append(bindings, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "home")))
+		if len(m.activityLog) > 0 {
+			bindings = append(bindings, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "activity")))
+		}
+		if !m.taskRunning() {
+			bindings = append(bindings, key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "review")))
+		}
+	} else if m.screen == screenDeploy && m.deployDone {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "details")),
+		}
+		if m.deployShowDetails {
+			bindings = contextualHelp{
+				key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "resources")),
+				key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "summary")),
+			}
+		}
+		bindings = append(bindings, key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "open Box"+m.postDeployBoxEnterpriseSuffix())))
+		if alias, ok := m.postDeploySalesforceTarget(); ok {
+			bindings = append(bindings, key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "open Salesforce ("+alias+")")))
+		}
+		enterHelp := "home"
+		if m.deploymentAuditPath == "" {
+			enterHelp = "retry audit"
+		}
+		bindings = append(bindings, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", enterHelp)))
 	}
 	if m.screen == screenBoxSwitch {
 		bindings = contextualHelp{

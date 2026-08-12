@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -540,6 +541,9 @@ func TestChooseCombinesQuickstartAndProviderSelection(t *testing.T) {
 			t.Fatalf("combined Choose view does not contain %q:\n%s", expected, view)
 		}
 	}
+	if got := strings.Count(view, "(Coming soon)"); got != 2 {
+		t.Fatalf("Choose view shows %d coming-soon provider labels, want 2:\n%s", got, view)
+	}
 }
 
 func TestChooseSpaceSelectsAndTabSwitchesPanels(t *testing.T) {
@@ -590,6 +594,47 @@ func TestChooseSpaceSelectsAndTabSwitchesPanels(t *testing.T) {
 		if !strings.Contains(footer, expected) {
 			t.Fatalf("Choose footer omitted %q:\n%s", expected, footer)
 		}
+	}
+}
+
+func TestChooseComingSoonProvidersAreReadOnly(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenComponents
+	_ = model.componentForm.Init()
+
+	// Move from quickstarts to providers, then from Box through Salesforce to
+	// Databricks. Space must leave the roadmap-only provider unselected.
+	model = updatedShell(t, model, tea.KeyTab)
+	model = updatedShell(t, model, tea.KeyCtrlA)
+	if slices.Contains(model.answers.components, "databricks") || slices.Contains(model.answers.components, "aws") {
+		t.Fatalf("select-all enabled coming-soon providers: %v", model.answers.components)
+	}
+	model = updatedShell(t, model, tea.KeyDown)
+	model = updatedShell(t, model, tea.KeyDown)
+	model = updatedShell(t, model, tea.KeySpace)
+	if slices.Contains(model.answers.components, "databricks") || !strings.Contains(model.message, "Databricks is coming soon") {
+		t.Fatalf("Databricks was selectable or lacked guidance: components=%v message=%q", model.answers.components, model.message)
+	}
+
+	model = updatedShell(t, model, tea.KeyDown)
+	model = updatedShell(t, model, tea.KeySpace)
+	if slices.Contains(model.answers.components, "aws") || !strings.Contains(model.message, "AWS Bedrock AgentCore is coming soon") {
+		t.Fatalf("AWS was selectable or lacked guidance: components=%v message=%q", model.answers.components, model.message)
+	}
+
+	// Defense in depth: stale or accessible-form values are removed before the
+	// provider plan is used.
+	model.answers.components = append(model.answers.components, "databricks", "aws")
+	if err := model.syncComponentAnswers(); err != nil {
+		t.Fatal(err)
+	}
+	if got := model.selectedProviders(); slices.Contains(got, "databricks") || slices.Contains(got, "aws") {
+		t.Fatalf("coming-soon providers survived selection normalization: %v", got)
+	}
+
+	scoped := newSetupOnlyShell("aws")
+	if got := scoped.selectedProviders(); !slices.Equal(got, []string{"box"}) {
+		t.Fatalf("scoped coming-soon provider became active: %v", got)
 	}
 }
 
@@ -787,9 +832,9 @@ func TestProviderChecklistGroupsDeploymentComponents(t *testing.T) {
 	}
 }
 
-func TestComponentsAlwaysOfferAllSupportedPlatforms(t *testing.T) {
-	// Even a minimal config that names only Box must still offer every
-	// platform box-dispatch supports; BCL only enriches display copy.
+func TestComponentsAlwaysShowTheFullPlatformRoadmap(t *testing.T) {
+	// Even a minimal config that names only Box must still show the full
+	// platform roadmap; BCL only enriches display copy.
 	cfg := &config.RuntimeConfig{
 		ActiveScenario: "clm",
 		Scenarios:      map[string]config.Scenario{"clm": {Providers: []string{"box"}}},
@@ -818,6 +863,9 @@ func TestComponentsAlwaysOfferAllSupportedPlatforms(t *testing.T) {
 	}
 	if !components[0].required || !components[0].selected {
 		t.Fatal("box must be required and selected")
+	}
+	if !components[2].comingSoon || !components[3].comingSoon {
+		t.Fatalf("Databricks and AWS must remain read-only roadmap providers: %+v", components)
 	}
 }
 
@@ -1206,7 +1254,7 @@ func TestTeardownAndDeployedAssetsStopAtBoundaries(t *testing.T) {
 	}
 
 	deployed := newSetupOnlyShell()
-	deployed.width, deployed.height, deployed.screen, deployed.deployDone = 80, 24, screenDeploy, true
+	deployed.width, deployed.height, deployed.screen, deployed.deployDone, deployed.deployShowDetails = 80, 24, screenDeploy, true, true
 	deployed.validationItems = []lifecycle.Item{{Provider: "box", Resources: resources}}
 	for range 100 {
 		deployed = updatedShell(t, deployed, tea.KeyDown)
@@ -1226,7 +1274,7 @@ func TestDeployViewFitsAndScrollReverses(t *testing.T) {
 	// undo scrolling down — the two together are what made the table unscrollable
 	// upward before (the frame overflowed and the top rendered off-screen).
 	m := newSetupOnlyShell()
-	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 44
+	m.screen, m.deployDone, m.deployShowDetails, m.width, m.height = screenDeploy, true, true, 120, 44
 	provs := []string{"box", "salesforce", "databricks", "aws"}
 	items := make([]lifecycle.Item, 0, len(provs))
 	for _, p := range provs {
@@ -1277,8 +1325,8 @@ func TestDeployCompletionOffersBoxAndSelectedScratchOrg(t *testing.T) {
 	m.screen, m.deployDone, m.width, m.height = screenDeploy, true, 120, 50
 	m.deploymentAuditPath = "/tmp/deployment.json"
 	m.results["box"] = checker.ProviderResult{Discovery: checker.ProviderDiscovery{Enterprise: "5105484"}}
-	action := m.deployAction(112, 0)
-	for _, want := range []string{"Open Box enterprise (EID 5105484)", "Open Salesforce scratch org (dispatch-scratch)", "Return to Box Dispatch home"} {
+	action := m.footer()
+	for _, want := range []string{"open Box (EID 5105484)", "open Salesforce (dispatch-scratch)", "home"} {
 		if !strings.Contains(action, want) {
 			t.Fatalf("deployment completion action omitted %q:\n%s", want, action)
 		}
@@ -1308,8 +1356,92 @@ func TestDeployCompletionHidesSalesforceOpenForPersistentOrg(t *testing.T) {
 		m.components[i].selected = m.components[i].provider == "box" || m.components[i].provider == "salesforce"
 	}
 	m.screen, m.deployDone = screenDeploy, true
-	if action := m.deployAction(112, 0); strings.Contains(action, "Open Salesforce scratch org") {
+	if action := m.footer(); strings.Contains(action, "open Salesforce") {
 		t.Fatalf("persistent org received scratch-org open action:\n%s", action)
+	}
+}
+
+func TestDeployCompletionDefaultsToFocusedSummary(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.deployDone, m.deploymentPhase = screenDeploy, true, deploymentPhaseComplete
+	m.width, m.height = 120, 44
+	m.deploymentAuditPath = "/tmp/private/deployment-audit.json"
+	m.deploymentStartedAt = time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	m.deploymentCompletedAt = m.deploymentStartedAt.Add(42 * time.Second)
+	m.validationItems = []lifecycle.Item{{
+		Provider: "box",
+		Status:   lifecycle.StatusPresent,
+		Present:  []string{"Folder Structure:CLM Workspace"},
+		Resources: []lifecycle.ResourceReference{{
+			Provider: "box", Component: "Sample Content:msa.pdf", Kind: "file", Name: "msa.pdf", ID: "999",
+		}},
+	}}
+
+	view := m.View()
+	for _, want := range []string{"ASSEMBLE", "VALIDATE", "APPLY", "FINISH", "Deployment complete", "1 created", "1 already present", "42s", "Audit saved", "v details"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("focused completion omitted %q:\n%s", want, view)
+		}
+	}
+	for _, hidden := range []string{"DEPLOYMENT CHECKLIST", "STATUS", "/tmp/private/deployment-audit.json", "msa.pdf"} {
+		if strings.Contains(view, hidden) {
+			t.Fatalf("focused completion exposed detailed content %q:\n%s", hidden, view)
+		}
+	}
+	for _, size := range []struct{ width, height int }{{80, 24}, {100, 30}, {120, 40}} {
+		resized := m
+		resized.width, resized.height = size.width, size.height
+		if lines := strings.Count(resized.View(), "\n") + 1; lines > size.height {
+			t.Fatalf("focused completion overflows %dx%d: %d lines", size.width, size.height, lines)
+		}
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	detailed := updated.(rootShellModel)
+	if !detailed.deployShowDetails {
+		t.Fatal("v did not open deployment details")
+	}
+	detailView := detailed.View()
+	for _, want := range []string{"STATUS", "msa.pdf", "/tmp/private/deployment-audit.json", "v summary"} {
+		if !strings.Contains(detailView, want) {
+			t.Fatalf("detailed completion omitted %q:\n%s", want, detailView)
+		}
+	}
+}
+
+func TestDeployFocusExpandsOnlyActiveProviderWithoutSyntheticPercentage(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.progress.Width = 24
+	completed := lifecycle.Item{Provider: "box", Status: lifecycle.StatusPresent}
+	active := lifecycle.Item{
+		Provider: "salesforce",
+		Status:   lifecycle.StatusMissing,
+		Planned:  []string{"Managed Package:Box for Salesforce", "ApexClass:CLMController"},
+	}
+	boxRow := m.focusedProviderRow("box", 1, &completed, false, "validate", 80)
+	salesforceRow := m.focusedProviderRow("salesforce", 0.39, &active, true, "validate", 80)
+
+	if !strings.Contains(boxRow, "COMPLETE") || strings.Contains(boxRow, "DEPLOYMENT CHECKLIST") {
+		t.Fatalf("completed provider did not collapse to a summary:\n%s", boxRow)
+	}
+	for _, want := range []string{"Salesforce", "IN PROGRESS", "Checking 2 configuration component(s)"} {
+		if !strings.Contains(salesforceRow, want) {
+			t.Fatalf("active provider omitted %q:\n%s", want, salesforceRow)
+		}
+	}
+	if strings.Contains(salesforceRow, "%") || strings.Contains(salesforceRow, "DEPLOYMENT CHECKLIST") {
+		t.Fatalf("focused provider exposed synthetic precision or checklist detail:\n%s", salesforceRow)
+	}
+}
+
+func TestDeployConfirmationUsesSingleKeyboardGuidanceLocation(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.confirmingDeploy, m.deploymentPhase = screenDeploy, true, deploymentPhaseReview
+	m.deployConfirmTitle, m.deployConfirmDesc, m.deployConfirmAffirm = "Deploy this solution?", "Apply the reviewed plan.", "Deploy"
+	m.width, m.height = 120, 40
+	view := m.View()
+	if got := strings.Count(view, "enter/space"); got != 1 {
+		t.Fatalf("confirmation keyboard guidance appears %d times, want once:\n%s", got, view)
 	}
 }
 
@@ -1353,7 +1485,7 @@ func TestValidationAndDeployChecklistsStayInsideTerminal(t *testing.T) {
 
 	assertFitsAndScrolls := func(screen shellScreen, confirm bool) {
 		t.Helper()
-		m.screen, m.confirmingDeploy, m.lifecycleScroll = screen, confirm, 0
+		m.screen, m.confirmingDeploy, m.deployShowDetails, m.lifecycleScroll = screen, confirm, screen == screenDeploy, 0
 		view := m.View()
 		if lines := strings.Count(view, "\n") + 1; lines > m.height {
 			t.Fatalf("screen %v overflows terminal: %d lines > height %d", screen, lines, m.height)

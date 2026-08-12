@@ -102,6 +102,30 @@ full-screen renderer. The welcome, help, validation, and deployment views are co
 supported terminal sizes. Help, diagnostics, lifecycle checklists, teardown resources, and
 deployed assets clamp at both ends rather than wrapping.
 
+### Slice 5: focused deployment presentation
+
+Status: completed on 2026-08-12.
+
+- Keep a stable `Assemble -> Validate -> Apply -> Finish` rail throughout Deploy.
+- Expand only the provider currently doing work; collapse completed and waiting providers.
+- Preserve the animated gradient without showing timer-derived percentage precision.
+- Default completion to outcome counts and destination actions.
+- Keep provider checklists, deployed resources, and the full audit path behind `v` details.
+- Keep all keyboard guidance in the contextual footer.
+
+Deploy now defaults to an outcome-focused summary while retaining the complete technical record
+on demand. This changes presentation only; package assembly, validation, provider order,
+deployment adapters, audit export, diagnostics, and browser-open behavior are unchanged.
+
+### Slice 6: provider roadmap clarity
+
+Status: completed on 2026-08-12.
+
+- Keep Databricks and AWS Bedrock AgentCore visible in Choose for roadmap context.
+- Render both as dimmed `Coming soon` rows.
+- Prevent keyboard, accessible-form, scoped-provider, and stale-state paths from adding
+  either provider to the active solution plan.
+
 ## Acceptance criteria
 
 - No customer-facing screen names implementation libraries.
