@@ -1,7 +1,7 @@
 # box-dispatch
 
 <p align="center">
-  <img src="docs/landing.png" alt="box-dispatch interactive launch shell — the welcome screen with the BOX DISPATCH wordmark, deployment menu, and the SELECT STACK › CONNECT › PICK QUICKSTART › SHIP route" width="900">
+  <img src="docs/landing.png" alt="box-dispatch interactive launch shell — the welcome screen with the BOX DISPATCH wordmark and five-stage Choose, Connect, Configure, Review, Deploy route" width="900">
 </p>
 
 `box-dispatch` is the CLI for **box-dispatch**, a set of building blocks and accelerators for Box-backed solution stacks (Box, Salesforce, Databricks, AWS Bedrock AgentCore).
@@ -33,6 +33,21 @@ box-dispatch check --json
 `box-dispatch check` uses its interactive progress UI in a TTY, `--offline` skips live
 provider calls, and `--json` is suitable for scripts and redirected output.
 
+### Interactive deployment workflow
+
+The default shell presents one five-stage path:
+
+1. **Choose** — select a solution quickstart and its providers together.
+2. **Connect** — verify access only for those providers.
+3. **Configure** — choose the destination, naming strategy, and supported Box capabilities.
+4. **Review** — preview the complete plan before anything is created or changed.
+5. **Deploy** — assemble the package, validate provider state and prerequisites, install required
+   managed packages, deploy supported missing configuration, and verify permission assignments.
+
+Packaging and validation remain visible as live checklist phases inside **Deploy**; they are not
+separate navigation destinations. Reset is available from **Deployment history**, where Dispatch
+shows the recorded resources and requires explicit confirmation before removing anything.
+
 ## First-time UX (FTUX)
 
 1. `box-dispatch check` (interactive by default)
@@ -46,7 +61,7 @@ provider calls, and `--json` is suitable for scripts and redirected output.
    - creates the local runtime config if it does not exist
 4. `box-dispatch resolve --scenario <name>`
    - resolves token-backed provider config and writes manifests
-5. `box-dispatch bootstrap --scenario <name> --yes` (alias: `deploy`)
+5. `box-dispatch deploy --scenario <name> --yes` (`bootstrap` remains a compatibility alias)
    - applies provider bootstrap steps and emits state
 
 ## Interactive check experience
@@ -75,21 +90,20 @@ box-dispatch check --platform aws
 
 ## Command surface
 
+Default help keeps the normal operator path short:
+
 - `check` - validate dependencies and connectivity
-- `init` - initialize scenario source and example config
-- `setup` - create runtime config baseline
-- `resolve` - resolve templates and generate provider artifacts
-- `bootstrap` - apply bootstrap steps and persist state
-- `deploy` - alias for `bootstrap`
+- `deploy` - apply resolved artifacts and provider configuration (`bootstrap` remains an alias)
 - `status` - report unresolved environment and scenario health
-- `scenarios` - list configured scenarios
-- `source` - show scenario source metadata
-- `env` - render environment token mapping for a scenario
-- `validate` - validate resolved artifacts and state
-- `present` - generate presenter handoff notes
-- `smoke` - run lightweight smoke checks
-- `publish-check` - validate blockers before handoff
-- `import` - import a deployment manifest into runtime config
+- `reset` - interactively preview and reset a recorded deployment by audited resource ID
+
+Advanced help contains the authoring, diagnostic, and presentation commands: `init`, `setup`,
+`resolve`, `source`, `scenarios`, `env`, `import`, `validate`, `present`, `smoke`, and
+`publish-check`. Existing command names remain available for compatibility.
+
+`--offline` consistently means “skip live connectivity checks” on connectivity commands.
+Validation uses the explicit `--skip-artifacts` flag; its former `--offline` spelling remains
+as a hidden deprecated alias for existing scripts.
 
 The staged plan for simplifying the interactive flow and default command help is tracked in
 [`docs/EXECPLAN_CLI_UX_STREAMLINING.md`](docs/EXECPLAN_CLI_UX_STREAMLINING.md).
@@ -144,7 +158,11 @@ Scratch-org creation itself remains provider-neutral. During solution validation
 checks the managed-package versions declared in `dispatch.bcl` and shows missing packages as
 explicit deployment prerequisites. After the operator confirms **Deploy**, Dispatch installs
 or upgrades each pinned `04t` package version non-interactively before sending solution
-metadata. The bundled CLM contract requires Box for Salesforce 5.43.0.1
+metadata. Dispatch sends only the metadata components validation found missing; it does not
+resend existing org metadata merely to finish prerequisites or permission-set assignments.
+For source-tracked orgs, validation previews the missing selectors and treats conflicts as
+existing tenant configuration rather than silently overwriting them.
+The bundled CLM contract requires Box for Salesforce 5.43.0.1
 (`04tKi000000gPNZIA2`) with admin-only access. The same contract declares the five
 required Box and CLM permission sets. Validation checks their assignment on the
 authenticated **System Administrator**; after metadata deployment makes local permission
@@ -235,5 +253,5 @@ go run ./cmd/box-dispatch check --platform aws --offline
 go run ./cmd/box-dispatch init --source-url <git-url>
 go run ./cmd/box-dispatch setup
 go run ./cmd/box-dispatch resolve --scenario <name> --dry-run
-go run ./cmd/box-dispatch bootstrap --scenario <name> --yes
+go run ./cmd/box-dispatch deploy --scenario <name> --yes
 ```

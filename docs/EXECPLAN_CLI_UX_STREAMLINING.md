@@ -8,7 +8,7 @@ commands and full diagnostics remain available on demand.
 
 ## Current evidence
 
-The current product exposes three competing workflow models:
+Before this plan, the product exposed three competing workflow models:
 
 - the launch shell uses `BUILD -> CONNECT -> TEMPLATE -> CONFIG -> PACKAGE -> VALIDATE -> DEPLOY`;
 - the welcome screen summarizes a different four-part route;
@@ -63,6 +63,8 @@ deployment behavior.
 
 ### Slice 2: command discoverability
 
+Status: completed on 2026-08-11.
+
 - Make `deploy`, `check`, `status`, and `reset` the Common commands in default help.
 - Group authoring, diagnostics, and presentation commands under Advanced help.
 - Keep existing command names and aliases for compatibility.
@@ -71,12 +73,19 @@ deployment behavior.
 
 ### Slice 3: five-stage shell
 
+Status: completed on 2026-08-11.
+
 - Combine provider and template selection into Choose.
 - Combine package configuration and the deployment preview into Configure and Review.
 - Run package, validation, managed-package prerequisites, and provider deployment from one Deploy
   screen.
 - Replace the welcome route and seven-stage rail with the same five-stage vocabulary.
 - Move Reset into deployment history/details rather than the default home menu.
+
+The default shell now follows `Choose -> Connect -> Configure -> Review -> Deploy`. Package
+assembly, provider validation, managed-package prerequisites, provider deployment, and permission
+verification run as one confirmation-gated Deploy pipeline. The underlying operations remain
+separately visible so failures retain a precise phase and diagnostic.
 
 ### Slice 4: accessibility and terminal resilience
 

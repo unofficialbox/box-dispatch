@@ -357,7 +357,7 @@ func (e *Engine) Resolve(scenario string, dryRun bool, allowUnresolved bool) (*m
 	}
 
 	if report.Status == string(model.PhasePassed) {
-		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		return &report, 0
 	}
 	if report.Status == string(model.PhaseBlocked) {
@@ -386,7 +386,7 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 		report.Scenario = scenarioName
 		report.ConfirmRequired = true
 		report.AddPhase("bootstrap.confirm", string(model.PhaseBlocked), 0, fmt.Errorf("use --yes or --confirm to apply changes"))
-		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
@@ -527,7 +527,7 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 		if !dryRun {
 			report.NextCommand = "box-dispatch validate --scenario " + scenarioName
 		} else {
-			report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+			report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		}
 		return &report, 0
 	}
@@ -538,7 +538,7 @@ func (e *Engine) Bootstrap(scenario string, dryRun bool, yes bool, allowUnresolv
 	return &report, 2
 }
 
-func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*model.CommandReport, int) {
+func (e *Engine) Validate(scenario string, presenterReady bool, skipArtifacts bool) (*model.CommandReport, int) {
 	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {
 		report := model.NewReport("validate")
@@ -571,7 +571,7 @@ func (e *Engine) Validate(scenario string, presenterReady bool, offline bool) (*
 			report.AddPhase("validate."+providerKey+".tokens", string(model.PhaseBlocked), elapsedMs(start), fmt.Errorf("unresolved env tokens: %s", unresolvedTokens(missing)))
 			continue
 		}
-		if !offline {
+		if !skipArtifacts {
 			artifact := filepath.Join(e.Paths.GeneratedDir, scenarioName, providerKey+"-artifacts.bcl")
 			if _, err := os.Stat(artifact); err != nil {
 				report.AddPhase("validate."+providerKey+".artifact", string(model.PhaseWarn), 0, fmt.Errorf("artifact missing"))
@@ -745,13 +745,13 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 	scenarioStateRaw, ok := state.Scenarios[scenarioName]
 	if !ok || len(scenarioStateRaw) == 0 {
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("no bootstrap state found for scenario"))
-		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 	providerRaw, ok := scenarioStateRaw["providers"].(map[string]any)
 	if !ok {
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("bootstrap providers state missing"))
-		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
@@ -773,7 +773,7 @@ func (e *Engine) PublishCheck(scenario string) (*model.CommandReport, int) {
 		report.Manual = append(report.Manual, blockers...)
 		report.AddPhase("publish-check.blockers", string(model.PhaseBlocked), 0, fmt.Errorf("providers not in passed state"))
 		report.Validation["blockers"] = blockers
-		report.NextCommand = "box-dispatch bootstrap --scenario " + scenarioName + " --yes"
+		report.NextCommand = "box-dispatch deploy --scenario " + scenarioName + " --yes"
 		return &report, 2
 	}
 
