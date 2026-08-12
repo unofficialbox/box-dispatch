@@ -55,6 +55,18 @@ collapse to one-line results. Press `v` to switch between the focused summary an
 checklists. Reset is available from **Deployment history**, where Dispatch shows the recorded
 resources and requires explicit confirmation before removing anything.
 
+The launch shell verifies a provider the first time it connects, then stores a credential-free
+verification snapshot in `.dispatch/connection-settings.bcl`. Later shell sessions reuse that
+CONNECTED state instead of repeating provider calls. **Recheck connections** always performs a
+fresh check, and choosing another alias, profile, Box environment, or CCG app invalidates the old
+snapshot and verifies the replacement immediately. Open a connected provider and choose
+**Forget saved verification** to remove only its snapshot; Dispatch keeps the configured
+connection and returns that provider to NOT CHECKED.
+
+Starting another deployment in the same shell clears the previous package, validation,
+deployment, progress, and audit state. Verified provider connections remain available, but every
+new deployment assembles and evaluates its own selected package.
+
 ## First-time UX (FTUX)
 
 1. `box-dispatch check` (interactive by default)
@@ -151,10 +163,12 @@ plain, non-full-screen command output.
 
 ### Salesforce org lifecycle safety
 
-The launch shell treats Salesforce org health as part of connectivity, not as a one-time
-login result. It inspects the selected org at **Connect**, immediately before **Validate**,
-and immediately before **Deploy**. A cached Salesforce CLI profile for a deleted, expired,
-or otherwise inactive scratch org is rejected before any metadata request is sent.
+The launch shell treats Salesforce org health as part of connectivity. It inspects the selected
+org on the first **Connect** check, when the operator selects or rechecks an org, immediately
+before **Validate**, and immediately before **Deploy**. A saved verification snapshot avoids
+repeating the initial Connect call; its recorded expiration/status is still rejected locally when
+stale, and the live deployment guards reject a deleted, expired, or otherwise inactive scratch org
+before any metadata request is sent.
 
 **Connect > Salesforce** presents only the next useful choices: continue with the connected
 org, use an existing Salesforce org, or create/replace a 30-day scratch org. Choosing a local

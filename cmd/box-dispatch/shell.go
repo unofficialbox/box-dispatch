@@ -499,6 +499,7 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	if uiSettings, err := shellstate.LoadUISettings(); err == nil {
 		m.accessibleForms = uiSettings.AccessibleForms
 	}
+	m.restoreVerifiedConnections()
 	m.rebuildComponentForm()
 	m.rebuildTemplateForm()
 	m.prepareConfigInputs()
@@ -933,6 +934,42 @@ func (m rootShellModel) prepareReview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// resetDeploymentRun clears state owned by a completed or abandoned deployment
+// while preserving provider selections and verified connections. Without this,
+// packageDone from an earlier run causes the next run to skip assembly and
+// validate the previous package, which can immediately appear complete.
+func (m *rootShellModel) resetDeploymentRun() {
+	m.selected = nil
+	m.packagePath = ""
+	m.packageStarted, m.packageDone = false, false
+	m.validateStarted, m.validateRunning, m.validateDone = false, false, false
+	m.validationQueue = nil
+	m.validationProgress = map[string]float64{}
+	m.currentValidation = ""
+	m.validationItems = nil
+	m.lifecycleScroll = 0
+	m.lifecycleFollowTail = true
+	m.deployStarted, m.deployDone = false, false
+	m.deployShowDetails = false
+	m.confirmingDeploy = false
+	m.deployConfirmCursor = 1
+	m.deploymentQueue = nil
+	m.deploymentProgress = map[string]float64{}
+	m.currentDeployment = ""
+	m.deploymentBaseline = nil
+	m.deploymentStartedAt = time.Time{}
+	m.deploymentCompletedAt = time.Time{}
+	m.deploymentAuditPath = ""
+	m.deployAssetsScroll = 0
+	m.deploymentPhase = deploymentPhaseReview
+	m.activityLog = nil
+	m.activityExpanded = false
+	m.activityCh = nil
+	m.diagnosticTitle, m.diagnosticBody = "", ""
+	m.rebuildComponentForm()
+	m.rebuildTemplateForm()
+}
+
 func (m rootShellModel) startPackage() (tea.Model, tea.Cmd) {
 	req, err := m.packageRequest()
 	if err != nil {
@@ -1349,7 +1386,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
-			return m.beginChecks(m.selectedProviders())
+			return m.beginChecksIfNeeded(m.selectedProviders())
 		case accessibleTemplateForm:
 			return m.selectTemplateAndConfigure()
 		case accessibleTeardownForm:
@@ -1362,6 +1399,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case checkFinishedMsg:
 		if msg.err != nil {
 			m.statuses[msg.provider] = connectionFailed
+			m.clearVerifiedConnection(msg.provider)
 			m.message = msg.err.Error()
 		} else {
 			m.results[msg.provider] = msg.result
@@ -1378,9 +1416,11 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.providerDiagnostics, "salesforce")
 				}
 				m.statuses[msg.provider] = connectionConnected
+				m.saveVerifiedConnection(msg.provider, msg.result)
 				m.message = providerLabel(msg.provider) + " connected"
 			} else {
 				m.statuses[msg.provider] = connectionFailed
+				m.clearVerifiedConnection(msg.provider)
 				m.message = providerLabel(msg.provider) + " needs attention"
 			}
 		}
@@ -1766,6 +1806,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.moveCursor(key, len(welcomeOptions))
 		if key.String() == "enter" || key.String() == "right" {
 			if m.cursor == 0 {
+				m.resetDeploymentRun()
 				m.screen = screenComponents
 				m.message = ""
 				return m, m.formCommand(m.componentForm, accessibleChooseForm)
@@ -1854,7 +1895,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
-			return m.beginChecks(m.selectedProviders())
+			return m.beginChecksIfNeeded(m.selectedProviders())
 		}
 		form, cmd := m.componentForm.Update(msg)
 		m.componentForm = form.(*huh.Form)
@@ -1866,7 +1907,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
-			model, checkCmd := m.beginChecks(m.selectedProviders())
+			model, checkCmd := m.beginChecksIfNeeded(m.selectedProviders())
 			return model, tea.Batch(cmd, checkCmd)
 		}
 		return m, cmd
@@ -1959,6 +2000,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if (key.String() == "enter" || key.String() == "right") && len(options) > 0 {
 			selected := options[m.cursor]
 			if m.provider == "salesforce" && selected == salesforceLoginOption {
+				m.clearProviderSelection("salesforce")
 				m.screen, m.cursor = screenProvider, 0
 				m.message = "Opening Salesforce login..."
 				cmd := exec.Command("sf", "org", "login", "web", "--set-default")
@@ -2229,6 +2271,142 @@ func (m rootShellModel) beginChecks(providers []string) (tea.Model, tea.Cmd) {
 	return m.startNextCheck()
 }
 
+func (m rootShellModel) beginChecksIfNeeded(providers []string) (tea.Model, tea.Cmd) {
+	pending := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		if m.statuses[provider] != connectionConnected {
+			pending = append(pending, provider)
+		}
+	}
+	if len(pending) == 0 {
+		if m.allSelectedConnected() {
+			m.message = "Using saved verified connections. Press → to continue or choose Recheck connections."
+		}
+		return m, nil
+	}
+	return m.beginChecks(pending)
+}
+
+func (m *rootShellModel) restoreVerifiedConnections() {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return
+	}
+	for provider, snapshot := range settings.VerifiedConnections {
+		if !verifiedConnectionMatches(provider, snapshot, settings) || !verifiedConnectionHealthy(provider, snapshot) {
+			continue
+		}
+		m.statuses[provider] = connectionConnected
+		m.results[provider] = providerResultFromVerifiedConnection(provider, snapshot)
+	}
+}
+
+func verifiedConnectionMatches(provider string, snapshot config.VerifiedConnection, settings config.ConnectionSettings) bool {
+	configured := ""
+	switch provider {
+	case "box":
+		configured = settings.BoxDefaultConnection
+	case "salesforce":
+		configured = settings.SalesforceAlias
+	case "databricks":
+		configured = firstNonEmptyString(settings.DatabricksProfile, settings.DatabricksHost)
+	case "aws":
+		configured = strings.TrimSpace(settings.AWSProfile) + "|" + strings.TrimSpace(settings.AWSRegion)
+	}
+	return snapshot.VerifiedAt != "" && snapshot.Selection == configured
+}
+
+func verifiedConnectionHealthy(provider string, snapshot config.VerifiedConnection) bool {
+	if provider != "salesforce" {
+		return true
+	}
+	info := salesforceorg.Info{
+		Alias: snapshot.Profile, Username: snapshot.Identity, ID: snapshot.OrgID,
+		Status: snapshot.OrgStatus, ExpirationDate: snapshot.ExpiresAt,
+	}
+	return salesforceorg.HealthFailure(info, time.Now()) == nil
+}
+
+func providerResultFromVerifiedConnection(provider string, snapshot config.VerifiedConnection) checker.ProviderResult {
+	return checker.ProviderResult{
+		Name: provider, ToolInstalled: true, ConfigSatisfied: true, ConnectivityOK: true,
+		Discovery: checker.ProviderDiscovery{
+			Identity: snapshot.Identity, Account: snapshot.Account, Enterprise: snapshot.Enterprise,
+			Profile: snapshot.Profile, Host: snapshot.Host, Region: snapshot.Region,
+			Options: append([]string(nil), snapshot.Options...), AuthType: snapshot.AuthType,
+			OrgID: snapshot.OrgID, OrgStatus: snapshot.OrgStatus, OrgType: snapshot.OrgType,
+			ExpiresAt: snapshot.ExpiresAt,
+		},
+	}
+}
+
+func verifiedConnectionSelection(provider string, discovery checker.ProviderDiscovery, settings config.ConnectionSettings) string {
+	switch provider {
+	case "box":
+		return settings.BoxDefaultConnection
+	case "salesforce":
+		return firstNonEmptyString(discovery.Profile, settings.SalesforceAlias, discovery.Identity)
+	case "databricks":
+		return firstNonEmptyString(discovery.Profile, settings.DatabricksProfile, discovery.Host, settings.DatabricksHost)
+	case "aws":
+		profile := firstNonEmptyString(discovery.Profile, settings.AWSProfile)
+		region := firstNonEmptyString(discovery.Region, settings.AWSRegion)
+		return strings.TrimSpace(profile) + "|" + strings.TrimSpace(region)
+	}
+	return ""
+}
+
+func (m rootShellModel) saveVerifiedConnection(provider string, result checker.ProviderResult) {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return
+	}
+	if settings.VerifiedConnections == nil {
+		settings.VerifiedConnections = map[string]config.VerifiedConnection{}
+	}
+	discovery := result.Discovery
+	settings.VerifiedConnections[provider] = config.VerifiedConnection{
+		VerifiedAt: time.Now().UTC().Format(time.RFC3339),
+		Selection:  verifiedConnectionSelection(provider, discovery, settings),
+		Identity:   discovery.Identity, Account: discovery.Account, Enterprise: discovery.Enterprise,
+		Profile: discovery.Profile, Host: discovery.Host, Region: discovery.Region,
+		Options: append([]string(nil), discovery.Options...), AuthType: discovery.AuthType,
+		OrgID: discovery.OrgID, OrgStatus: discovery.OrgStatus, OrgType: discovery.OrgType,
+		ExpiresAt: discovery.ExpiresAt,
+	}
+	_ = shellstate.SaveConnectionSettings(settings)
+}
+
+func (m rootShellModel) clearVerifiedConnection(provider string) {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil || settings.VerifiedConnections == nil {
+		return
+	}
+	delete(settings.VerifiedConnections, provider)
+	_ = shellstate.SaveConnectionSettings(settings)
+}
+
+func (m rootShellModel) clearProviderSelection(provider string) {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return
+	}
+	switch provider {
+	case "box":
+		settings.BoxDefaultConnection = ""
+	case "salesforce":
+		settings.SalesforceAlias = ""
+	case "databricks":
+		settings.DatabricksHost, settings.DatabricksProfile = "", ""
+	case "aws":
+		settings.AWSProfile, settings.AWSRegion = "", ""
+	}
+	if settings.VerifiedConnections != nil {
+		delete(settings.VerifiedConnections, provider)
+	}
+	_ = shellstate.SaveConnectionSettings(settings)
+}
+
 func (m rootShellModel) startNextCheck() (tea.Model, tea.Cmd) {
 	if len(m.queue) == 0 {
 		if m.allSelectedConnected() {
@@ -2295,6 +2473,15 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "check":
 		return m.beginChecks([]string{m.provider})
+	case "forget-verification":
+		provider := m.provider
+		m.clearVerifiedConnection(provider)
+		m.statuses[provider] = connectionPending
+		delete(m.results, provider)
+		delete(m.providerDiagnostics, provider)
+		m.cursor = 0
+		m.message = "Forgot the saved " + providerLabel(provider) + " verification. Connection credentials and selections were kept."
+		return m, nil
 	case "choose":
 		m.screen, m.cursor = screenOptions, 0
 		return m, nil
@@ -2311,6 +2498,7 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 			m.hostInput.Focus()
 			return m, textinput.Blink
 		}
+		m.clearProviderSelection(m.provider)
 		parts := providerCLIConnectCommand(m.provider)
 		cmd := exec.Command(parts[0], parts[1:]...)
 		provider := m.provider
@@ -2348,6 +2536,9 @@ func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if settings.DatabricksProfile == "" {
 				settings.DatabricksProfile = "box-dispatch"
 			}
+			if settings.VerifiedConnections != nil {
+				delete(settings.VerifiedConnections, "databricks")
+			}
 			_ = shellstate.SaveConnectionSettings(settings)
 			m.screen = screenProvider
 			m.hostInput.Blur()
@@ -2364,11 +2555,14 @@ func (m rootShellModel) updateDatabricksHost(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m rootShellModel) providerActions() []string {
 	if m.provider == "salesforce" {
 		if m.statuses["salesforce"] == connectionConnected {
-			return []string{"salesforce-done", "salesforce-existing", "scratch"}
+			return []string{"salesforce-done", "salesforce-existing", "forget-verification", "scratch"}
 		}
 		return []string{"salesforce-existing", "scratch", "back"}
 	}
 	actions := []string{"check"}
+	if m.statuses[m.provider] == connectionConnected {
+		actions = append(actions, "forget-verification")
+	}
 	if len(m.results[m.provider].Discovery.Options) > 1 {
 		actions = append(actions, "choose")
 	}
@@ -2453,10 +2647,16 @@ func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
 	settings.BoxCCGSubjectID = deref(m.ccgSubjectID)
 	// A freshly captured connection becomes the default box-dispatch deploys with.
 	settings.BoxDefaultConnection = boxconn.DispatchCCGName
+	if settings.VerifiedConnections != nil {
+		delete(settings.VerifiedConnections, "box")
+	}
 	if err := shellstate.SaveConnectionSettings(settings); err != nil {
 		m.message = "Could not save Box CCG credentials: " + err.Error()
 	} else {
-		m.message = "Box CCG credentials saved and set as the default. Choose Check connection to verify."
+		m.message = "Box CCG credentials saved. Verifying the new default connection..."
+		m.screen, m.cursor = screenProvider, 0
+		m.boxCCGForm = nil
+		return m.beginChecks([]string{"box"})
 	}
 	m.screen, m.cursor = screenProvider, 0
 	m.boxCCGForm = nil
@@ -2489,13 +2689,18 @@ func (m rootShellModel) setBoxDefault(conn boxconn.Connection) (tea.Model, tea.C
 	}
 	settings, _ := shellstate.LoadConnectionSettings()
 	settings.BoxDefaultConnection = conn.Name
+	if settings.VerifiedConnections != nil {
+		delete(settings.VerifiedConnections, "box")
+	}
 	if err := shellstate.SaveConnectionSettings(settings); err != nil {
 		m.message = "Could not save the default Box connection: " + err.Error()
 		return m, nil
 	}
 	m.boxConnections = boxconn.List()
-	m.message = conn.Name + " (" + conn.AuthType + ") is now the default Box connection."
-	return m, nil
+	m.provider = "box"
+	m.screen, m.cursor = screenProvider, 0
+	m.message = conn.Name + " (" + conn.AuthType + ") is now the default Box connection. Verifying..."
+	return m.beginChecks([]string{"box"})
 }
 
 // removeBoxConnection deletes a connection, guarded by a confirming second
@@ -2515,6 +2720,7 @@ func (m rootShellModel) removeBoxConnection(conn boxconn.Connection) (tea.Model,
 		m.message = "Could not remove " + conn.Name + ": " + err.Error()
 		return m, nil
 	}
+	m.clearVerifiedConnection("box")
 	m.boxConnections = boxconn.List()
 	if m.cursor >= len(m.boxConnections) && m.cursor > 0 {
 		m.cursor = len(m.boxConnections) - 1
@@ -2579,6 +2785,9 @@ func (m rootShellModel) saveProviderOption(provider, value string) {
 	case "aws":
 		settings.AWSProfile = value
 	}
+	if settings.VerifiedConnections != nil {
+		delete(settings.VerifiedConnections, provider)
+	}
 	_ = shellstate.SaveConnectionSettings(settings)
 }
 
@@ -2591,6 +2800,9 @@ func (m rootShellModel) saveSalesforceTarget(alias string, info salesforceorg.In
 	settings.SalesforceOrgType = "persistent"
 	if info.IsScratch() {
 		settings.SalesforceOrgType = "scratch"
+	}
+	if settings.VerifiedConnections != nil {
+		delete(settings.VerifiedConnections, "salesforce")
 	}
 	_ = shellstate.SaveConnectionSettings(settings)
 }
@@ -3260,7 +3472,7 @@ func (m rootShellModel) viewProvider(width int) string {
 		}
 	}
 	actionLabels := map[string]string{
-		"salesforce-done": "Continue with this org", "salesforce-existing": "Use a different Salesforce org", "check": "Check connection", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "scratch": "Create or replace a 30-day scratch org", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+		"salesforce-done": "Continue with this org", "salesforce-existing": "Use a different Salesforce org", "check": "Check connection", "forget-verification": "Forget saved verification", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "scratch": "Create or replace a 30-day scratch org", "connect": "Connect using provider CLI", "back": "Back to launch plan",
 	}
 	if m.provider == "salesforce" && m.statuses["salesforce"] != connectionConnected {
 		actionLabels["salesforce-existing"] = "Use an existing Salesforce org"
