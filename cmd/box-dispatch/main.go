@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
@@ -16,6 +18,17 @@ import (
 )
 
 func main() {
+	if err := newRootCommand().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+const (
+	commonCommandGroup   = "common"
+	advancedCommandGroup = "advanced"
+)
+
+func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "box-dispatch",
 		Short: "Box Dispatch - solution shipping accelerators for Box and partners",
@@ -26,7 +39,7 @@ func main() {
 			offline, _ := cmd.Flags().GetBool("offline")
 			// The full-screen shell needs a terminal; anything scripted or
 			// JSON-bound falls back to the plain connectivity report.
-			if isTTY() && !asJSON(cmd) {
+			if isTTY() && terminalSupportsFullScreen() && !asJSON(cmd) {
 				return runLaunchShell()
 			}
 			return runConnectivityCheck(cmd, scenario, platform, offline, false)
@@ -35,18 +48,31 @@ func main() {
 	}
 	root.PersistentFlags().String("profile", "", "configuration profile (defaults to BOX_DISPATCH_PROFILE or default)")
 	root.PersistentFlags().Bool("json", false, "machine-readable JSON output")
-	root.Flags().String("scenario", "", "scenario filter (e.g. clm, lifesciences, all)")
-	root.Flags().String("platform", "", "provider filter (box, salesforce, databricks, aws)")
-	root.Flags().Bool("offline", false, "skip live connectivity checks")
+	root.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		noColor, _ := cmd.Flags().GetBool("no-color")
+		configureTerminalPresentation(noColor)
+	}
+	addConnectivityFlags(root)
 
-	root.AddCommand(
+	root.AddGroup(
+		&cobra.Group{ID: commonCommandGroup, Title: "Common Commands:"},
+		&cobra.Group{ID: advancedCommandGroup, Title: "Advanced Commands:"},
+	)
+	root.SetHelpCommandGroupID(advancedCommandGroup)
+	root.SetCompletionCommandGroupID(advancedCommandGroup)
+
+	commonCommands := []*cobra.Command{
+		makeDeployCommand(),
 		makeCheckCommand(),
+		makeStatusCommand(),
+		makeResetCommand(),
+	}
+	advancedCommands := []*cobra.Command{
 		makeInitCommand(),
 		makeSetupCommand(),
 		makeResolveCommand(),
-		makeBootstrapCommand(),
 		makeSourceCommand(),
-		makeStatusCommand(),
 		makeScenariosCommand(),
 		makeEnvCommand(),
 		makeImportCommand(),
@@ -54,15 +80,29 @@ func main() {
 		makePresentCommand(),
 		makeSmokeCommand(),
 		makePublishCheckCommand(),
-	)
-
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
 	}
+	for _, cmd := range commonCommands {
+		cmd.GroupID = commonCommandGroup
+	}
+	for _, cmd := range advancedCommands {
+		cmd.GroupID = advancedCommandGroup
+	}
+	root.AddCommand(append(commonCommands, advancedCommands...)...)
+	return root
 }
 
 func isTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func terminalSupportsFullScreen() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
+}
+
+func configureTerminalPresentation(explicitNoColor bool) {
+	if explicitNoColor || os.Getenv("NO_COLOR") != "" || !terminalSupportsFullScreen() {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
 }
 
 func asJSON(cmd *cobra.Command) bool {
@@ -99,11 +139,15 @@ func makeCheckCommand() *cobra.Command {
 		},
 	}
 
+	addConnectivityFlags(cmd)
+
+	return cmd
+}
+
+func addConnectivityFlags(cmd *cobra.Command) {
 	cmd.Flags().String("scenario", "", "scenario filter (e.g. clm, lifesciences, all)")
 	cmd.Flags().String("platform", "", "provider filter (box, salesforce, databricks, aws)")
 	cmd.Flags().Bool("offline", false, "skip live connectivity checks")
-
-	return cmd
 }
 
 // runLaunchShell starts the full-screen solution launch wizard.
@@ -111,6 +155,14 @@ func runLaunchShell() error {
 	program := tea.NewProgram(newDispatchShell(), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("launch shell failed: %w", err)
+	}
+	return nil
+}
+
+func runResetShell() error {
+	program := tea.NewProgram(newResetShell(), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
+		return fmt.Errorf("reset shell failed: %w", err)
 	}
 	return nil
 }
@@ -126,7 +178,7 @@ func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline
 	var report checker.CheckReport
 	var err error
 
-	interactive := preferInteractive && !asJSON(cmd)
+	interactive := preferInteractive && terminalSupportsFullScreen() && !asJSON(cmd)
 	if interactive {
 		p := checker.NewInteractiveCheckModel(cfg)
 		if _, err := tea.NewProgram(p).Run(); err != nil {
@@ -216,11 +268,11 @@ func makeResolveCommand() *cobra.Command {
 	return cmd
 }
 
-func makeBootstrapCommand() *cobra.Command {
+func makeDeployCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "bootstrap",
-		Aliases: []string{"deploy"},
-		Short:   "Apply resolved artifacts and provider bootstrap steps",
+		Use:     "deploy",
+		Aliases: []string{"bootstrap"},
+		Short:   "Deploy resolved artifacts and provider configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scenario, _ := cmd.Flags().GetString("scenario")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -238,6 +290,20 @@ func makeBootstrapCommand() *cobra.Command {
 	cmd.Flags().Bool("allow-unresolved", false, "continue when tokens are unresolved")
 	cmd.Flags().Bool("skip-validate", false, "skip provider-level precheck validation")
 	return cmd
+}
+
+func makeResetCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset",
+		Short: "Reset a recorded deployment by its audited resource IDs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if asJSON(cmd) || !isTTY() {
+				return fmt.Errorf("reset requires an interactive terminal because it previews recorded resources and requires typed confirmation")
+			}
+			return runResetShell()
+		},
+	}
 }
 
 func makeSourceCommand() *cobra.Command {
@@ -301,15 +367,19 @@ func makeValidateCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scenario, _ := cmd.Flags().GetString("scenario")
 			presenterReady, _ := cmd.Flags().GetBool("presenter-ready")
-			offline, _ := cmd.Flags().GetBool("offline")
+			skipArtifacts, _ := cmd.Flags().GetBool("skip-artifacts")
+			legacyOffline, _ := cmd.Flags().GetBool("offline")
 			return runWithEngine(cmd, func(e *engine.Engine) (*model.CommandReport, int) {
-				return e.Validate(scenario, presenterReady, offline)
+				return e.Validate(scenario, presenterReady, skipArtifacts || legacyOffline)
 			})
 		},
 	}
 	cmd.Flags().String("scenario", "", "scenario key (defaults to active scenario)")
 	cmd.Flags().Bool("presenter-ready", false, "validate generated presenter receipt presence")
-	cmd.Flags().Bool("offline", false, "skip artifact presence checks")
+	cmd.Flags().Bool("skip-artifacts", false, "skip generated artifact presence checks")
+	cmd.Flags().Bool("offline", false, "deprecated compatibility alias for --skip-artifacts")
+	_ = cmd.Flags().MarkDeprecated("offline", "use --skip-artifacts")
+	_ = cmd.Flags().MarkHidden("offline")
 	return cmd
 }
 

@@ -5,4 +5,5 @@ package config
 // solution manifest.
 type UISettings struct {
 	BoxComponentVisibility map[string]bool `json:"boxComponentVisibility,omitempty"`
+	AccessibleForms        bool            `json:"accessibleForms,omitempty"`
 }

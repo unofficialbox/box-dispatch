@@ -78,7 +78,7 @@ func TestSolutionPlanRoundTripAsBCL(t *testing.T) {
 
 func TestUISettingsRoundTripAsBCL(t *testing.T) {
 	root := isolateRoot(t)
-	want := config.UISettings{BoxComponentVisibility: map[string]bool{
+	want := config.UISettings{AccessibleForms: true, BoxComponentVisibility: map[string]bool{
 		"folder_structure": true,
 		"box_form":         false,
 	}}
@@ -94,7 +94,7 @@ func TestUISettingsRoundTripAsBCL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.BoxComponentVisibility) != 2 || !got.BoxComponentVisibility["folder_structure"] || got.BoxComponentVisibility["box_form"] {
+	if !got.AccessibleForms || len(got.BoxComponentVisibility) != 2 || !got.BoxComponentVisibility["folder_structure"] || got.BoxComponentVisibility["box_form"] {
 		t.Fatalf("round-trip mismatch: got %+v", got)
 	}
 }

@@ -6,6 +6,7 @@
   "generatedAt": "2026-08-04T00:00:00Z",
   "resources": [],
   "metadata": {
+    "accessibleForms": false,
     "boxComponentVisibility": {
       "folder_structure": true,
       "metadata_template": true,

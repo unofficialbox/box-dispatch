@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -35,7 +36,7 @@ import (
 
 // welcomeOptions is the home menu; the key handler and the view read the same
 // slice so the cursor range never drifts from what is rendered.
-var welcomeOptions = []string{"Start new deployment", "Show deployment history", "Reset demo environment"}
+var welcomeOptions = []string{"Start new deployment", "Show deployment history"}
 
 // dispatchBanner is the ANSI-shadow product wordmark (6 rows, 60 cols) shown in
 // the welcome hero on wide terminals; smaller terminals fall back to a one-line
@@ -85,6 +86,7 @@ const (
 	screenTeardown
 	screenBoxCCG
 	screenBoxSwitch
+	screenHelp
 	screenDiagnostic
 	screenScratchConfirm
 	screenDevHubs
@@ -97,6 +99,17 @@ const (
 	connectionChecking
 	connectionConnected
 	connectionFailed
+)
+
+type deploymentPhase string
+
+const (
+	deploymentPhaseReview   deploymentPhase = "review"
+	deploymentPhasePackage  deploymentPhase = "package"
+	deploymentPhaseValidate deploymentPhase = "validate"
+	deploymentPhaseApply    deploymentPhase = "deploy"
+	deploymentPhaseFailed   deploymentPhase = "failed"
+	deploymentPhaseComplete deploymentPhase = "complete"
 )
 
 type componentChoice struct {
@@ -150,6 +163,35 @@ type packageFinishedMsg struct {
 	manifest workspace.PackageManifest
 	err      error
 }
+
+type accessibleFormKind string
+
+const (
+	accessibleChooseForm   accessibleFormKind = "choose"
+	accessibleTemplateForm accessibleFormKind = "template"
+	accessibleTeardownForm accessibleFormKind = "teardown"
+	accessibleBoxCCGForm   accessibleFormKind = "box-ccg"
+)
+
+type accessibleFormFinishedMsg struct {
+	kind accessibleFormKind
+	err  error
+}
+
+type accessibleFormCommand struct {
+	form   *huh.Form
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (c *accessibleFormCommand) Run() error {
+	return c.form.WithAccessible(true).WithInput(c.stdin).WithOutput(c.stdout).Run()
+}
+
+func (c *accessibleFormCommand) SetStdin(reader io.Reader)  { c.stdin = reader }
+func (c *accessibleFormCommand) SetStdout(writer io.Writer) { c.stdout = writer }
+func (c *accessibleFormCommand) SetStderr(writer io.Writer) { c.stderr = writer }
 
 // activityMsg is one live progress line emitted by a running lifecycle task.
 type activityMsg struct {
@@ -284,6 +326,9 @@ type rootShellModel struct {
 	activityExpanded      bool         // whether the activity feed is expanded
 	activityCh            chan tea.Msg // steps + final result from the running task
 	help                  help.Model
+	helpReturn            shellScreen
+	helpScroll            int
+	accessibleForms       bool
 	answers               *wizardAnswers
 	componentForm         *huh.Form
 	templateForm          *huh.Form
@@ -320,6 +365,7 @@ type rootShellModel struct {
 	deploymentCompletedAt time.Time
 	deploymentAuditPath   string
 	deployAssetsScroll    int // first visible row of the deployed-assets table
+	deploymentPhase       deploymentPhase
 	deploymentHistory     []deploymentaudit.DeploymentRecord
 	historyError          string
 	validationItems       []lifecycle.Item
@@ -446,6 +492,9 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 		help:                helpModel,
 		answers:             answers,
 	}
+	if uiSettings, err := shellstate.LoadUISettings(); err == nil {
+		m.accessibleForms = uiSettings.AccessibleForms
+	}
 	m.rebuildComponentForm()
 	m.rebuildTemplateForm()
 	m.prepareConfigInputs()
@@ -455,13 +504,25 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 
 func newDispatchShell() rootShellModel { return newSetupOnlyShell() }
 
-// componentsFromRuntime builds the component picker from the active BCL scenario,
-// translating BCL provider IDs to internal keys and filling display copy from the
-// provider config (falling back to built-in copy for anything the config omits).
-// componentsFromRuntime returns the platforms box-dispatch supports for the
-// BUILD picker. Availability is fixed (the tool checks and deploys exactly these
-// providers) and independent of the active scenario, which is chosen later at the
-// TEMPLATE step; the BCL providers map only enriches each platform's display copy.
+func newResetShell() rootShellModel {
+	m := newDispatchShell()
+	history, err := deploymentaudit.ListDeployments()
+	m.deploymentHistory = history
+	m.screen, m.cursor = screenHistory, 0
+	m.message = "Choose the deployment to reset, then press enter."
+	if err != nil {
+		m.historyError = err.Error()
+	} else if len(history) == 0 {
+		m.historyError = "No deployment has been recorded yet."
+	}
+	return m
+}
+
+// componentsFromRuntime builds the provider portion of the Choose picker from
+// the active BCL scenario, translating BCL provider IDs to internal keys and
+// filling display copy from the provider config (falling back to built-in copy
+// for anything the config omits). Availability is fixed and independent of the
+// selected quickstart; BCL only enriches each platform's display copy.
 func componentsFromRuntime(cfg *config.RuntimeConfig) []componentChoice {
 	components := defaultComponents()
 	if cfg == nil {
@@ -569,21 +630,31 @@ func packageNameForTemplate(templates []templateChoice, id string) string {
 }
 
 func (m *rootShellModel) rebuildComponentForm() {
-	options := make([]huh.Option[string], 0, len(m.components))
+	templateOptions := make([]huh.Option[string], 0, len(m.templates))
+	for _, template := range m.templates {
+		templateOptions = append(templateOptions, huh.NewOption(template.name, template.id))
+	}
+	componentOptions := make([]huh.Option[string], 0, len(m.components))
 	for _, component := range m.components {
 		label := component.name
 		if component.required {
 			label += "  ·  REQUIRED"
 		}
-		options = append(options, huh.NewOption(label, component.provider).Selected(slices.Contains(m.answers.components, component.provider)))
+		componentOptions = append(componentOptions, huh.NewOption(label, component.provider).Selected(slices.Contains(m.answers.components, component.provider)))
 	}
 	m.componentForm = huh.NewForm(
 		huh.NewGroup(
+			huh.NewSelect[string]().
+				Key("template").
+				Title("Choose a solution quickstart").
+				Description("Start from a proven architecture or the Box Dispatch solution template.").
+				Options(templateOptions...).
+				Value(&m.answers.templateID),
 			huh.NewMultiSelect[string]().
 				Key("components").
-				Title("Select platform components").
+				Title("Choose platform components").
 				Description("Box is required; partner platforms are optional.").
-				Options(options...).
+				Options(componentOptions...).
 				Value(&m.answers.components).
 				Validate(func(values []string) error {
 					if !slices.Contains(values, "box") {
@@ -592,7 +663,7 @@ func (m *rootShellModel) rebuildComponentForm() {
 					return nil
 				}),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 }
 
 func (m *rootShellModel) rebuildTemplateForm() {
@@ -609,7 +680,7 @@ func (m *rootShellModel) rebuildTemplateForm() {
 				Options(options...).
 				Value(&m.answers.templateID),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 }
 
 func (m *rootShellModel) prepareConfigInputs() {
@@ -765,6 +836,16 @@ func (m *rootShellModel) syncComponentAnswers() error {
 }
 
 func (m rootShellModel) selectTemplateAndConfigure() (tea.Model, tea.Cmd) {
+	m.selectTemplate()
+	m.prepareConfigInputs()
+	m.prepareBoxComponentSelection()
+	m.savePlan()
+	m.screen, m.cursor, m.configFocus = screenConfig, 0, 0
+	return m, textinput.Blink
+}
+
+func (m *rootShellModel) selectTemplate() {
+	m.selected = nil
 	for i := range m.templates {
 		if m.templates[i].id == m.answers.templateID {
 			choice := m.templates[i]
@@ -778,50 +859,76 @@ func (m rootShellModel) selectTemplateAndConfigure() (tea.Model, tea.Cmd) {
 		m.selected = &choice
 		m.answers.templateID = choice.id
 	}
-	m.answers.packageName = "box-bedrock-for-" + m.selected.id
-	if m.selected.id == "new" {
-		m.answers.packageName = "box-bedrock-for-my-solution"
-	}
-	m.prepareConfigInputs()
-	m.prepareBoxComponentSelection()
-	m.savePlan()
-	m.screen, m.cursor, m.configFocus = screenConfig, 0, 0
-	return m, textinput.Blink
+	m.answers.packageName = packageNameForTemplate(m.templates, m.selected.id)
 }
 
-func (m rootShellModel) startPackage() (tea.Model, tea.Cmd) {
+func (m *rootShellModel) packageRequest() (workspace.PackageRequest, error) {
 	if m.selected == nil {
-		m.message = "Choose a solution template before packaging."
-		return m, nil
+		return workspace.PackageRequest{}, errors.New("choose a solution quickstart before reviewing the deployment")
 	}
 	if strings.TrimSpace(m.selected.repository) == "" {
-		m.message = "This solution has no source repository configured; set a repository for scenario " + m.selected.id + " in the runtime config before packaging."
-		return m, nil
+		return workspace.PackageRequest{}, errors.New("this solution has no source repository configured; set a repository for scenario " + m.selected.id + " in the runtime config before deploying")
 	}
 	m.answers.directory = strings.TrimSpace(m.directoryInput.Value())
 	m.answers.packageName = strings.TrimSpace(m.packageInput.Value())
 	info, err := os.Stat(m.answers.directory)
 	if err != nil || !info.IsDir() {
-		m.message = "Choose an existing parent directory."
-		return m, nil
+		return workspace.PackageRequest{}, errors.New("choose an existing parent directory")
 	}
 	name := m.answers.packageName
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
-		m.message = "Enter a valid package directory name without slashes."
-		m.setConfigFocus(1)
-		return m, nil
+		return workspace.PackageRequest{}, errors.New("enter a valid package directory name without slashes")
 	}
 	m.packagePath = filepath.Join(m.answers.directory, strings.TrimSpace(m.answers.packageName))
-	m.packageStarted = true
-	m.packageDone = false
-	m.screen = screenPackage
-	m.message = "Pulling the selected solution components from GitHub..."
-	req := workspace.PackageRequest{
+	return workspace.PackageRequest{
 		Repository: m.selected.repository, Destination: m.packagePath,
 		TemplateID: m.selected.id, Components: m.selectedProviders(), BoxComponents: m.boxComponentSelection(),
 		BoxStrategy: m.answers.deploymentStrategy,
+	}, nil
+}
+
+func (m rootShellModel) prepareReview() (tea.Model, tea.Cmd) {
+	if _, err := m.packageRequest(); err != nil {
+		m.message = err.Error()
+		if strings.Contains(err.Error(), "directory name") {
+			m.setConfigFocus(1)
+		}
+		return m, nil
 	}
+	m.deploymentPhase = deploymentPhaseReview
+	m.screen, m.cursor = screenPackage, 0
+	m.message = "Review the deployment plan before anything is created or changed."
+	m.savePlan()
+	return m, nil
+}
+
+func (m rootShellModel) startPackage() (tea.Model, tea.Cmd) {
+	req, err := m.packageRequest()
+	if err != nil {
+		m.deploymentPhase = deploymentPhaseFailed
+		m.message = "Package failed: " + err.Error()
+		return m, nil
+	}
+	m.packageStarted = true
+	m.packageDone = false
+	m.screen = screenDeploy
+	m.deploymentPhase = deploymentPhasePackage
+	m.message = "Pulling the selected solution components from GitHub..."
 	return m, tea.Batch(m.spinner.Tick, packageCmd(req))
+}
+
+func (m rootShellModel) startDeploymentPipeline() (tea.Model, tea.Cmd) {
+	m.packageStarted = false
+	m.validateStarted, m.validateRunning, m.validateDone = false, false, false
+	m.deployStarted, m.deployDone = false, false
+	m.validationItems = nil
+	if m.packageDone {
+		m.deploymentPhase = deploymentPhaseValidate
+		m.message = "Reusing the assembled package. Validating provider configuration and prerequisites..."
+		return m.startValidation()
+	}
+	m.deploymentPhase = deploymentPhasePackage
+	return m.startPackage()
 }
 
 func packageCmd(req workspace.PackageRequest) tea.Cmd {
@@ -869,6 +976,7 @@ func (m rootShellModel) startValidation() (tea.Model, tea.Cmd) {
 }
 
 func (m rootShellModel) startDeploy() (tea.Model, tea.Cmd) {
+	m.deploymentPhase = deploymentPhaseApply
 	m.deployStarted = true
 	m.deployDone = false
 	m.activityLog, m.activityExpanded = nil, false
@@ -910,6 +1018,11 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 		m.deployConfirmDesc = "Validation found no supported missing configuration. No provider commands will run."
 		m.deployConfirmAffirm = "Complete"
 	}
+	if m.deploymentPhase == deploymentPhaseReview {
+		m.deployConfirmTitle = "Deploy this solution?"
+		m.deployConfirmDesc = "Dispatch will assemble the package, validate provider state and prerequisites, then apply only supported missing configuration to: " + strings.Join(m.selectedProviderLabels(), ", ") + "."
+		m.deployConfirmAffirm = "Deploy"
+	}
 	m.message = "Review and confirm the deployment plan."
 	return m, nil
 }
@@ -944,6 +1057,15 @@ func (m rootShellModel) startNextValidation() (tea.Model, tea.Cmd) {
 		m.validateRunning = false
 		m.validateDone = true
 		m.currentValidation = ""
+		if m.deploymentPhase == deploymentPhaseValidate {
+			if m.validationHasFailures() {
+				m.deploymentPhase = deploymentPhaseFailed
+				m.message = "Deployment stopped because provider validation failed. Resolve the error and retry from Review."
+				return m, nil
+			}
+			m.message = "Validation complete. Applying supported missing configuration..."
+			return m.startDeploy()
+		}
 		m.message = "Validation complete. Review existing and missing configuration before deployment."
 		return m, nil
 	}
@@ -993,6 +1115,7 @@ func (m rootShellModel) startNextDeployment() (tea.Model, tea.Cmd) {
 	}
 	m.deployStarted = false
 	m.deployDone = true
+	m.deploymentPhase = deploymentPhaseComplete
 	m.deploymentCompletedAt = time.Now().UTC()
 	m.currentDeployment = ""
 	m.message = "Deployment run complete. Review provider results below."
@@ -1060,9 +1183,9 @@ func (m rootShellModel) requestTeardownConfirmation() (tea.Model, tea.Cmd) {
 					return nil
 				}),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 	m.message = "Type the package name to confirm the reset."
-	return m, m.teardownConfirmForm.Init()
+	return m, m.formCommand(m.teardownConfirmForm, accessibleTeardownForm)
 }
 
 // teardownConfirmationPhrase is the package directory name, which is specific to
@@ -1128,6 +1251,15 @@ func (m rootShellModel) Init() tea.Cmd {
 	return m.componentForm.Init()
 }
 
+func (m rootShellModel) formCommand(form *huh.Form, kind accessibleFormKind) tea.Cmd {
+	if !m.accessibleForms {
+		return form.Init()
+	}
+	return tea.Exec(&accessibleFormCommand{form: form}, func(err error) tea.Msg {
+		return accessibleFormFinishedMsg{kind: kind, err: err}
+	})
+}
+
 func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.route(msg)
 }
@@ -1172,6 +1304,30 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// bottom of the screen.
 		m.followLifecycleTail()
 		return m, waitForActivity(m.activityCh)
+	case accessibleFormFinishedMsg:
+		if msg.err != nil {
+			m.message = "Accessible form stopped: " + msg.err.Error()
+			return m, nil
+		}
+		switch msg.kind {
+		case accessibleChooseForm:
+			if err := m.syncComponentAnswers(); err != nil {
+				m.message = err.Error()
+				m.rebuildComponentForm()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
+			}
+			m.selectTemplate()
+			m.screen, m.cursor = screenDashboard, 0
+			return m.beginChecks(m.selectedProviders())
+		case accessibleTemplateForm:
+			return m.selectTemplateAndConfigure()
+		case accessibleTeardownForm:
+			m.confirmingTeardown = false
+			return m.startTeardown()
+		case accessibleBoxCCGForm:
+			return m.saveBoxCCG()
+		}
+		return m, nil
 	case checkFinishedMsg:
 		if msg.err != nil {
 			m.statuses[msg.provider] = connectionFailed
@@ -1267,13 +1423,18 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case packageFinishedMsg:
 		m.packageStarted = false
 		if msg.err != nil {
+			m.deploymentPhase = deploymentPhaseFailed
 			m.message = "Package failed: " + msg.err.Error()
 			return m, nil
 		}
 		m.packageDone = true
 		m.packagePath = msg.manifest.Destination
-		m.message = "Package created. Press → to validate provider configuration."
+		m.message = "Package created. Validating provider configuration and prerequisites..."
 		m.savePlan()
+		if m.screen == screenDeploy && m.deploymentPhase == deploymentPhasePackage {
+			m.deploymentPhase = deploymentPhaseValidate
+			return m.startValidation()
+		}
 		return m, nil
 	case providerValidationFinishedMsg:
 		m.validationProgress[msg.provider] = 1
@@ -1401,6 +1562,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				m.confirmingDeploy = false
+				m.screen = screenPackage
 				m.message = "Deployment cancelled. No provider configuration was changed."
 				return m, nil
 			case "down", "j":
@@ -1415,8 +1577,12 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter", " ", "spacebar":
 				m.confirmingDeploy = false
 				if m.deployConfirmCursor == 0 {
+					if m.deploymentPhase == deploymentPhaseReview {
+						return m.startDeploymentPipeline()
+					}
 					return m.startDeploy()
 				}
+				m.screen = screenPackage
 				m.message = "Deployment cancelled. No provider configuration was changed."
 				return m, nil
 			}
@@ -1488,6 +1654,34 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.screen == screenHelp {
+		switch key.String() {
+		case "?", "f1", "esc", "left", "q":
+			m.screen = m.helpReturn
+			return m, nil
+		case "down", "j", "pgdown":
+			delta := 1
+			if key.String() == "pgdown" {
+				delta = m.helpVisibleRows()
+			}
+			m.helpScroll = clampLifecycleScroll(m.helpScroll, delta, m.helpScrollLimit())
+			return m, nil
+		case "up", "k", "pgup":
+			delta := -1
+			if key.String() == "pgup" {
+				delta = -m.helpVisibleRows()
+			}
+			m.helpScroll = clampLifecycleScroll(m.helpScroll, delta, m.helpScrollLimit())
+			return m, nil
+		}
+		return m, nil
+	}
+	if (key.String() == "?" || key.String() == "f1") && !(m.screen == screenConfig && m.configFocus < 2) {
+		m.helpReturn = m.screen
+		m.helpScroll = 0
+		m.screen = screenHelp
+		return m, nil
+	}
 	if m.screen == screenDiagnostic {
 		switch key.String() {
 		case "esc", "left", "d":
@@ -1542,9 +1736,8 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "enter" || key.String() == "right" {
 			if m.cursor == 0 {
 				m.screen = screenComponents
-				return m, m.componentForm.Init()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			}
-			resetting := m.cursor == 2
 			history, err := deploymentaudit.ListDeployments()
 			m.deploymentHistory = history
 			m.historyError = ""
@@ -1553,14 +1746,8 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if len(history) == 0 {
 				m.historyError = "No deployment has been recorded yet."
 			}
-			// "Reset demo environment" opens the same history list; the reset
-			// acts on whichever deployment is selected there.
 			m.screen, m.cursor = screenHistory, 0
-			if resetting {
-				m.message = "Choose the deployment to reset, then press enter."
-			} else {
-				m.message = ""
-			}
+			m.message = "Choose a deployment to review its recorded resources or reset it."
 			return m, nil
 		}
 	case screenHistory:
@@ -1614,6 +1801,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = err.Error()
 				return m, nil
 			}
+			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
 			return m.beginChecks(m.selectedProviders())
 		}
@@ -1623,8 +1811,9 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := m.syncComponentAnswers(); err != nil {
 				m.message = err.Error()
 				m.rebuildComponentForm()
-				return m, m.componentForm.Init()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			}
+			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
 			model, checkCmd := m.beginChecks(m.selectedProviders())
 			return model, tea.Batch(cmd, checkCmd)
@@ -1651,13 +1840,11 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "left" {
 			m.rebuildComponentForm()
 			m.screen, m.cursor = screenComponents, 0
-			return m, m.componentForm.Init()
+			return m, m.formCommand(m.componentForm, accessibleChooseForm)
 		}
 		if key.String() == "right" {
 			if m.allSelectedConnected() {
-				m.rebuildTemplateForm()
-				m.screen, m.cursor = screenTemplates, m.templateCursor
-				return m, m.templateForm.Init()
+				return m.selectTemplateAndConfigure()
 			} else {
 				m.message = "Connect every selected service before continuing."
 			}
@@ -1670,11 +1857,11 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursor == len(m.selectedProviders()) {
 				return m.beginChecks(m.selectedProviders())
 			} else if m.cursor == len(m.selectedProviders())+1 {
+				m.rebuildComponentForm()
 				m.screen, m.cursor = screenComponents, 0
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			} else if m.allSelectedConnected() {
-				m.rebuildTemplateForm()
-				m.screen, m.cursor = screenTemplates, m.templateCursor
-				return m, m.templateForm.Init()
+				return m.selectTemplateAndConfigure()
 			} else {
 				m.message = "Connect every selected service before continuing."
 			}
@@ -1739,9 +1926,8 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case screenConfig:
 		if key.String() == "esc" || (key.String() == "left" && m.configFocus == 4) {
-			m.rebuildTemplateForm()
-			m.screen, m.cursor = screenTemplates, m.templateCursor
-			return m, m.templateForm.Init()
+			m.screen, m.cursor = screenDashboard, 0
+			return m, nil
 		}
 		switch key.String() {
 		case "up", "shift+tab":
@@ -1772,7 +1958,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.configFocus == 4 {
-				return m.startPackage()
+				return m.prepareReview()
 			}
 		case "right":
 			if m.configFocus == 2 {
@@ -1780,7 +1966,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.configFocus == 4 {
-				return m.startPackage()
+				return m.prepareReview()
 			}
 		case "left":
 			if m.configFocus == 2 {
@@ -1809,15 +1995,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = "Choose a destination or edit the package name."
 			return m, textinput.Blink
 		}
-		if key.String() == "right" || (key.String() == "enter" && m.packageDone) {
-			if !m.packageDone {
-				m.message = "Create the package before validation."
-				return m, nil
-			}
-			return m.enterValidate()
-		}
-		if key.String() == "enter" && !m.packageStarted {
-			return m.startPackage()
+		if key.String() == "right" || key.String() == "enter" {
+			m.screen = screenDeploy
+			m.deploymentPhase = deploymentPhaseReview
+			return m.requestDeployConfirmation()
 		}
 	case screenValidate:
 		if key.String() == "down" || key.String() == "j" {
@@ -1879,7 +2060,10 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if key.String() == "left" {
-			m.screen = screenValidate
+			if !m.packageStarted && !m.validateRunning && !m.deployStarted {
+				m.screen = screenPackage
+				m.deploymentPhase = deploymentPhaseReview
+			}
 			return m, nil
 		}
 		if (key.String() == "enter" || key.String() == "right") && m.deployDone {
@@ -1897,7 +2081,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = "Deployment audit exported: " + path
 			return m, nil
 		}
-		if (key.String() == "enter" || key.String() == "right") && !m.deployStarted {
+		if (key.String() == "enter" || key.String() == "right") && !m.deployStarted && m.deploymentPhase == deploymentPhaseReview {
 			return m.requestDeployConfirmation()
 		}
 	}
@@ -2111,10 +2295,10 @@ func (m rootShellModel) openBoxCCGForm() (tea.Model, tea.Cmd) {
 				Description("Box user ID when subject is user, enterprise ID when enterprise").
 				Value(m.ccgSubjectID).Validate(requiredField("Subject ID")),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithAccessible(m.accessibleForms).WithWidth(76)
 	m.screen = screenBoxCCG
 	m.message = "Enter the CCG app credentials. Esc cancels."
-	return m, m.boxCCGForm.Init()
+	return m, m.formCommand(m.boxCCGForm, accessibleBoxCCGForm)
 }
 
 func requiredField(label string) func(string) error {
@@ -2412,6 +2596,15 @@ func (m rootShellModel) selectedProviders() []string {
 	return providers
 }
 
+func (m rootShellModel) selectedProviderLabels() []string {
+	providers := m.selectedProviders()
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, providerLabel(provider))
+	}
+	return labels
+}
+
 func (m rootShellModel) dashboardItems() []string {
 	items := append([]string(nil), m.selectedProviders()...)
 	return append(items, "check-all", "revise", "continue")
@@ -2471,6 +2664,8 @@ func (m rootShellModel) View() string {
 		body = m.viewBoxCCG(contentWidth)
 	case screenBoxSwitch:
 		body = m.viewBoxSwitch(contentWidth)
+	case screenHelp:
+		body = m.viewExpandedHelp(contentWidth)
 	case screenDiagnostic:
 		body = m.viewDiagnostic(contentWidth)
 	case screenScratchConfirm:
@@ -2494,10 +2689,53 @@ func (m rootShellModel) header(width int) string {
 	return lipgloss.NewStyle().Width(width).BorderStyle(lipgloss.NormalBorder()).BorderTop(false).BorderBottom(true).BorderLeft(false).BorderRight(false).BorderForeground(divider).Render(row)
 }
 
+func (m rootShellModel) expandedHelpLines(width int) []string {
+	workflow := []string{
+		"1  Choose     Select a quickstart and providers",
+		"2  Connect    Verify the selected services",
+		"3  Configure  Set destination, strategy, and capabilities",
+		"4  Review     Preview the complete plan without changing anything",
+		"5  Deploy     Assemble, validate, install prerequisites, and apply",
+	}
+	controls := []string{
+		"↑/↓ or j/k   Move through rows and bounded result lists",
+		"Enter/Space  Select, toggle, or confirm the focused action",
+		"← or Esc     Return to the previous screen",
+		"d            Open sanitized full diagnostics when available",
+		"e            Expand or collapse live task activity",
+		"q            Return home; from Home, quit",
+		"? or F1      Open or close this help",
+	}
+	presentation := "Set metadata.accessibleForms = true in .dispatch/ui-settings.bcl to enable Huh's screen-reader form prompts. Set NO_COLOR, TERM=dumb, or pass --no-color to disable ANSI color. TERM=dumb uses the non-full-screen command output."
+	lines := []string{titleStyle.Render("WORKFLOW")}
+	lines = append(lines, workflow...)
+	lines = append(lines, "", titleStyle.Render("CONTROLS"))
+	lines = append(lines, controls...)
+	lines = append(lines, "", titleStyle.Render("ACCESSIBLE OUTPUT"))
+	lines = append(lines, strings.Split(dimStyle.Copy().Width(max(width-10, 20)).Render(presentation), "\n")...)
+	return lines
+}
+
+func (m rootShellModel) helpVisibleRows() int {
+	return max(m.height-18, 4)
+}
+
+func (m rootShellModel) helpScrollLimit() int {
+	width := min(max(m.width-8, 64), 112)
+	return lifecycleScrollLimit(len(m.expandedHelpLines(width)), m.helpVisibleRows())
+}
+
+func (m rootShellModel) viewExpandedHelp(width int) string {
+	body := renderLifecycleViewport(m.expandedHelpLines(width), m.helpVisibleRows(), m.helpScroll)
+	return titleStyle.Render("Keyboard and accessibility help") + "\n" +
+		dimStyle.Render("The footer stays contextual; this view contains the complete interaction model.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(body)
+}
+
 // taskRunning reports whether a long-running lifecycle task is in progress, so
 // the activity feed and its expand key are only active while there is work.
 func (m rootShellModel) taskRunning() bool {
-	return m.validateRunning || m.deployStarted || m.teardownStarted
+	return m.packageStarted || m.validateRunning || m.deployStarted || m.teardownStarted
 }
 
 // spinnerActive prevents a completed validation or deployment from scheduling
@@ -2560,27 +2798,20 @@ func (m rootShellModel) renderActivity(width int) string {
 func (m rootShellModel) stepper() string {
 	current := 0
 	switch m.screen {
-	case screenComponents:
+	case screenComponents, screenTemplates:
 		current = 0
 	case screenDashboard, screenProvider, screenOptions, screenDatabricksHost, screenScratchConfirm, screenDevHubs:
 		current = 1
-	case screenTemplates:
+	case screenConfig, screenDirectoryPicker, screenBoxComponents:
 		current = 2
-	case screenConfig, screenDirectoryPicker:
-		current = 3
 	case screenPackage:
+		current = 3
+	case screenValidate, screenDeploy:
 		current = 4
-	case screenValidate:
-		current = 5
-	case screenDeploy:
-		current = 6
 	default:
 		current = 1
 	}
-	labels := []string{"BUILD", "CONNECT", "TEMPLATE", "CONFIG", "PACKAGE", "VALIDATE", "DEPLOY"}
-	if m.width < 100 {
-		labels = []string{"BUILD", "LINK", "TPL", "CONFIG", "PACK", "CHECK", "SHIP"}
-	}
+	labels := []string{"CHOOSE", "CONNECT", "CONFIGURE", "REVIEW", "DEPLOY"}
 	// Interleave each step with a connector so the row reads as a single track:
 	// the traveled path (up to the current step) is green, the road ahead muted.
 	out := make([]string, 0, len(labels)*2-1)
@@ -2625,6 +2856,13 @@ func (m rootShellModel) viewWelcome(width int) string {
 		}
 	}
 	menu := strings.Join(optionRows, "\n")
+	if m.height < 36 {
+		headline := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX ") +
+			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") + accentMark
+		compactDescription := lipgloss.NewStyle().Foreground(ice).Width(min(width-4, 66)).Render("Assemble and deploy Box-backed solution accelerators.")
+		compactRoute := dimStyle.Render("YOUR ROUTE") + "\n" + accent.Render("CHOOSE › CONNECT › CONFIGURE › REVIEW › DEPLOY")
+		return lipgloss.JoinVertical(lipgloss.Left, eyebrow, headline, compactDescription, "", menu, "", compactRoute)
+	}
 
 	// The big wordmark (BOX kicker over the DISPATCH banner) needs a wide, tall
 	// terminal; otherwise fall back to a one-line headline so the block art never
@@ -2666,18 +2904,19 @@ func (m rootShellModel) viewWelcome(width int) string {
 	return hero + "\n\n" + m.routeStrip()
 }
 
-// routeStrip renders the four-phase overview as numbered chips joined by chevrons
-// — a clean flow where every step reads the same and only the destination (Ship)
+// routeStrip renders the five-stage overview as numbered chips joined by chevrons
+// — a clean flow where every step reads the same and only the destination (Deploy)
 // is set apart in green.
 func (m rootShellModel) routeStrip() string {
 	steps := []struct {
 		num, label string
 		tone, text lipgloss.Color
 	}{
-		{"01", "SELECT STACK", cyan, white},
+		{"01", "CHOOSE", cyan, white},
 		{"02", "CONNECT", cyan, white},
-		{"03", "PICK QUICKSTART", cyan, white},
-		{"04", "SHIP", green, navy},
+		{"03", "CONFIGURE", cyan, white},
+		{"04", "REVIEW", cyan, white},
+		{"05", "DEPLOY", green, navy},
 	}
 	label := lipgloss.NewStyle().Foreground(muted).Bold(true).Render("YOUR ROUTE")
 	chevron := lipgloss.NewStyle().Foreground(divider).Render(" › ")
@@ -2727,7 +2966,7 @@ func (m rootShellModel) viewDeploymentHistory(width int) string {
 		dimStyle.Render("Duration") + "  " + selected.Duration,
 		dimStyle.Render("Audit") + "  " + selected.SourcePath,
 	}, "\n")
-	return titleStyle.Render("Deployment history") + "\n" + dimStyle.Render("Credential-free audit records exported by Box Dispatch, newest first.") + "\n\n" +
+	return titleStyle.Render("Deployment history") + "\n" + dimStyle.Render("Select a credential-free audit record to review its resources or reset that deployment.") + "\n\n" +
 		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(rows, "\n")) + "\n\n" +
 		panel.Copy().BorderForeground(cyan).Width(width-4).Padding(1, 2).Render(detail)
 }
@@ -2737,7 +2976,7 @@ func (m rootShellModel) viewComponents(width int) string {
 	if m.componentForm != nil {
 		form = m.componentForm.View()
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Build your solution stack") + "\n" + dimStyle.Render("Box is required. Add only the platforms this solution needs.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Choose a quickstart and providers") + "\n" + dimStyle.Render("Pick the solution architecture first, then add only the platforms it needs.") + "\n\n" + activePane.Copy().Width(width-4).Padding(1, 2).Render(form)
 }
 
 func (m rootShellModel) viewTemplates(width int) string {
@@ -2778,14 +3017,14 @@ func (m rootShellModel) viewDashboard(width int) string {
 		reviseStyle = activePane.Copy().Padding(0, 1).Width((width - 7) / 2)
 	}
 	continueStyle := panel.Copy().Padding(0, 1).Width(width - 4).Height(2)
-	continueText := dimStyle.Render("○  Continue to template selection  ·  Connect every selected service first")
+	continueText := dimStyle.Render("○  Continue to configuration  ·  Connect every selected service first")
 	if m.allSelectedConnected() {
-		continueText = lipgloss.NewStyle().Bold(true).Foreground(green).Render("◆  Continue to template selection  →")
+		continueText = lipgloss.NewStyle().Bold(true).Foreground(green).Render("◆  Continue to configuration  →")
 	}
 	if m.cursor == continueIndex {
 		continueStyle = activePane.Copy().Padding(0, 1).Width(width - 4).Height(2)
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Connect selected services") + "\n" + dimStyle.Render("Confirm access before choosing an industry quickstart.") + "\n\n" +
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Connect selected services") + "\n" + dimStyle.Render("Confirm access for the providers selected with this quickstart.") + "\n\n" +
 		accent.Render(fmt.Sprintf("%d/%d connected", connected, len(providers))) + "\n\n" +
 		panel.Copy().Padding(0, 1).Width(width-4).Render(strings.Join(rows, "\n")) + "\n" +
 		lipgloss.JoinHorizontal(lipgloss.Top,
@@ -2974,7 +3213,7 @@ func (m rootShellModel) viewConfig(width int) string {
 		nameStyle.Render(titleStyle.Render("2  Package directory name")+"\n"+m.packageInput.View()) + "\n" +
 		strategyStyle.Render(titleStyle.Render("3  Deployment strategy")+"\n"+accent.Render(deploymentStrategyLabel(m.answers.deploymentStrategy))+"\n"+dimStyle.Render(m.deploymentNamePreview())) + "\n" +
 		boxStyle.Render(titleStyle.Render("4  Box components")+"\n"+accent.Render(strings.ToUpper(m.boxComponentMode))+dimStyle.Render(fmt.Sprintf(" · %d capabilities", len(m.boxCapabilities)))) + "\n" +
-		continueStyle.Render(lipgloss.NewStyle().Bold(true).Foreground(coral).Render("5  Create package  →")+"\n"+dimStyle.Render(destination))
+		continueStyle.Render(lipgloss.NewStyle().Bold(true).Foreground(coral).Render("5  Review deployment  →")+"\n"+dimStyle.Render(destination))
 }
 
 func (m *rootShellModel) cycleDeploymentStrategy(delta int) {
@@ -3109,22 +3348,34 @@ func (m rootShellModel) viewDirectoryPicker(width int) string {
 }
 
 func (m rootShellModel) viewPackage(width int) string {
-	status := m.spinner.View() + " PACKAGING"
-	color := gold
-	detail := "Cloning the selected quickstart and filtering provider-specific components."
-	if m.packageDone {
-		status, color = "● PACKAGE COMPLETE", green
-		detail = "Created " + m.packagePath + "\nDetached upstream Git metadata and wrote .dispatch/package.json."
-	} else if !m.packageStarted {
-		status, color = "○ PACKAGE NOT CREATED", muted
-		detail = "Press Enter to retry packaging with the configured destination."
+	templateName, repository := "No quickstart selected", ""
+	if m.selected != nil {
+		templateName, repository = m.selected.name, m.selected.repository
 	}
-	content := lipgloss.NewStyle().Bold(true).Foreground(color).Render(status) + "\n\n" + detail
-	if m.packageDone {
-		content += "\n\n" + accent.Render("Press Enter / → to validate provider configuration")
+	selectedCapabilities := 0
+	for _, capability := range m.boxCapabilities {
+		if m.boxCapabilitySelected(capability) {
+			selectedCapabilities++
+		}
 	}
-	return m.stageHeader() + "\n\n" + titleStyle.Render("Assemble the solution package") + "\n" +
-		panel.Copy().BorderForeground(color).Width(width-4).Padding(2, 3).Render(content)
+	details := []string{
+		titleStyle.Render("Quickstart") + "\n" + accent.Render(templateName) + "\n" + dimStyle.Render(repository),
+		titleStyle.Render("Providers") + "\n" + strings.Join(m.selectedProviderLabels(), " + "),
+		titleStyle.Render("Destination") + "\n" + m.packagePath,
+		titleStyle.Render("Deployment strategy") + "\n" + deploymentStrategyLabel(m.answers.deploymentStrategy),
+		titleStyle.Render("Box components") + "\n" + fmt.Sprintf("%s · %d supported capabilities selected", strings.ToUpper(m.boxComponentMode), selectedCapabilities),
+	}
+	pipeline := strings.Join([]string{
+		accent.Render("DEPLOYMENT PIPELINE"),
+		"1  Assemble the selected quickstart package",
+		"2  Validate provider state and prerequisites",
+		"3  Install managed packages and deploy supported missing configuration",
+		"4  Assign and verify required permission sets",
+	}, "\n")
+	return m.stageHeader() + "\n\n" + titleStyle.Render("Review deployment") + "\n" + dimStyle.Render("Nothing has been created or changed yet.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(details, "\n\n")) + "\n" +
+		panel.Copy().BorderForeground(cyan).Width(width-4).Padding(1, 2).Render(pipeline) + "\n" +
+		accent.Render("Enter / →  Confirm and deploy")
 }
 
 func (m rootShellModel) viewValidate(width int) string {
@@ -3254,8 +3505,16 @@ func (m rootShellModel) validationViewport(width int) (prefix, suffix string, li
 		status = m.spinner.View() + " VALIDATING PACKAGE AND PROVIDERS"
 	}
 	footer := accent.Render("Enter / →  Continue to Deploy    r  Validate again")
+	if m.screen == screenDeploy {
+		footer = dimStyle.Render("Deployment continues automatically after validation succeeds.")
+	}
 	if m.validationHasFailures() {
-		footer = lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Deployment blocked: resolve failed validation") + "    " + accent.Render("r  Validate again")
+		footer = lipgloss.NewStyle().Bold(true).Foreground(coral).Render("Deployment stopped: resolve failed validation")
+		if m.screen == screenValidate {
+			footer += "    " + accent.Render("r  Validate again")
+		} else {
+			footer += "    " + accent.Render("←  Return to Review")
+		}
 	}
 	if _, diagnostic := m.lifecycleDiagnostic(); diagnostic != "" {
 		footer += "    " + accent.Render("d  Full error details")
@@ -3373,7 +3632,7 @@ func (m *rootShellModel) followLifecycleTail() {
 	if !m.lifecycleFollowTail {
 		return
 	}
-	if m.screen == screenValidate && m.validateRunning && m.currentValidation != "" {
+	if (m.screen == screenValidate || m.screen == screenDeploy) && m.validateRunning && m.currentValidation != "" {
 		if scroll, ok := m.activeValidationScroll(); ok {
 			m.lifecycleScroll = scroll
 			return
@@ -3437,7 +3696,11 @@ func (m rootShellModel) lifecycleScrollLimit() (int, bool) {
 	case screenValidate:
 		_, _, lines, visible = m.validationViewport(width)
 	case screenDeploy:
-		_, _, lines, visible = m.deployProviderViewport(width)
+		if m.deploymentPhase == deploymentPhaseValidate || (m.deploymentPhase == deploymentPhaseFailed && m.validateDone) {
+			_, _, lines, visible = m.validationViewport(width)
+		} else {
+			_, _, lines, visible = m.deployProviderViewport(width)
+		}
 	default:
 		return 0, false
 	}
@@ -3617,6 +3880,37 @@ func (m rootShellModel) clampedTeardownScroll(total, visible int) int {
 }
 
 func (m rootShellModel) viewDeploy(width int) string {
+	if m.confirmingDeploy && m.deploymentPhase == deploymentPhaseReview {
+		return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" +
+			dimStyle.Render("One confirmation starts package assembly, validation, prerequisites, and provider deployment.") + "\n\n" +
+			activePane.Copy().Width(width-4).Render(m.renderDeployConfirm(width-8))
+	}
+	if m.deploymentPhase == deploymentPhasePackage {
+		status := m.spinner.View() + " ASSEMBLING PACKAGE"
+		if !m.packageStarted {
+			status = "○ PACKAGE ASSEMBLY STOPPED"
+		}
+		steps := []string{
+			lipgloss.NewStyle().Bold(true).Foreground(gold).Render(status),
+			"",
+			lipgloss.NewStyle().Foreground(gold).Render("◆  Assemble package"),
+			dimStyle.Render("○  Validate providers and prerequisites"),
+			dimStyle.Render("○  Apply supported missing configuration"),
+		}
+		body := panel.Copy().Width(width-4).Padding(1, 2).Render(strings.Join(steps, "\n"))
+		if activity := m.renderActivity(width - 4); activity != "" {
+			body += "\n" + activity
+		}
+		return m.stageHeader() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" + dimStyle.Render("Dispatch is running the reviewed deployment pipeline.") + "\n\n" + body
+	}
+	if m.deploymentPhase == deploymentPhaseValidate || (m.deploymentPhase == deploymentPhaseFailed && m.validateDone) {
+		return m.viewValidate(width)
+	}
+	if m.deploymentPhase == deploymentPhaseFailed {
+		return m.stageHeader() + "\n\n" + titleStyle.Render("Deployment stopped") + "\n\n" +
+			panel.Copy().BorderForeground(coral).Width(width-4).Padding(1, 2).Render(lipgloss.NewStyle().Foreground(coral).Render(m.message)) + "\n" +
+			accent.Render("←  Return to Review")
+	}
 	head, action := m.deployHeadAction(width)
 	assets := ""
 	if m.deployDone {
@@ -4153,6 +4447,7 @@ func (m rootShellModel) footer() string {
 	if m.screen == screenHistory {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "browse history")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "review/reset")),
 			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "home")),
 		}
 	}
@@ -4180,6 +4475,12 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
 			key.NewBinding(key.WithKeys("esc", "left", "d"), key.WithHelp("esc/←/d", "back")),
 		}
+	} else if m.screen == screenHelp {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
+			key.NewBinding(key.WithKeys("?", "f1", "esc", "left", "q"), key.WithHelp("?/f1/esc", "close")),
+		}
 	} else if m.screen == screenScratchConfirm {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "switch")),
@@ -4202,8 +4503,11 @@ func (m rootShellModel) footer() string {
 	if m.screen == screenWelcome {
 		quitHelp = "quit"
 	}
-	if !(m.screen == screenConfig && m.configFocus < 2) {
+	if m.screen != screenHelp && !(m.screen == screenConfig && m.configFocus < 2) {
 		bindings = append(bindings, key.NewBinding(key.WithKeys("q"), key.WithHelp("q", quitHelp)))
+	}
+	if m.screen != screenHelp && !(m.screen == screenConfig && m.configFocus < 2) {
+		bindings = append(bindings, key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")))
 	}
 	helpView := m.help.View(bindings)
 	content := helpView

@@ -726,21 +726,28 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 		item.Status, item.Detail = StatusFailed, buildErr.Error()
 		return item
 	}
-	report.step("Deploying Salesforce metadata with sf project deploy")
-	cmd := exec.Command("sf", "project", "deploy", "start", "--source-dir", "force-app", "--target-org", settings.SalesforceAlias, "--json")
-	cmd.Dir = project
-	output, runErr := cmd.CombinedOutput()
-	if runErr != nil {
-		item.Status = StatusFailed
-		item.Detail, item.Diagnostic = salesforceErrorDetails(output, runErr)
-		return item
+	metadata := missingSalesforceMetadata(item.Missing)
+	deployID := ""
+	if len(metadata) > 0 {
+		report.step(fmt.Sprintf("Deploying %d missing Salesforce metadata components", len(metadata)))
+		cmd := exec.Command("sf", salesforceMetadataDeployArgs(settings.SalesforceAlias, metadata)...)
+		cmd.Dir = project
+		output, runErr := cmd.CombinedOutput()
+		if runErr != nil {
+			item.Status = StatusFailed
+			item.Detail, item.Diagnostic = salesforceErrorDetails(output, runErr)
+			return item
+		}
+		var deployResponse struct {
+			Result struct {
+				ID string `json:"id"`
+			} `json:"result"`
+		}
+		_ = decodeSalesforceJSON(output, &deployResponse)
+		deployID = deployResponse.Result.ID
+	} else {
+		report.step("Salesforce metadata is already present; skipping metadata deployment")
 	}
-	var deployResponse struct {
-		Result struct {
-			ID string `json:"id"`
-		} `json:"result"`
-	}
-	_ = json.Unmarshal(output, &deployResponse)
 	instanceURL := ""
 	orgID := ""
 	orgOutput, orgErr := exec.Command("sf", "org", "display", "--target-org", settings.SalesforceAlias, "--json").Output()
@@ -759,10 +766,12 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 		}
 	}
 	deployURL := ""
-	if instanceURL != "" && deployResponse.Result.ID != "" {
-		deployURL = instanceURL + "/" + deployResponse.Result.ID
+	if instanceURL != "" && deployID != "" {
+		deployURL = instanceURL + "/" + deployID
 	}
-	addResource(&item, "Salesforce metadata", "metadata_deployment", "Salesforce metadata deployment", deployResponse.Result.ID, deployURL)
+	if deployID != "" {
+		addResource(&item, "Salesforce metadata", "metadata_deployment", "Salesforce metadata deployment", deployID, deployURL)
+	}
 	report.step("Assigning required Salesforce permission sets")
 	if permissionErr := ensureSalesforcePermissionSets(settings.SalesforceAlias, orgInfo.Username, manifest.Salesforce.RequiredPermissionSets); permissionErr != nil {
 		item.Status = StatusFailed
@@ -1064,6 +1073,24 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	if err != nil {
 		return item, err
 	}
+	missing := missingSalesforceComponents(expected, existing)
+	if len(missing) > 0 {
+		report.step("Checking missing Salesforce metadata for source-tracking conflicts")
+		conflicts, previewErr := inspectSalesforceMetadataConflicts(project, settings.SalesforceAlias, missing)
+		if previewErr != nil {
+			item.Status = StatusFailed
+			if failure, ok := previewErr.(*salesforceorg.Failure); ok {
+				item.Detail = failure.Summary
+				item.Diagnostic = failure.Diagnostic
+			} else {
+				item.Detail = previewErr.Error()
+			}
+			return item, nil
+		}
+		for _, component := range conflicts {
+			existing[component] = true
+		}
+	}
 	result := classifySalesforceInventory(item, expected, existing, settings.SalesforceAlias)
 	result = addSalesforcePackageResults(result, manifestContract.Salesforce.RequiredPackages, installedPackages, settings.SalesforceAlias)
 	return addSalesforcePermissionSetResults(result, manifestContract.Salesforce.RequiredPermissionSets, permissionInventory.Assigned, settings.SalesforceAlias), nil
@@ -1342,6 +1369,88 @@ func salesforcePackageInstallArgs(requirement solution.SalesforcePackageRequirem
 		"--no-prompt",
 		"--json",
 	}
+}
+
+func missingSalesforceMetadata(missing []string) []string {
+	metadata := make([]string, 0, len(missing))
+	for _, component := range missing {
+		metadataType, _, ok := strings.Cut(component, ":")
+		if !ok {
+			continue
+		}
+		switch metadataType {
+		case "Managed Package", "Permission Set Assignment":
+			continue
+		default:
+			metadata = append(metadata, component)
+		}
+	}
+	slices.Sort(metadata)
+	return metadata
+}
+
+func missingSalesforceComponents(expected, existing map[string]bool) []string {
+	missing := make([]string, 0, len(expected))
+	for component := range expected {
+		if !existing[component] {
+			missing = append(missing, component)
+		}
+	}
+	slices.Sort(missing)
+	return missing
+}
+
+func salesforceMetadataDeployArgs(target string, metadata []string) []string {
+	args := []string{"project", "deploy", "start", "--target-org", target, "--json"}
+	for _, component := range metadata {
+		args = append(args, "--metadata", component)
+	}
+	return args
+}
+
+func salesforceMetadataPreviewArgs(target string, metadata []string) []string {
+	args := []string{"project", "deploy", "preview", "--target-org", target, "--json"}
+	for _, component := range metadata {
+		args = append(args, "--metadata", component)
+	}
+	return args
+}
+
+func inspectSalesforceMetadataConflicts(project, target string, metadata []string) ([]string, error) {
+	cmd := exec.Command("sf", salesforceMetadataPreviewArgs(target, metadata)...)
+	cmd.Dir = project
+	output, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		return nil, salesforceorg.NewFailure("Unable to preview missing Salesforce metadata. Recheck the org connection and retry.", output, runErr)
+	}
+	conflicts, parseErr := readSalesforceMetadataConflicts(output)
+	if parseErr != nil {
+		return nil, salesforceorg.NewFailure("Salesforce CLI returned an unreadable metadata preview. Update the Salesforce CLI and retry.", output, parseErr)
+	}
+	return conflicts, nil
+}
+
+func readSalesforceMetadataConflicts(output []byte) ([]string, error) {
+	var preview struct {
+		Result struct {
+			Conflicts []struct {
+				Type     string `json:"type"`
+				FullName string `json:"fullName"`
+			} `json:"conflicts"`
+		} `json:"result"`
+	}
+	if err := decodeSalesforceJSON(output, &preview); err != nil {
+		return nil, err
+	}
+	conflicts := make([]string, 0, len(preview.Result.Conflicts))
+	for _, conflict := range preview.Result.Conflicts {
+		if strings.TrimSpace(conflict.Type) == "" || strings.TrimSpace(conflict.FullName) == "" {
+			continue
+		}
+		conflicts = append(conflicts, conflict.Type+":"+conflict.FullName)
+	}
+	slices.Sort(conflicts)
+	return conflicts, nil
 }
 
 func readSalesforceManifest(path string) (map[string]bool, error) {

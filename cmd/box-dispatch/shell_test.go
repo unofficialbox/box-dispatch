@@ -18,6 +18,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
 
 func updatedShell(t *testing.T, model rootShellModel, key tea.KeyType) rootShellModel {
@@ -382,33 +383,28 @@ func TestFailedValidationBlocksDeployAndOpensDiagnostic(t *testing.T) {
 	}
 }
 
-func TestConnectedServicesUnlockConfigurationAndPackage(t *testing.T) {
+func TestConnectedServicesUnlockConfigurationAndReview(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.screen = screenDashboard
 	model.statuses["box"] = connectionConnected
 	choice := model.templates[0]
 	model.selected = &choice
 
-	// Connect precedes template selection, which in turn unlocks configuration.
-	model = updatedShell(t, model, tea.KeyRight)
-	if model.screen != screenTemplates {
-		t.Fatalf("screen = %v, want templates", model.screen)
-	}
-
+	// Choose already captured the template, so Connect unlocks configuration directly.
 	model = updatedShell(t, model, tea.KeyRight)
 	if model.screen != screenConfig {
 		t.Fatalf("screen = %v, want config", model.screen)
 	}
 
-	// Focus 4 is the confirm row that starts packaging.
+	// Focus 4 opens Review without creating the package yet.
 	model.setConfigFocus(4)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(rootShellModel)
 	if model.screen != screenPackage {
-		t.Fatalf("screen = %v, want package", model.screen)
+		t.Fatalf("screen = %v, want review", model.screen)
 	}
-	if cmd == nil {
-		t.Fatal("entering Package did not start package creation")
+	if cmd != nil || model.packageStarted || model.deploymentPhase != deploymentPhaseReview {
+		t.Fatal("entering Review unexpectedly started package creation")
 	}
 }
 
@@ -511,34 +507,128 @@ func TestConfigViewExplainsBothFieldsAndContinueAction(t *testing.T) {
 	model.width = 120
 	model.height = 40
 	view := model.View()
-	for _, expected := range []string{"Parent directory", "Package directory name", "Create package", "b browse"} {
+	for _, expected := range []string{"Parent directory", "Package directory name", "Review deployment", "b browse"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Config view does not contain %q", expected)
 		}
 	}
 }
 
-func TestValidateRunsAutomaticallyOnlyOnFirstEntry(t *testing.T) {
+func TestDeploymentPipelineReusesPackageAndStartsValidation(t *testing.T) {
 	model := newSetupOnlyShell()
-	model.screen = screenPackage
+	model.screen = screenDeploy
 	model.packageDone = true
 	model.packagePath = t.TempDir()
+	model.deploymentPhase = deploymentPhaseReview
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated, cmd := model.startDeploymentPipeline()
 	model = updated.(rootShellModel)
-	if model.screen != screenValidate || !model.validateStarted || !model.validateRunning || cmd == nil {
-		t.Fatal("first Validate entry did not start validation")
+	if model.screen != screenDeploy || model.deploymentPhase != deploymentPhaseValidate || !model.validateStarted || !model.validateRunning || cmd == nil {
+		t.Fatal("unified Deploy screen did not start validation for the assembled package")
+	}
+}
+
+func TestChooseCombinesQuickstartAndProviderSelection(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenComponents
+	_ = model.componentForm.Init()
+	view := model.viewComponents(112)
+	for _, expected := range []string{"Choose a quickstart and providers", "Choose a solution quickstart", "Choose platform components"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("combined Choose view does not contain %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestDefaultWorkflowMovesThroughFiveStages(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenComponents
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(rootShellModel)
+	if model.screen != screenDashboard || model.selected == nil {
+		t.Fatalf("Choose did not enter Connect with a selected quickstart: screen=%v selected=%v", model.screen, model.selected)
 	}
 
-	model.validateRunning = false
-	model.screen = screenPackage
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRight})
-	model = updated.(rootShellModel)
-	if model.screen != screenValidate {
-		t.Fatalf("screen = %v, want validate", model.screen)
+	for _, provider := range model.selectedProviders() {
+		model.statuses[provider] = connectionConnected
 	}
-	if cmd != nil {
-		t.Fatal("returning to Validate unexpectedly started validation again")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(rootShellModel)
+	if model.screen != screenConfig {
+		t.Fatalf("Connect did not enter Configure: screen=%v", model.screen)
+	}
+
+	model.directoryInput.SetValue(t.TempDir())
+	model.packageInput.SetValue("five-stage-package")
+	model.setConfigFocus(4)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.screen != screenPackage || model.deploymentPhase != deploymentPhaseReview || model.packageStarted {
+		t.Fatalf("Configure did not enter a non-mutating Review: screen=%v phase=%q packageStarted=%v", model.screen, model.deploymentPhase, model.packageStarted)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.screen != screenDeploy || !model.confirmingDeploy {
+		t.Fatalf("Review did not open the Deploy confirmation: screen=%v confirming=%v", model.screen, model.confirmingDeploy)
+	}
+	model.deployConfirmCursor = 0
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.screen != screenDeploy || model.deploymentPhase != deploymentPhasePackage || !model.packageStarted || cmd == nil {
+		t.Fatalf("Deploy did not start the unified pipeline: screen=%v phase=%q packageStarted=%v", model.screen, model.deploymentPhase, model.packageStarted)
+	}
+}
+
+func TestPackageCompletionAutomaticallyStartsValidation(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenDeploy
+	model.deploymentPhase = deploymentPhasePackage
+	model.packageStarted = true
+	root := t.TempDir()
+
+	updated, cmd := model.Update(packageFinishedMsg{manifest: workspace.PackageManifest{Destination: root}})
+	model = updated.(rootShellModel)
+	if model.deploymentPhase != deploymentPhaseValidate || !model.validateStarted || !model.validateRunning || cmd == nil {
+		t.Fatalf("package completion did not continue into validation: phase=%q started=%v running=%v", model.deploymentPhase, model.validateStarted, model.validateRunning)
+	}
+}
+
+func TestValidationCompletionAutomaticallyFinishesNoopDeployment(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenDeploy
+	model.deploymentPhase = deploymentPhaseValidate
+	model.validateRunning = true
+	model.validationItems = []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}
+	model.validationQueue = nil
+
+	updated, cmd := model.startNextValidation()
+	model = updated.(rootShellModel)
+	if cmd != nil || !model.validateDone || !model.deployDone || model.deploymentPhase != deploymentPhaseComplete {
+		t.Fatalf("successful validation did not continue through a no-op deployment: phase=%q validateDone=%v deployDone=%v", model.deploymentPhase, model.validateDone, model.deployDone)
+	}
+}
+
+func TestDeploymentHistoryIsTheOnlyResetEntryPoint(t *testing.T) {
+	model := newSetupOnlyShell()
+	if len(welcomeOptions) != 2 {
+		t.Fatalf("welcome options = %v, want only Start and History", welcomeOptions)
+	}
+	model.screen = screenHistory
+	model.deploymentHistory = []deploymentaudit.DeploymentRecord{{
+		DeploymentID: "20260811T000000Z",
+		PackageRoot:  "/tmp/five-stage-package",
+		Providers: []deploymentaudit.ProviderRecord{{
+			Provider:  "box",
+			Resources: []lifecycle.ResourceReference{{Provider: "box", Kind: "folder", ID: "123", Name: "Workspace"}},
+		}},
+	}}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(rootShellModel)
+	if model.screen != screenTeardown || model.teardownRecord == nil {
+		t.Fatalf("history did not open the reset preview: screen=%v record=%v", model.screen, model.teardownRecord)
 	}
 }
 
@@ -600,6 +690,16 @@ func TestWorkflowHeaderUsesStepsWithoutArtificialProgress(t *testing.T) {
 		}
 		if strings.Contains(header, "OVERALL PROGRESS") || strings.Contains(header, "%") {
 			t.Fatalf("stage %v renders navigation position as progress: %q", stage, header)
+		}
+		for _, expected := range []string{"CHOOSE", "CONNECT", "CONFIGURE", "REVIEW", "DEPLOY"} {
+			if !strings.Contains(header, expected) {
+				t.Fatalf("stage %v header omitted %q: %q", stage, expected, header)
+			}
+		}
+		for _, obsolete := range []string{"BUILD", "TEMPLATE", "PACKAGE", "VALIDATE"} {
+			if strings.Contains(header, obsolete) {
+				t.Fatalf("stage %v header retained obsolete stage %q: %q", stage, obsolete, header)
+			}
 		}
 	}
 }
@@ -895,10 +995,13 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	// Wide, tall terminals render DISPATCH as an ANSI-shadow banner (block glyphs)
 	// with a large chevron accent, so assert the branding, the wordmark banner,
 	// the menu, the route strip, and the punk-rock mark.
-	for _, expected := range []string{"COMMUNITY-BUILT", "🤘", "██", "Start new deployment", "SELECT STACK", "PICK QUICKSTART"} {
+	for _, expected := range []string{"COMMUNITY-BUILT", "🤘", "██", "Start new deployment", "CHOOSE", "CONFIGURE", "REVIEW", "DEPLOY"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("welcome view does not contain %q", expected)
 		}
+	}
+	if strings.Contains(view, "Reset demo environment") {
+		t.Fatal("destructive reset remains on the default home menu")
 	}
 	// Narrow or short terminals fall back to a one-line DISPATCH headline with the
 	// small » accent.
@@ -911,6 +1014,157 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	// Product branding lives in the shared header rather than the welcome body.
 	if header := model.header(112); !strings.Contains(header, "UNOFFICIALBOX.DEV") {
 		t.Fatalf("header does not carry product branding: %q", header)
+	}
+}
+
+func TestExpandedHelpIsDiscoverableAndReturnsToCaller(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen, model.width, model.height = screenDashboard, 100, 30
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	model = updated.(rootShellModel)
+	if model.screen != screenHelp || model.helpReturn != screenDashboard {
+		t.Fatalf("? did not open help from Connect: screen=%v return=%v", model.screen, model.helpReturn)
+	}
+	view := model.View()
+	allHelp := strings.Join(model.expandedHelpLines(92), "\n")
+	for _, expected := range []string{"Keyboard and accessibility help", "WORKFLOW"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expanded help omitted visible heading %q:\n%s", expected, view)
+		}
+	}
+	for _, expected := range []string{"ACCESSIBLE OUTPUT", "NO_COLOR"} {
+		if !strings.Contains(allHelp, expected) {
+			t.Fatalf("expanded help content omitted %q:\n%s", expected, allHelp)
+		}
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if returned := updated.(rootShellModel); returned.screen != screenDashboard {
+		t.Fatalf("help returned to screen %v, want Connect", returned.screen)
+	}
+}
+
+func TestAccessibleFormPreferenceLoadsFromBCL(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveUISettings(config.UISettings{AccessibleForms: true}); err != nil {
+		t.Fatal(err)
+	}
+	model := newSetupOnlyShell()
+	if !model.accessibleForms {
+		t.Fatal("metadata.accessibleForms did not enable accessible form mode")
+	}
+}
+
+func TestAccessibleChooseCompletionContinuesIntoConnect(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.accessibleForms = true
+	model.screen = screenComponents
+	updated, cmd := model.Update(accessibleFormFinishedMsg{kind: accessibleChooseForm})
+	model = updated.(rootShellModel)
+	if model.screen != screenDashboard || model.selected == nil || cmd == nil {
+		t.Fatalf("accessible Choose did not continue into Connect: screen=%v selected=%v", model.screen, model.selected)
+	}
+}
+
+func TestCoreViewsFitSupportedTerminalSizes(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{80, 24}, {100, 30}, {120, 40}} {
+		for _, screen := range []shellScreen{screenWelcome, screenHelp, screenValidate, screenDeploy} {
+			model := newSetupOnlyShell()
+			model.width, model.height, model.screen = size.width, size.height, screen
+			if screen == screenHelp {
+				model.helpReturn = screenWelcome
+			}
+			if screen == screenValidate || screen == screenDeploy {
+				model.validateDone = true
+				model.validationItems = []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent, Detail: "Box configuration is present."}}
+				model.validationProgress = map[string]float64{"box": 1}
+			}
+			if lines := strings.Count(model.View(), "\n") + 1; lines > size.height {
+				t.Fatalf("%dx%d screen %v rendered %d lines", size.width, size.height, screen, lines)
+			}
+		}
+	}
+}
+
+func TestExpandedHelpScrollStopsAtBothBoundaries(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height, model.screen = 80, 24, screenHelp
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyDown)
+	}
+	limit := model.helpScrollLimit()
+	if model.helpScroll != limit || limit == 0 {
+		t.Fatalf("help bottom offset = %d, limit = %d", model.helpScroll, limit)
+	}
+	model = updatedShell(t, model, tea.KeyDown)
+	if model.helpScroll != limit {
+		t.Fatalf("help wrapped after its final row: %d", model.helpScroll)
+	}
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyUp)
+	}
+	if model.helpScroll != 0 {
+		t.Fatalf("help top offset = %d, want 0", model.helpScroll)
+	}
+}
+
+func TestDiagnosticScrollStopsAtBothBoundaries(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height, model.screen = 80, 24, screenDiagnostic
+	model.diagnosticBody = strings.Repeat("diagnostic line with wrapped content\n", 40)
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyDown)
+	}
+	width := min(max(model.width-8, 64), 112)
+	limit := max(len(model.diagnosticLines(width))-model.diagnosticCapacity(), 0)
+	if model.diagnosticScroll != limit || limit == 0 {
+		t.Fatalf("diagnostic bottom offset = %d, limit = %d", model.diagnosticScroll, limit)
+	}
+	model = updatedShell(t, model, tea.KeyDown)
+	if model.diagnosticScroll != limit {
+		t.Fatalf("diagnostic wrapped after its final row: %d", model.diagnosticScroll)
+	}
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyUp)
+	}
+	if model.diagnosticScroll != 0 {
+		t.Fatalf("diagnostic top offset = %d, want 0", model.diagnosticScroll)
+	}
+}
+
+func TestTeardownAndDeployedAssetsStopAtBoundaries(t *testing.T) {
+	resources := make([]lifecycle.ResourceReference, 40)
+	for i := range resources {
+		resources[i] = lifecycle.ResourceReference{Provider: "box", Kind: "file", Name: fmt.Sprintf("file-%02d", i), ID: fmt.Sprint(i)}
+	}
+
+	teardown := newSetupOnlyShell()
+	teardown.width, teardown.height, teardown.screen = 80, 24, screenTeardown
+	teardown.teardownRecord = &deploymentaudit.DeploymentRecord{Providers: []deploymentaudit.ProviderRecord{{Provider: "box", Resources: resources}}}
+	for range 100 {
+		teardown = updatedShell(t, teardown, tea.KeyDown)
+	}
+	teardownLimit := max(len(teardown.teardownBodyRows(teardown.width))-teardown.teardownVisibleRows(), 0)
+	if teardown.teardownScroll != teardownLimit || teardownLimit == 0 {
+		t.Fatalf("teardown bottom offset = %d, limit = %d", teardown.teardownScroll, teardownLimit)
+	}
+	teardown = updatedShell(t, teardown, tea.KeyDown)
+	if teardown.teardownScroll != teardownLimit {
+		t.Fatalf("teardown wrapped after its final row: %d", teardown.teardownScroll)
+	}
+
+	deployed := newSetupOnlyShell()
+	deployed.width, deployed.height, deployed.screen, deployed.deployDone = 80, 24, screenDeploy, true
+	deployed.validationItems = []lifecycle.Item{{Provider: "box", Resources: resources}}
+	for range 100 {
+		deployed = updatedShell(t, deployed, tea.KeyDown)
+	}
+	assetLimit := max(len(resources)-deployed.deployTableCapacity(), 0)
+	if deployed.deployAssetsScroll != assetLimit || assetLimit == 0 {
+		t.Fatalf("deployed-assets bottom offset = %d, limit = %d", deployed.deployAssetsScroll, assetLimit)
+	}
+	deployed = updatedShell(t, deployed, tea.KeyDown)
+	if deployed.deployAssetsScroll != assetLimit {
+		t.Fatalf("deployed assets wrapped after their final row: %d", deployed.deployAssetsScroll)
 	}
 }
 

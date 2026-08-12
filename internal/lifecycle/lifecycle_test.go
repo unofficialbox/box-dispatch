@@ -301,6 +301,78 @@ func TestSalesforceInventoryDeploysOnlyWhenComponentsAreMissing(t *testing.T) {
 	}
 }
 
+func TestSalesforceMetadataDeployTargetsOnlyMissingMetadata(t *testing.T) {
+	missing := []string{
+		"Permission Set Assignment:Box Sign",
+		"ListView:CLM_Contract__c.All",
+		"Managed Package:Box for Salesforce 5.43",
+		"FlexiPage:CLM_Contract_Record_Page",
+	}
+	metadata := missingSalesforceMetadata(missing)
+	want := []string{"FlexiPage:CLM_Contract_Record_Page", "ListView:CLM_Contract__c.All"}
+	if !slices.Equal(metadata, want) {
+		t.Fatalf("missing Salesforce metadata = %#v, want %#v", metadata, want)
+	}
+
+	args := salesforceMetadataDeployArgs("dispatch-scratch", metadata)
+	joined := strings.Join(args, " ")
+	for _, component := range want {
+		if !strings.Contains(joined, "--metadata "+component) {
+			t.Fatalf("Salesforce deploy args omitted %q: %q", component, joined)
+		}
+	}
+	for _, unwanted := range []string{"--source-dir", "Permission Set Assignment", "Managed Package"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("Salesforce deploy args unexpectedly contain %q: %q", unwanted, joined)
+		}
+	}
+}
+
+func TestSalesforceMetadataDeploySkipsWhenOnlyPrerequisitesRemain(t *testing.T) {
+	missing := []string{
+		"Permission Set Assignment:Box Sign",
+		"Managed Package:Box for Salesforce 5.43",
+	}
+	if metadata := missingSalesforceMetadata(missing); len(metadata) != 0 {
+		t.Fatalf("missing Salesforce metadata = %#v, want none", metadata)
+	}
+}
+
+func TestSalesforceMetadataPreviewTreatsConflictsAsExisting(t *testing.T) {
+	output := []byte("Warning: Salesforce CLI update available\n" + `{
+  "status": 0,
+  "result": {
+    "toDeploy": [{"type":"FlexiPage","fullName":"CLM_Contract_Record_Page"}],
+    "conflicts": [{"type":"ListView","fullName":"CLM_Contract__c.All"}]
+  }
+}`)
+	conflicts, err := readSalesforceMetadataConflicts(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ListView:CLM_Contract__c.All"}
+	if !slices.Equal(conflicts, want) {
+		t.Fatalf("Salesforce metadata conflicts = %#v, want %#v", conflicts, want)
+	}
+
+	expected := map[string]bool{
+		"FlexiPage:CLM_Contract_Record_Page": true,
+		"ListView:CLM_Contract__c.All":       true,
+	}
+	existing := map[string]bool{}
+	for _, component := range conflicts {
+		existing[component] = true
+	}
+	missing := missingSalesforceComponents(expected, existing)
+	if !slices.Equal(missing, []string{"FlexiPage:CLM_Contract_Record_Page"}) {
+		t.Fatalf("missing Salesforce components = %#v", missing)
+	}
+	args := strings.Join(salesforceMetadataPreviewArgs("dispatch-scratch", missing), " ")
+	if !strings.Contains(args, "project deploy preview") || !strings.Contains(args, "--metadata FlexiPage:CLM_Contract_Record_Page") {
+		t.Fatalf("Salesforce metadata preview args = %q", args)
+	}
+}
+
 func TestSalesforcePlanIncludesManagedPackageFromStart(t *testing.T) {
 	root := t.TempDir()
 	if err := solution.WriteBundled(root, "clm"); err != nil {
