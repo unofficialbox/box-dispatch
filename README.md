@@ -136,6 +136,12 @@ an unsupported capability visible only shows a locked reference row—it cannot 
 or deployed. See [`docs/PUBLIC_API_GAPS.md`](docs/PUBLIC_API_GAPS.md) and the tracked
 [`config/runtime/ui-settings.example.bcl`](config/runtime/ui-settings.example.bcl).
 
+Press `?` or `F1` anywhere outside an active text field to open the expanded keyboard and
+accessibility help. Set `metadata.accessibleForms` to `true` in `.dispatch/ui-settings.bcl` to
+use Huh's screen-reader-oriented form prompts. Set the standard `NO_COLOR` environment variable
+or pass `--no-color` to disable ANSI colors. `TERM=dumb` also disables color and selects the
+plain, non-full-screen command output.
+
 ### Salesforce org lifecycle safety
 
 The launch shell treats Salesforce org health as part of connectivity, not as a one-time

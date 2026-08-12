@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
@@ -37,7 +39,7 @@ func newRootCommand() *cobra.Command {
 			offline, _ := cmd.Flags().GetBool("offline")
 			// The full-screen shell needs a terminal; anything scripted or
 			// JSON-bound falls back to the plain connectivity report.
-			if isTTY() && !asJSON(cmd) {
+			if isTTY() && terminalSupportsFullScreen() && !asJSON(cmd) {
 				return runLaunchShell()
 			}
 			return runConnectivityCheck(cmd, scenario, platform, offline, false)
@@ -46,6 +48,11 @@ func newRootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().String("profile", "", "configuration profile (defaults to BOX_DISPATCH_PROFILE or default)")
 	root.PersistentFlags().Bool("json", false, "machine-readable JSON output")
+	root.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		noColor, _ := cmd.Flags().GetBool("no-color")
+		configureTerminalPresentation(noColor)
+	}
 	addConnectivityFlags(root)
 
 	root.AddGroup(
@@ -86,6 +93,16 @@ func newRootCommand() *cobra.Command {
 
 func isTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func terminalSupportsFullScreen() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
+}
+
+func configureTerminalPresentation(explicitNoColor bool) {
+	if explicitNoColor || os.Getenv("NO_COLOR") != "" || !terminalSupportsFullScreen() {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
 }
 
 func asJSON(cmd *cobra.Command) bool {
@@ -161,7 +178,7 @@ func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline
 	var report checker.CheckReport
 	var err error
 
-	interactive := preferInteractive && !asJSON(cmd)
+	interactive := preferInteractive && terminalSupportsFullScreen() && !asJSON(cmd)
 	if interactive {
 		p := checker.NewInteractiveCheckModel(cfg)
 		if _, err := tea.NewProgram(p).Run(); err != nil {

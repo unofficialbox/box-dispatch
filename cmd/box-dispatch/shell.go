@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -85,6 +86,7 @@ const (
 	screenTeardown
 	screenBoxCCG
 	screenBoxSwitch
+	screenHelp
 	screenDiagnostic
 	screenScratchConfirm
 	screenDevHubs
@@ -161,6 +163,35 @@ type packageFinishedMsg struct {
 	manifest workspace.PackageManifest
 	err      error
 }
+
+type accessibleFormKind string
+
+const (
+	accessibleChooseForm   accessibleFormKind = "choose"
+	accessibleTemplateForm accessibleFormKind = "template"
+	accessibleTeardownForm accessibleFormKind = "teardown"
+	accessibleBoxCCGForm   accessibleFormKind = "box-ccg"
+)
+
+type accessibleFormFinishedMsg struct {
+	kind accessibleFormKind
+	err  error
+}
+
+type accessibleFormCommand struct {
+	form   *huh.Form
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (c *accessibleFormCommand) Run() error {
+	return c.form.WithAccessible(true).WithInput(c.stdin).WithOutput(c.stdout).Run()
+}
+
+func (c *accessibleFormCommand) SetStdin(reader io.Reader)  { c.stdin = reader }
+func (c *accessibleFormCommand) SetStdout(writer io.Writer) { c.stdout = writer }
+func (c *accessibleFormCommand) SetStderr(writer io.Writer) { c.stderr = writer }
 
 // activityMsg is one live progress line emitted by a running lifecycle task.
 type activityMsg struct {
@@ -295,6 +326,9 @@ type rootShellModel struct {
 	activityExpanded      bool         // whether the activity feed is expanded
 	activityCh            chan tea.Msg // steps + final result from the running task
 	help                  help.Model
+	helpReturn            shellScreen
+	helpScroll            int
+	accessibleForms       bool
 	answers               *wizardAnswers
 	componentForm         *huh.Form
 	templateForm          *huh.Form
@@ -457,6 +491,9 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 		progress:            bar,
 		help:                helpModel,
 		answers:             answers,
+	}
+	if uiSettings, err := shellstate.LoadUISettings(); err == nil {
+		m.accessibleForms = uiSettings.AccessibleForms
 	}
 	m.rebuildComponentForm()
 	m.rebuildTemplateForm()
@@ -626,7 +663,7 @@ func (m *rootShellModel) rebuildComponentForm() {
 					return nil
 				}),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 }
 
 func (m *rootShellModel) rebuildTemplateForm() {
@@ -643,7 +680,7 @@ func (m *rootShellModel) rebuildTemplateForm() {
 				Options(options...).
 				Value(&m.answers.templateID),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 }
 
 func (m *rootShellModel) prepareConfigInputs() {
@@ -1146,9 +1183,9 @@ func (m rootShellModel) requestTeardownConfirmation() (tea.Model, tea.Cmd) {
 					return nil
 				}),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(false).WithAccessible(m.accessibleForms).WithWidth(76)
 	m.message = "Type the package name to confirm the reset."
-	return m, m.teardownConfirmForm.Init()
+	return m, m.formCommand(m.teardownConfirmForm, accessibleTeardownForm)
 }
 
 // teardownConfirmationPhrase is the package directory name, which is specific to
@@ -1214,6 +1251,15 @@ func (m rootShellModel) Init() tea.Cmd {
 	return m.componentForm.Init()
 }
 
+func (m rootShellModel) formCommand(form *huh.Form, kind accessibleFormKind) tea.Cmd {
+	if !m.accessibleForms {
+		return form.Init()
+	}
+	return tea.Exec(&accessibleFormCommand{form: form}, func(err error) tea.Msg {
+		return accessibleFormFinishedMsg{kind: kind, err: err}
+	})
+}
+
 func (m rootShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.route(msg)
 }
@@ -1258,6 +1304,30 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// bottom of the screen.
 		m.followLifecycleTail()
 		return m, waitForActivity(m.activityCh)
+	case accessibleFormFinishedMsg:
+		if msg.err != nil {
+			m.message = "Accessible form stopped: " + msg.err.Error()
+			return m, nil
+		}
+		switch msg.kind {
+		case accessibleChooseForm:
+			if err := m.syncComponentAnswers(); err != nil {
+				m.message = err.Error()
+				m.rebuildComponentForm()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
+			}
+			m.selectTemplate()
+			m.screen, m.cursor = screenDashboard, 0
+			return m.beginChecks(m.selectedProviders())
+		case accessibleTemplateForm:
+			return m.selectTemplateAndConfigure()
+		case accessibleTeardownForm:
+			m.confirmingTeardown = false
+			return m.startTeardown()
+		case accessibleBoxCCGForm:
+			return m.saveBoxCCG()
+		}
+		return m, nil
 	case checkFinishedMsg:
 		if msg.err != nil {
 			m.statuses[msg.provider] = connectionFailed
@@ -1584,6 +1654,34 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.screen == screenHelp {
+		switch key.String() {
+		case "?", "f1", "esc", "left", "q":
+			m.screen = m.helpReturn
+			return m, nil
+		case "down", "j", "pgdown":
+			delta := 1
+			if key.String() == "pgdown" {
+				delta = m.helpVisibleRows()
+			}
+			m.helpScroll = clampLifecycleScroll(m.helpScroll, delta, m.helpScrollLimit())
+			return m, nil
+		case "up", "k", "pgup":
+			delta := -1
+			if key.String() == "pgup" {
+				delta = -m.helpVisibleRows()
+			}
+			m.helpScroll = clampLifecycleScroll(m.helpScroll, delta, m.helpScrollLimit())
+			return m, nil
+		}
+		return m, nil
+	}
+	if (key.String() == "?" || key.String() == "f1") && !(m.screen == screenConfig && m.configFocus < 2) {
+		m.helpReturn = m.screen
+		m.helpScroll = 0
+		m.screen = screenHelp
+		return m, nil
+	}
 	if m.screen == screenDiagnostic {
 		switch key.String() {
 		case "esc", "left", "d":
@@ -1638,7 +1736,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "enter" || key.String() == "right" {
 			if m.cursor == 0 {
 				m.screen = screenComponents
-				return m, m.componentForm.Init()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			}
 			history, err := deploymentaudit.ListDeployments()
 			m.deploymentHistory = history
@@ -1713,7 +1811,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := m.syncComponentAnswers(); err != nil {
 				m.message = err.Error()
 				m.rebuildComponentForm()
-				return m, m.componentForm.Init()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			}
 			m.selectTemplate()
 			m.screen, m.cursor = screenDashboard, 0
@@ -1742,7 +1840,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "left" {
 			m.rebuildComponentForm()
 			m.screen, m.cursor = screenComponents, 0
-			return m, m.componentForm.Init()
+			return m, m.formCommand(m.componentForm, accessibleChooseForm)
 		}
 		if key.String() == "right" {
 			if m.allSelectedConnected() {
@@ -1761,7 +1859,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursor == len(m.selectedProviders())+1 {
 				m.rebuildComponentForm()
 				m.screen, m.cursor = screenComponents, 0
-				return m, m.componentForm.Init()
+				return m, m.formCommand(m.componentForm, accessibleChooseForm)
 			} else if m.allSelectedConnected() {
 				return m.selectTemplateAndConfigure()
 			} else {
@@ -2197,10 +2295,10 @@ func (m rootShellModel) openBoxCCGForm() (tea.Model, tea.Cmd) {
 				Description("Box user ID when subject is user, enterprise ID when enterprise").
 				Value(m.ccgSubjectID).Validate(requiredField("Subject ID")),
 		),
-	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithWidth(76)
+	).WithTheme(dispatchHuhTheme()).WithShowHelp(true).WithAccessible(m.accessibleForms).WithWidth(76)
 	m.screen = screenBoxCCG
 	m.message = "Enter the CCG app credentials. Esc cancels."
-	return m, m.boxCCGForm.Init()
+	return m, m.formCommand(m.boxCCGForm, accessibleBoxCCGForm)
 }
 
 func requiredField(label string) func(string) error {
@@ -2566,6 +2664,8 @@ func (m rootShellModel) View() string {
 		body = m.viewBoxCCG(contentWidth)
 	case screenBoxSwitch:
 		body = m.viewBoxSwitch(contentWidth)
+	case screenHelp:
+		body = m.viewExpandedHelp(contentWidth)
 	case screenDiagnostic:
 		body = m.viewDiagnostic(contentWidth)
 	case screenScratchConfirm:
@@ -2587,6 +2687,49 @@ func (m rootShellModel) header(width int) string {
 	row := mark + product + tag + strings.Repeat(" ", gap) + domain
 	// A hairline rule frames the chrome and separates it from the content below.
 	return lipgloss.NewStyle().Width(width).BorderStyle(lipgloss.NormalBorder()).BorderTop(false).BorderBottom(true).BorderLeft(false).BorderRight(false).BorderForeground(divider).Render(row)
+}
+
+func (m rootShellModel) expandedHelpLines(width int) []string {
+	workflow := []string{
+		"1  Choose     Select a quickstart and providers",
+		"2  Connect    Verify the selected services",
+		"3  Configure  Set destination, strategy, and capabilities",
+		"4  Review     Preview the complete plan without changing anything",
+		"5  Deploy     Assemble, validate, install prerequisites, and apply",
+	}
+	controls := []string{
+		"↑/↓ or j/k   Move through rows and bounded result lists",
+		"Enter/Space  Select, toggle, or confirm the focused action",
+		"← or Esc     Return to the previous screen",
+		"d            Open sanitized full diagnostics when available",
+		"e            Expand or collapse live task activity",
+		"q            Return home; from Home, quit",
+		"? or F1      Open or close this help",
+	}
+	presentation := "Set metadata.accessibleForms = true in .dispatch/ui-settings.bcl to enable Huh's screen-reader form prompts. Set NO_COLOR, TERM=dumb, or pass --no-color to disable ANSI color. TERM=dumb uses the non-full-screen command output."
+	lines := []string{titleStyle.Render("WORKFLOW")}
+	lines = append(lines, workflow...)
+	lines = append(lines, "", titleStyle.Render("CONTROLS"))
+	lines = append(lines, controls...)
+	lines = append(lines, "", titleStyle.Render("ACCESSIBLE OUTPUT"))
+	lines = append(lines, strings.Split(dimStyle.Copy().Width(max(width-10, 20)).Render(presentation), "\n")...)
+	return lines
+}
+
+func (m rootShellModel) helpVisibleRows() int {
+	return max(m.height-18, 4)
+}
+
+func (m rootShellModel) helpScrollLimit() int {
+	width := min(max(m.width-8, 64), 112)
+	return lifecycleScrollLimit(len(m.expandedHelpLines(width)), m.helpVisibleRows())
+}
+
+func (m rootShellModel) viewExpandedHelp(width int) string {
+	body := renderLifecycleViewport(m.expandedHelpLines(width), m.helpVisibleRows(), m.helpScroll)
+	return titleStyle.Render("Keyboard and accessibility help") + "\n" +
+		dimStyle.Render("The footer stays contextual; this view contains the complete interaction model.") + "\n\n" +
+		panel.Copy().Width(width-4).Padding(1, 2).Render(body)
 }
 
 // taskRunning reports whether a long-running lifecycle task is in progress, so
@@ -2713,6 +2856,13 @@ func (m rootShellModel) viewWelcome(width int) string {
 		}
 	}
 	menu := strings.Join(optionRows, "\n")
+	if m.height < 36 {
+		headline := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("BOX ") +
+			lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("DISPATCH") + accentMark
+		compactDescription := lipgloss.NewStyle().Foreground(ice).Width(min(width-4, 66)).Render("Assemble and deploy Box-backed solution accelerators.")
+		compactRoute := dimStyle.Render("YOUR ROUTE") + "\n" + accent.Render("CHOOSE › CONNECT › CONFIGURE › REVIEW › DEPLOY")
+		return lipgloss.JoinVertical(lipgloss.Left, eyebrow, headline, compactDescription, "", menu, "", compactRoute)
+	}
 
 	// The big wordmark (BOX kicker over the DISPATCH banner) needs a wide, tall
 	// terminal; otherwise fall back to a one-line headline so the block art never
@@ -4325,6 +4475,12 @@ func (m rootShellModel) footer() string {
 			key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
 			key.NewBinding(key.WithKeys("esc", "left", "d"), key.WithHelp("esc/←/d", "back")),
 		}
+	} else if m.screen == screenHelp {
+		bindings = contextualHelp{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
+			key.NewBinding(key.WithKeys("?", "f1", "esc", "left", "q"), key.WithHelp("?/f1/esc", "close")),
+		}
 	} else if m.screen == screenScratchConfirm {
 		bindings = contextualHelp{
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "switch")),
@@ -4347,8 +4503,11 @@ func (m rootShellModel) footer() string {
 	if m.screen == screenWelcome {
 		quitHelp = "quit"
 	}
-	if !(m.screen == screenConfig && m.configFocus < 2) {
+	if m.screen != screenHelp && !(m.screen == screenConfig && m.configFocus < 2) {
 		bindings = append(bindings, key.NewBinding(key.WithKeys("q"), key.WithHelp("q", quitHelp)))
+	}
+	if m.screen != screenHelp && !(m.screen == screenConfig && m.configFocus < 2) {
+		bindings = append(bindings, key.NewBinding(key.WithKeys("?", "f1"), key.WithHelp("?", "help")))
 	}
 	helpView := m.help.View(bindings)
 	content := helpView

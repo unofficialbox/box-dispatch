@@ -5,6 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // TestMain isolates the runtime config directory so ambient machine config does
@@ -52,6 +55,36 @@ func TestRootHelpGroupsCommonAndAdvancedCommands(t *testing.T) {
 		if !strings.Contains(help[advancedStart:], commandRow) {
 			t.Errorf("advanced help omitted %q:\n%s", command, help[advancedStart:])
 		}
+	}
+}
+
+func TestRootHelpExposesNoColorFlag(t *testing.T) {
+	root := newRootCommand()
+	if flag := root.PersistentFlags().Lookup("no-color"); flag == nil || !strings.Contains(flag.Usage, "ANSI color") {
+		t.Fatalf("--no-color flag = %#v", flag)
+	}
+}
+
+func TestTerminalPresentationHonorsNoColorAndDumbTerminal(t *testing.T) {
+	original := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(original) })
+
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Setenv("NO_COLOR", "1")
+	configureTerminalPresentation(false)
+	if got := lipgloss.ColorProfile(); got != termenv.Ascii {
+		t.Fatalf("NO_COLOR profile = %v, want Ascii", got)
+	}
+
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	configureTerminalPresentation(true)
+	if got := lipgloss.ColorProfile(); got != termenv.Ascii {
+		t.Fatalf("explicit --no-color profile = %v, want Ascii", got)
+	}
+
+	t.Setenv("TERM", "dumb")
+	if terminalSupportsFullScreen() {
+		t.Fatal("TERM=dumb should disable the full-screen shell")
 	}
 }
 

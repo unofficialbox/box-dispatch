@@ -89,10 +89,18 @@ separately visible so failures retain a precise phase and diagnostic.
 
 ### Slice 4: accessibility and terminal resilience
 
+Status: completed on 2026-08-11.
+
 - Add a discoverable expanded help view.
 - Honor `NO_COLOR`, `TERM=dumb`, and an explicit no-color option.
 - Enable an accessible form mode through configuration.
 - Add 80x24, 100x30, and 120x40 rendering tests plus boundary tests for every scrollable view.
+
+Expanded help is available from `?` or `F1`; presentation settings can enable screen-reader form
+prompts; standard and explicit no-color controls are honored; and `TERM=dumb` avoids the
+full-screen renderer. The welcome, help, validation, and deployment views are covered at all three
+supported terminal sizes. Help, diagnostics, lifecycle checklists, teardown resources, and
+deployed assets clamp at both ends rather than wrapping.
 
 ## Acceptance criteria
 

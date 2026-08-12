@@ -1017,6 +1017,157 @@ func TestWelcomePresentsBrandedLaunchExperience(t *testing.T) {
 	}
 }
 
+func TestExpandedHelpIsDiscoverableAndReturnsToCaller(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen, model.width, model.height = screenDashboard, 100, 30
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	model = updated.(rootShellModel)
+	if model.screen != screenHelp || model.helpReturn != screenDashboard {
+		t.Fatalf("? did not open help from Connect: screen=%v return=%v", model.screen, model.helpReturn)
+	}
+	view := model.View()
+	allHelp := strings.Join(model.expandedHelpLines(92), "\n")
+	for _, expected := range []string{"Keyboard and accessibility help", "WORKFLOW"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expanded help omitted visible heading %q:\n%s", expected, view)
+		}
+	}
+	for _, expected := range []string{"ACCESSIBLE OUTPUT", "NO_COLOR"} {
+		if !strings.Contains(allHelp, expected) {
+			t.Fatalf("expanded help content omitted %q:\n%s", expected, allHelp)
+		}
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if returned := updated.(rootShellModel); returned.screen != screenDashboard {
+		t.Fatalf("help returned to screen %v, want Connect", returned.screen)
+	}
+}
+
+func TestAccessibleFormPreferenceLoadsFromBCL(t *testing.T) {
+	isolateShellRoot(t)
+	if err := shellstate.SaveUISettings(config.UISettings{AccessibleForms: true}); err != nil {
+		t.Fatal(err)
+	}
+	model := newSetupOnlyShell()
+	if !model.accessibleForms {
+		t.Fatal("metadata.accessibleForms did not enable accessible form mode")
+	}
+}
+
+func TestAccessibleChooseCompletionContinuesIntoConnect(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.accessibleForms = true
+	model.screen = screenComponents
+	updated, cmd := model.Update(accessibleFormFinishedMsg{kind: accessibleChooseForm})
+	model = updated.(rootShellModel)
+	if model.screen != screenDashboard || model.selected == nil || cmd == nil {
+		t.Fatalf("accessible Choose did not continue into Connect: screen=%v selected=%v", model.screen, model.selected)
+	}
+}
+
+func TestCoreViewsFitSupportedTerminalSizes(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{80, 24}, {100, 30}, {120, 40}} {
+		for _, screen := range []shellScreen{screenWelcome, screenHelp, screenValidate, screenDeploy} {
+			model := newSetupOnlyShell()
+			model.width, model.height, model.screen = size.width, size.height, screen
+			if screen == screenHelp {
+				model.helpReturn = screenWelcome
+			}
+			if screen == screenValidate || screen == screenDeploy {
+				model.validateDone = true
+				model.validationItems = []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent, Detail: "Box configuration is present."}}
+				model.validationProgress = map[string]float64{"box": 1}
+			}
+			if lines := strings.Count(model.View(), "\n") + 1; lines > size.height {
+				t.Fatalf("%dx%d screen %v rendered %d lines", size.width, size.height, screen, lines)
+			}
+		}
+	}
+}
+
+func TestExpandedHelpScrollStopsAtBothBoundaries(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height, model.screen = 80, 24, screenHelp
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyDown)
+	}
+	limit := model.helpScrollLimit()
+	if model.helpScroll != limit || limit == 0 {
+		t.Fatalf("help bottom offset = %d, limit = %d", model.helpScroll, limit)
+	}
+	model = updatedShell(t, model, tea.KeyDown)
+	if model.helpScroll != limit {
+		t.Fatalf("help wrapped after its final row: %d", model.helpScroll)
+	}
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyUp)
+	}
+	if model.helpScroll != 0 {
+		t.Fatalf("help top offset = %d, want 0", model.helpScroll)
+	}
+}
+
+func TestDiagnosticScrollStopsAtBothBoundaries(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.width, model.height, model.screen = 80, 24, screenDiagnostic
+	model.diagnosticBody = strings.Repeat("diagnostic line with wrapped content\n", 40)
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyDown)
+	}
+	width := min(max(model.width-8, 64), 112)
+	limit := max(len(model.diagnosticLines(width))-model.diagnosticCapacity(), 0)
+	if model.diagnosticScroll != limit || limit == 0 {
+		t.Fatalf("diagnostic bottom offset = %d, limit = %d", model.diagnosticScroll, limit)
+	}
+	model = updatedShell(t, model, tea.KeyDown)
+	if model.diagnosticScroll != limit {
+		t.Fatalf("diagnostic wrapped after its final row: %d", model.diagnosticScroll)
+	}
+	for range 100 {
+		model = updatedShell(t, model, tea.KeyUp)
+	}
+	if model.diagnosticScroll != 0 {
+		t.Fatalf("diagnostic top offset = %d, want 0", model.diagnosticScroll)
+	}
+}
+
+func TestTeardownAndDeployedAssetsStopAtBoundaries(t *testing.T) {
+	resources := make([]lifecycle.ResourceReference, 40)
+	for i := range resources {
+		resources[i] = lifecycle.ResourceReference{Provider: "box", Kind: "file", Name: fmt.Sprintf("file-%02d", i), ID: fmt.Sprint(i)}
+	}
+
+	teardown := newSetupOnlyShell()
+	teardown.width, teardown.height, teardown.screen = 80, 24, screenTeardown
+	teardown.teardownRecord = &deploymentaudit.DeploymentRecord{Providers: []deploymentaudit.ProviderRecord{{Provider: "box", Resources: resources}}}
+	for range 100 {
+		teardown = updatedShell(t, teardown, tea.KeyDown)
+	}
+	teardownLimit := max(len(teardown.teardownBodyRows(teardown.width))-teardown.teardownVisibleRows(), 0)
+	if teardown.teardownScroll != teardownLimit || teardownLimit == 0 {
+		t.Fatalf("teardown bottom offset = %d, limit = %d", teardown.teardownScroll, teardownLimit)
+	}
+	teardown = updatedShell(t, teardown, tea.KeyDown)
+	if teardown.teardownScroll != teardownLimit {
+		t.Fatalf("teardown wrapped after its final row: %d", teardown.teardownScroll)
+	}
+
+	deployed := newSetupOnlyShell()
+	deployed.width, deployed.height, deployed.screen, deployed.deployDone = 80, 24, screenDeploy, true
+	deployed.validationItems = []lifecycle.Item{{Provider: "box", Resources: resources}}
+	for range 100 {
+		deployed = updatedShell(t, deployed, tea.KeyDown)
+	}
+	assetLimit := max(len(resources)-deployed.deployTableCapacity(), 0)
+	if deployed.deployAssetsScroll != assetLimit || assetLimit == 0 {
+		t.Fatalf("deployed-assets bottom offset = %d, limit = %d", deployed.deployAssetsScroll, assetLimit)
+	}
+	deployed = updatedShell(t, deployed, tea.KeyDown)
+	if deployed.deployAssetsScroll != assetLimit {
+		t.Fatalf("deployed assets wrapped after their final row: %d", deployed.deployAssetsScroll)
+	}
+}
+
 func TestDeployViewFitsAndScrollReverses(t *testing.T) {
 	// A tall deployment must not overflow the terminal, and scrolling up must
 	// undo scrolling down — the two together are what made the table unscrollable
