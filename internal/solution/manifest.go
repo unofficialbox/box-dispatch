@@ -249,7 +249,7 @@ func DefaultDeploymentSettings() DeploymentSettings {
 	return DeploymentSettings{
 		SchemaVersion: "1.0",
 		Box: BoxDeploymentSettings{
-			GlobalStrategy:      "inherit",
+			GlobalStrategy:      StrategyReuse,
 			Naming:              DeploymentNaming{Pattern: "{name} - {suffix}"},
 			Rollback:            RollbackSettings{Directory: ".dispatch/deployments", Retain: 10},
 			ComponentStrategies: map[string]ComponentStrategy{},
