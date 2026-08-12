@@ -44,9 +44,14 @@ The default shell presents one five-stage path:
 5. **Deploy** — assemble the package, validate provider state and prerequisites, install required
    managed packages, deploy supported missing configuration, and verify permission assignments.
 
-Packaging and validation remain visible as live checklist phases inside **Deploy**; they are not
-separate navigation destinations. Reset is available from **Deployment history**, where Dispatch
-shows the recorded resources and requires explicit confirmation before removing anything.
+Databricks and AWS Bedrock AgentCore remain visible in **Choose** as dimmed **Coming soon** roadmap
+items. They are read-only and cannot be added to the active provider plan yet.
+
+Packaging and validation remain visible inside **Deploy**; they are not separate navigation
+destinations. The active provider carries the progress animation while completed providers
+collapse to one-line results. Press `v` to switch between the focused summary and full provider
+checklists. Reset is available from **Deployment history**, where Dispatch shows the recorded
+resources and requires explicit confirmation before removing anything.
 
 ## First-time UX (FTUX)
 
@@ -178,7 +183,9 @@ manual assignments are reported as present and are not recreated.
 After a deployment, press `b` to open the Box Admin Console for the connected enterprise.
 When the selected Salesforce target is a scratch org, press `s` to open it through Salesforce
 CLI. The Box browser session determines the enterprise shown; Dispatch includes the connected
-EID in the action label so the operator can confirm the target.
+EID in the action label so the operator can confirm the target. The completion screen defaults to
+created, existing, and failed counts; press `v` to inspect the deployed-resource table and full
+credential-free audit path.
 
 Normal failures show a concise remediation message. Press `d` when offered to open the full
 Salesforce CLI JSON diagnostic, including `stack` and `error.data`; token-, secret-, password-,
