@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	deploymentaudit "github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
@@ -36,6 +37,7 @@ func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 	// Connect is entered from the component picker; selections live on answers.
 	model.screen = screenComponents
 	model.answers.components = []string{"box", "salesforce"}
+	model.rebuildComponentForm()
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRight})
 	result := updated.(rootShellModel)
@@ -536,6 +538,57 @@ func TestChooseCombinesQuickstartAndProviderSelection(t *testing.T) {
 	for _, expected := range []string{"Choose a quickstart and providers", "Choose a solution quickstart", "Choose platform components"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("combined Choose view does not contain %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestChooseSpaceSelectsAndTabSwitchesPanels(t *testing.T) {
+	model := newSetupOnlyShell()
+	model.screen = screenComponents
+	_ = model.componentForm.Init()
+	quickstarts, ok := model.componentForm.GetFocusedField().(*huh.MultiSelect[string])
+	if !ok || quickstarts.GetKey() != "template" {
+		t.Fatalf("initial Choose focus = %T, want quickstart selector", model.componentForm.GetFocusedField())
+	}
+
+	selectedQuickstart := model.answers.templateID
+	// Arrows move the highlight without changing the selected quickstart.
+	model = updatedShell(t, model, tea.KeyDown)
+	if model.answers.templateID != selectedQuickstart {
+		t.Fatalf("Down changed quickstart from %q to %q before Space", selectedQuickstart, model.answers.templateID)
+	}
+	model = updatedShell(t, model, tea.KeySpace)
+	if model.answers.templateID == selectedQuickstart {
+		t.Fatalf("Space did not select the highlighted quickstart after %q", selectedQuickstart)
+	}
+	view := model.viewComponents(112)
+	for _, quickstart := range model.templates {
+		if !strings.Contains(view, quickstart.name) {
+			t.Fatalf("selecting a quickstart hid %q:\n%s", quickstart.name, view)
+		}
+	}
+
+	// Tab explicitly switches panels and cycles back from components.
+	model = updatedShell(t, model, tea.KeyTab)
+	components, ok := model.componentForm.GetFocusedField().(*huh.MultiSelect[string])
+	if !ok || components.GetKey() != "components" {
+		t.Fatalf("Tab focused %T/%q, want provider selector", model.componentForm.GetFocusedField(), model.componentForm.GetFocusedField().GetKey())
+	}
+
+	model = updatedShell(t, model, tea.KeyDown)
+	model = updatedShell(t, model, tea.KeySpace)
+	if !slices.Contains(model.answers.components, "salesforce") {
+		t.Fatalf("Space did not toggle Salesforce: %v", model.answers.components)
+	}
+	model = updatedShell(t, model, tea.KeyTab)
+	if model.componentForm.GetFocusedField().GetKey() != "template" {
+		t.Fatalf("second Tab did not cycle to quickstarts: %q", model.componentForm.GetFocusedField().GetKey())
+	}
+
+	footer := model.footer()
+	for _, expected := range []string{"rows", "switch panel", "next/continue", "select/toggle"} {
+		if !strings.Contains(footer, expected) {
+			t.Fatalf("Choose footer omitted %q:\n%s", expected, footer)
 		}
 	}
 }
