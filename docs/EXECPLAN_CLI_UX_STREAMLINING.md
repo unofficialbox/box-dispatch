@@ -126,6 +126,49 @@ Status: completed on 2026-08-12.
 - Prevent keyboard, accessible-form, scoped-provider, and stale-state paths from adding
   either provider to the active solution plan.
 
+### Slice 7: Deploy hierarchy and palette
+
+Status: completed on 2026-08-12.
+
+- Keep the five primary workflow steps as the dominant all-caps navigation rail.
+- Present `Assemble -> Validate -> Apply -> Finish` as title-case child tasks inside a labeled,
+  indented **Deploy progress** block with a coral hierarchy rail.
+- Adopt the supplied Box presentation palette: primary blue `#0061D3`, light blue `#91C1FC`,
+  success `#25C180`, warning `#F4B21A`, community coral `#FF6658`, and the
+  pink-to-blue `#FD56FF -> #307CF2` progress gradient.
+- Preserve the existing animation, status semantics, provider order, and progressive disclosure.
+
+The primary workflow and Deploy's internal work now have different visual grammar, so the local
+tasks read as progress within Deploy instead of a second competing navigation rail.
+
+### Slice 8: live-work focus
+
+Status: completed on 2026-08-12.
+
+- Collapse live activity to a labeled **Current task** and the newest event only.
+- Keep recent history behind `e`; show the step count only in the expanded activity view.
+- Remove in-content expand/collapse hints and keep that control in the contextual footer.
+- De-emphasize subtitles, queued providers, and supporting counts so the active provider and
+  animated progress bar remain the visual focal point.
+- Replace `component(s)` copy with natural singular and plural labels.
+
+This refinement removes repeated "working" signals and historical lines from the default view
+without hiding provider progress or the complete live activity record.
+
+### Slice 9: status consolidation
+
+Status: completed on 2026-08-12.
+
+- Keep package assembly's changing task inside the main work panel instead of the footer.
+- Reserve the footer for contextual controls throughout the active Deploy pipeline.
+- State the final deployment outcome once; follow it with one compact counts line and audit state.
+- Hide sub-second durations instead of presenting an unhelpful `0s` result.
+- Replace Choose's in-panel arrow/Space instructions with decision guidance; keyboard controls
+  remain in the footer.
+
+These changes make the eye path consistent: phase and task in the work area, controls in the
+footer, and one authoritative outcome at completion.
+
 ## Acceptance criteria
 
 - No customer-facing screen names implementation libraries.
