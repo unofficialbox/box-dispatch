@@ -998,6 +998,69 @@ func TestWorkflowHeaderUsesStepsWithoutArtificialProgress(t *testing.T) {
 	}
 }
 
+func TestChoosePanelExplainsDecisionWithoutDuplicatingControls(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.width, m.height = screenComponents, 120, 40
+	_ = m.componentForm.Init()
+	view := m.View()
+	if !strings.Contains(view, "Start from a proven architecture") {
+		t.Fatalf("Choose panel omitted decision guidance:\n%s", view)
+	}
+	if strings.Contains(view, "press Space") || strings.Contains(view, "Highlight with arrows") {
+		t.Fatalf("Choose panel duplicated keyboard guidance:\n%s", view)
+	}
+	if !strings.Contains(view, "space select/toggle") {
+		t.Fatalf("Choose footer omitted the interaction guidance:\n%s", view)
+	}
+}
+
+func TestDispatchThemeUsesReferencePalette(t *testing.T) {
+	colors := map[string]struct {
+		got  lipgloss.Color
+		want string
+	}{
+		"navy":             {navy, "#113053"},
+		"blue":             {cyan, "#0061D3"},
+		"light blue":       {ice, "#91C1FC"},
+		"community coral":  {coral, "#FF6658"},
+		"warning yellow":   {gold, "#F4B21A"},
+		"success green":    {green, "#25C180"},
+		"body blue":        {muted, "#4B6E98"},
+		"standard outline": {white, "#D0D0D0"},
+	}
+	for name, color := range colors {
+		if got := fmt.Sprint(color.got); got != color.want {
+			t.Errorf("%s = %s, want %s", name, got, color.want)
+		}
+	}
+	if progressGradientStart != "#FD56FF" || progressGradientEnd != "#307CF2" {
+		t.Fatalf("progress gradient = %s -> %s, want #FD56FF -> #307CF2", progressGradientStart, progressGradientEnd)
+	}
+}
+
+func TestDeployProgressReadsAsNestedTasks(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.deploymentPhase = deploymentPhaseApply
+	m.height = 40
+	block := m.deployPipelineStrip()
+	if !strings.Contains(block, "DEPLOY PROGRESS") || !strings.Contains(block, "Assemble") || !strings.Contains(block, "Apply") {
+		t.Fatalf("nested deploy progress omitted its hierarchy or tasks:\n%s", block)
+	}
+	if lipgloss.Height(block) != 2 {
+		t.Fatalf("deploy progress height = %d, want a two-row labeled block:\n%s", lipgloss.Height(block), block)
+	}
+	if !strings.Contains(block, "┃") {
+		t.Fatalf("deploy progress omitted the inset hierarchy rail:\n%s", block)
+	}
+	if strings.Contains(block, "ASSEMBLE") || strings.Contains(block, "APPLY") {
+		t.Fatalf("child tasks compete with the all-caps primary workflow:\n%s", block)
+	}
+	m.height = 24
+	if compact := m.deployPipelineStrip(); lipgloss.Height(compact) != 1 {
+		t.Fatalf("short-terminal deploy progress height = %d, want one compact row:\n%s", lipgloss.Height(compact), compact)
+	}
+}
+
 func TestDeployRequiresExplicitConfirmation(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.screen = screenDeploy
@@ -1574,7 +1637,7 @@ func TestDeployCompletionDefaultsToFocusedSummary(t *testing.T) {
 	}}
 
 	view := m.View()
-	for _, want := range []string{"ASSEMBLE", "VALIDATE", "APPLY", "FINISH", "Deployment complete", "1 created", "1 already present", "42s", "Audit saved", "v details"} {
+	for _, want := range []string{"DEPLOY PROGRESS", "Assemble", "Validate", "Apply", "Finish", "Deployment complete", "1 created", "1 already present", "42s", "Audit saved", "v details"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("focused completion omitted %q:\n%s", want, view)
 		}
@@ -1583,6 +1646,9 @@ func TestDeployCompletionDefaultsToFocusedSummary(t *testing.T) {
 		if strings.Contains(view, hidden) {
 			t.Fatalf("focused completion exposed detailed content %q:\n%s", hidden, view)
 		}
+	}
+	if got := strings.Count(view, "Deployment complete"); got != 1 {
+		t.Fatalf("completion outcome appears %d times, want one:\n%s", got, view)
 	}
 	for _, size := range []struct{ width, height int }{{80, 24}, {100, 30}, {120, 40}} {
 		resized := m
@@ -1605,6 +1671,33 @@ func TestDeployCompletionDefaultsToFocusedSummary(t *testing.T) {
 	}
 }
 
+func TestPackagePhaseKeepsChangingTaskOutOfFooter(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.deploymentPhase, m.packageStarted = screenDeploy, deploymentPhasePackage, true
+	m.width, m.height = 120, 40
+	m.message = "Pulling the selected solution components from GitHub..."
+
+	view := m.View()
+	for _, want := range []string{"Assembling package", "CURRENT TASK", "Pulling the selected solution components from GitHub..."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("package phase omitted %q:\n%s", want, view)
+		}
+	}
+	footer := m.footer()
+	if strings.Contains(footer, m.message) {
+		t.Fatalf("package status leaked into the contextual footer:\n%s", footer)
+	}
+}
+
+func TestSubSecondDeploymentDurationIsNotShown(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.deploymentStartedAt = time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	m.deploymentCompletedAt = m.deploymentStartedAt.Add(400 * time.Millisecond)
+	if got := m.deploymentDurationSuffix(); got != "" {
+		t.Fatalf("sub-second duration = %q, want hidden", got)
+	}
+}
+
 func TestDeployFocusExpandsOnlyActiveProviderWithoutSyntheticPercentage(t *testing.T) {
 	m := newSetupOnlyShell()
 	m.progress.Width = 24
@@ -1620,13 +1713,44 @@ func TestDeployFocusExpandsOnlyActiveProviderWithoutSyntheticPercentage(t *testi
 	if !strings.Contains(boxRow, "COMPLETE") || strings.Contains(boxRow, "DEPLOYMENT CHECKLIST") {
 		t.Fatalf("completed provider did not collapse to a summary:\n%s", boxRow)
 	}
-	for _, want := range []string{"Salesforce", "IN PROGRESS", "Checking 2 configuration component(s)"} {
+	for _, want := range []string{"Salesforce", "IN PROGRESS", "Checking 2 configuration components"} {
 		if !strings.Contains(salesforceRow, want) {
 			t.Fatalf("active provider omitted %q:\n%s", want, salesforceRow)
 		}
 	}
 	if strings.Contains(salesforceRow, "%") || strings.Contains(salesforceRow, "DEPLOYMENT CHECKLIST") {
 		t.Fatalf("focused provider exposed synthetic precision or checklist detail:\n%s", salesforceRow)
+	}
+}
+
+func TestActiveDeployKeepsOneVisualFocusAtSupportedSizes(t *testing.T) {
+	m := newSetupOnlyShell()
+	m.screen, m.deploymentPhase, m.deployStarted = screenDeploy, deploymentPhaseApply, true
+	m.currentDeployment = "box"
+	m.deploymentProgress = map[string]float64{"box": 0.42, "salesforce": 0}
+	m.validationItems = []lifecycle.Item{
+		{Provider: "box", Status: lifecycle.StatusMissing, Deployable: true, DeployableComponents: []string{"Folder:Workspace", "File:README.md"}},
+		{Provider: "salesforce", Status: lifecycle.StatusMissing, Deployable: true, DeployableComponents: []string{"ApexClass:CLMController"}},
+	}
+	m.activityLog = []string{"Preparing Box", "Creating workspace", "Uploading README.md"}
+
+	for _, size := range []struct{ width, height int }{{80, 24}, {100, 30}, {120, 40}} {
+		resized := m
+		resized.width, resized.height = size.width, size.height
+		view := resized.View()
+		if lines := strings.Count(view, "\n") + 1; lines > size.height {
+			t.Fatalf("active deployment overflows %dx%d: %d lines", size.width, size.height, lines)
+		}
+		for _, want := range []string{"Box", "IN PROGRESS", "CURRENT TASK", "Uploading README.md", "e activity"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("active deployment at %dx%d omitted %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+		for _, hidden := range []string{"Preparing Box", "Creating workspace", "Working", "e to expand"} {
+			if strings.Contains(view, hidden) {
+				t.Fatalf("active deployment at %dx%d exposed redundant content %q:\n%s", size.width, size.height, hidden, view)
+			}
+		}
 	}
 }
 
@@ -1911,13 +2035,18 @@ func TestActivityFeedStreamsAndExpands(t *testing.T) {
 		t.Fatalf("footer duplicated the activity line while the feed is active:\n%s", rm.footer())
 	}
 
-	// Collapsed: shows the tail (last two) and an expand hint, not the first line.
+	// Collapsed: shows only the current task. Interaction guidance stays in the footer.
 	collapsed := rm.renderActivity(100)
-	if !strings.Contains(collapsed, "Creating AI agent Risk Triage") || !strings.Contains(collapsed, "e to expand") {
-		t.Fatalf("collapsed feed missing latest line or hint:\n%s", collapsed)
+	if !strings.Contains(collapsed, "CURRENT TASK") || !strings.Contains(collapsed, "Creating AI agent Risk Triage") {
+		t.Fatalf("collapsed feed missing its label or latest line:\n%s", collapsed)
 	}
-	if strings.Contains(collapsed, "Ensuring the Box workspace folder tree") {
-		t.Fatalf("collapsed feed should not show the first (scrolled-off) line:\n%s", collapsed)
+	for _, hidden := range []string{"Ensuring the Box workspace folder tree", "Uploading sample content msa.pdf", "e to expand", "Working"} {
+		if strings.Contains(collapsed, hidden) {
+			t.Fatalf("collapsed feed retained redundant content %q:\n%s", hidden, collapsed)
+		}
+	}
+	if footer := rm.footer(); !strings.Contains(footer, "e activity") {
+		t.Fatalf("collapsed activity action missing from footer:\n%s", footer)
 	}
 
 	// `e` expands to the full recent history.
@@ -1926,8 +2055,20 @@ func TestActivityFeedStreamsAndExpands(t *testing.T) {
 	if !rm.activityExpanded {
 		t.Fatal("e did not expand the activity feed")
 	}
-	if expanded := rm.renderActivity(100); !strings.Contains(expanded, "Ensuring the Box workspace folder tree") || !strings.Contains(expanded, "e to collapse") {
-		t.Fatalf("expanded feed missing earlier line or collapse hint:\n%s", expanded)
+	if expanded := rm.renderActivity(100); !strings.Contains(expanded, "ACTIVITY · 3 STEPS") || !strings.Contains(expanded, "Ensuring the Box workspace folder tree") || strings.Contains(expanded, "e to collapse") {
+		t.Fatalf("expanded feed has the wrong hierarchy or duplicated guidance:\n%s", expanded)
+	}
+	if footer := rm.footer(); !strings.Contains(footer, "e collapse activity") {
+		t.Fatalf("expanded activity action missing from footer:\n%s", footer)
+	}
+}
+
+func TestComponentCountUsesNaturalGrammar(t *testing.T) {
+	if got := componentCount(1); got != "1 configuration component" {
+		t.Fatalf("singular count = %q", got)
+	}
+	if got := componentCount(18); got != "18 configuration components" {
+		t.Fatalf("plural count = %q", got)
 	}
 }
 

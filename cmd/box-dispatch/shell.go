@@ -261,27 +261,36 @@ type contextualHelp []key.Binding
 func (k contextualHelp) ShortHelp() []key.Binding  { return []key.Binding(k) }
 func (k contextualHelp) FullHelp() [][]key.Binding { return [][]key.Binding{[]key.Binding(k)} }
 
+const (
+	progressGradientStart = "#FD56FF"
+	progressGradientEnd   = "#307CF2"
+)
+
 var (
-	navy       = lipgloss.Color("#0B172A")
-	cyan       = lipgloss.Color("#0866D9")
-	ice        = lipgloss.Color("#D8EAFF")
-	coral      = lipgloss.Color("#FF6658")
-	gold       = lipgloss.Color("#F7C95C")
-	green      = lipgloss.Color("#67C587")
-	muted      = lipgloss.Color("#8A9AAF")
-	white      = lipgloss.Color("#FFFEFA")
-	divider    = lipgloss.Color("#25384F") // subtle rule between chrome and content
-	panel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#52637A")).Padding(1, 2)
-	activePane = panel.Copy().BorderForeground(coral).Background(navy)
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(white)
-	dimStyle   = lipgloss.NewStyle().Foreground(muted)
-	accent     = lipgloss.NewStyle().Bold(true).Foreground(cyan)
+	// Dispatch's terminal theme mirrors the supplied Box presentation palette.
+	// The shell runs on a dark background, so the light-blue swatch carries body
+	// copy while the darker blues provide structure, focus, and selection fills.
+	navy        = lipgloss.Color("#113053")
+	cyan        = lipgloss.Color("#0061D3")
+	ice         = lipgloss.Color("#91C1FC")
+	coral       = lipgloss.Color("#FF6658")
+	gold        = lipgloss.Color("#F4B21A")
+	green       = lipgloss.Color("#25C180")
+	muted       = lipgloss.Color("#4B6E98")
+	white       = lipgloss.Color("#D0D0D0")
+	divider     = lipgloss.Color("#4B6E98")
+	panel       = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(muted).Padding(1, 2)
+	activePane  = panel.Copy().BorderForeground(coral).Background(navy)
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(white)
+	dimStyle    = lipgloss.NewStyle().Foreground(ice)
+	subtleStyle = lipgloss.NewStyle().Foreground(muted)
+	accent      = lipgloss.NewStyle().Bold(true).Foreground(cyan)
 )
 
 func dispatchHuhTheme() *huh.Theme {
 	theme := huh.ThemeCharm()
 	focusedButton := theme.Focused.FocusedButton.Foreground(white).Background(cyan).Bold(true)
-	blurredButton := theme.Focused.BlurredButton.Foreground(ice).Background(lipgloss.Color("#172235"))
+	blurredButton := theme.Focused.BlurredButton.Foreground(ice).Background(navy)
 	theme.Focused.FocusedButton = focusedButton
 	theme.Focused.BlurredButton = blurredButton
 	theme.Focused.Next = focusedButton
@@ -290,7 +299,7 @@ func dispatchHuhTheme() *huh.Theme {
 
 	// ThemeCharm titles are indigo and its select cursors/indicators fuchsia —
 	// both hard to read on our navy panes. Remap onto our scheme: titles white,
-	// pointers coral, prompts cyan.
+	// pointers coral, prompts blue.
 	theme.Focused.Title = theme.Focused.Title.Foreground(white).Bold(true)
 	theme.Focused.NoteTitle = theme.Focused.NoteTitle.Foreground(white).Bold(true)
 	theme.Blurred.Title = theme.Blurred.Title.Foreground(muted).Bold(true)
@@ -424,15 +433,14 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	host.Prompt = "  Workspace URL  "
 	host.CharLimit = 300
 	bar := progress.New(
-		// Blue → red; end deliberately red rather than the pinker coral accent.
-		progress.WithGradient("#0866D9", "#E23A2C"),
+		progress.WithGradient(progressGradientStart, progressGradientEnd),
 		progress.WithWidth(52),
 	)
 	helpModel := help.New()
 	helpModel.ShortSeparator = "  •  "
 	helpModel.Styles.ShortKey = lipgloss.NewStyle().Bold(true).Foreground(cyan)
 	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(muted)
-	helpModel.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#52637A"))
+	helpModel.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(muted)
 
 	// BCL runtime config is the source of truth for scenarios and providers.
 	// When it is absent (setup has not run) the shell falls back to built-in copy.
@@ -655,7 +663,7 @@ func (m *rootShellModel) rebuildComponentForm() {
 			huh.NewMultiSelect[string]().
 				Key("template").
 				Title("Choose a solution quickstart").
-				Description("Highlight with arrows, then press Space to select one.").
+				Description("Start from a proven architecture or create from the reference template.").
 				Options(templateOptions...).
 				Limit(1).
 				Value(&m.answers.quickstarts).
@@ -1097,12 +1105,12 @@ func (m rootShellModel) requestDeployConfirmation() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// renderDeployConfirm draws the destructive-confirm prompt: a coral title, the
+// renderDeployConfirm draws the deployment-confirm prompt: a coral title, the
 // plan description, and two fixed-colour buttons — Deploy always blue, Cancel
-// always coral — with the focused one filled so the choice reads at a glance.
+// always red — with the focused one filled so the choice reads at a glance.
 func (m rootShellModel) renderDeployConfirm(width int) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(coral).Width(width).Render(m.deployConfirmTitle)
-	desc := dimStyle.Copy().Width(width).Render(m.deployConfirmDesc)
+	desc := subtleStyle.Copy().Width(width).Render(m.deployConfirmDesc)
 
 	deploy := confirmButton(m.deployConfirmAffirm, cyan, m.deployConfirmCursor == 0)
 	cancel := confirmButton("Cancel", coral, m.deployConfirmCursor == 1)
@@ -1117,7 +1125,7 @@ func confirmButton(label string, hue lipgloss.Color, focused bool) string {
 	if focused {
 		return style.Foreground(white).Background(hue).Render(label)
 	}
-	return style.Foreground(hue).Background(lipgloss.Color("#172235")).Render(label)
+	return style.Foreground(hue).Background(navy).Render(label)
 }
 
 func (m rootShellModel) startNextValidation() (tea.Model, tea.Cmd) {
@@ -1186,7 +1194,7 @@ func (m rootShellModel) startNextDeployment() (tea.Model, tea.Cmd) {
 	m.deploymentPhase = deploymentPhaseComplete
 	m.deploymentCompletedAt = time.Now().UTC()
 	m.currentDeployment = ""
-	m.message = "Deployment run complete. Review provider results below."
+	m.message = ""
 	// Persist the audit immediately: it is the resource inventory a later reset
 	// deletes from, so it must not depend on the operator pressing a key.
 	if path, err := deploymentaudit.ExportDeployment(m.packagePath, m.deploymentBaseline, m.validationItems, m.deploymentStartedAt, m.deploymentCompletedAt); err == nil {
@@ -3086,24 +3094,25 @@ func (m rootShellModel) spinnerActive() bool {
 	return false
 }
 
-// renderActivity draws the live "still working" feed: a spinner header and, by
-// default, the last two step lines (the most recent brightened) — like the
-// collapsed thinking view in Claude/Codex/Cursor. Pressing `e` expands it to the
-// recent history. It renders nothing until the running task emits its first step.
+// renderActivity draws only the newest task by default. The provider row already
+// communicates that work is active, so repeating a spinner and recent history
+// creates noise. Expanded mode exposes the recent log; its key stays in the
+// contextual footer so interaction guidance appears in one place.
 func (m rootShellModel) renderActivity(width int) string {
 	if len(m.activityLog) == 0 {
 		return ""
 	}
 	total := len(m.activityLog)
-	header := lipgloss.NewStyle().Bold(true).Foreground(gold).Render(m.spinner.View() + " Working")
+	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("CURRENT TASK")
 	line := func(text string, recent bool) string {
-		style := dimStyle
+		style := lipgloss.NewStyle().Foreground(muted)
 		if recent {
 			style = lipgloss.NewStyle().Foreground(ice)
 		}
-		return style.Render("  " + truncateCell(text, max(width-4, 20)))
+		return style.Render(truncateCell(text, max(width-4, 20)))
 	}
 	if m.activityExpanded {
+		header = lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(fmt.Sprintf("ACTIVITY · %d STEPS", total))
 		shown := m.activityLog
 		const window = 12
 		if len(shown) > window {
@@ -3111,21 +3120,24 @@ func (m rootShellModel) renderActivity(width int) string {
 		}
 		body := make([]string, len(shown))
 		for i, l := range shown {
-			body[i] = line(l, i == len(shown)-1)
+			marker := "  "
+			if i == len(shown)-1 {
+				marker = "› "
+			}
+			body[i] = marker + line(l, i == len(shown)-1)
 		}
-		hint := dimStyle.Render(fmt.Sprintf("  (%d steps · e to collapse)", total))
-		return header + "\n" + strings.Join(body, "\n") + "\n" + hint
+		return header + "\n" + strings.Join(body, "\n")
 	}
-	shown := m.activityLog
-	if len(shown) > 2 {
-		shown = shown[len(shown)-2:]
+	return header + "\n" + "› " + line(m.activityLog[total-1], true)
+}
+
+func renderCurrentTask(text string, width int) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
 	}
-	body := make([]string, len(shown))
-	for i, l := range shown {
-		body[i] = line(l, i == len(shown)-1)
-	}
-	hint := dimStyle.Render(fmt.Sprintf("  e to expand · %d steps", total))
-	return header + "\n" + strings.Join(body, "\n") + "\n" + hint
+	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("CURRENT TASK")
+	line := lipgloss.NewStyle().Foreground(ice).Render("› " + truncateCell(text, max(width-4, 20)))
+	return header + "\n" + line
 }
 
 func (m rootShellModel) stepper() string {
@@ -3180,10 +3192,10 @@ func (m rootShellModel) viewWelcome(width int) string {
 	rowWidth := min(inner, 48)
 	for index, option := range options {
 		// A coral left rail + faint surface marks the selection instead of a heavy
-		// full-coral block; the rail keeps every row aligned.
+		// full-colour block; the rail keeps every row aligned.
 		base := lipgloss.NewStyle().Width(rowWidth).Padding(0, 2).Border(lipgloss.NormalBorder(), false, false, false, true)
 		if index == m.cursor {
-			optionRows[index] = base.BorderForeground(coral).Background(lipgloss.Color("#14263F")).Foreground(white).Bold(true).Render("▸ " + option)
+			optionRows[index] = base.BorderForeground(coral).Background(navy).Foreground(white).Bold(true).Render("▸ " + option)
 		} else {
 			optionRows[index] = base.BorderForeground(divider).Foreground(ice).Render("  " + option)
 		}
@@ -3228,7 +3240,7 @@ func (m rootShellModel) viewWelcome(width int) string {
 
 	hero := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2E4B6E")).
+		BorderForeground(muted).
 		BorderLeftForeground(coral).
 		Width(width-4).
 		Padding(2, 5).
@@ -3287,7 +3299,7 @@ func (m rootShellModel) viewDeploymentHistory(width int) string {
 		line := fmt.Sprintf("%-20s  %-12s  %3d deployed  %s", record.CompletedAt.Local().Format("2006-01-02 15:04"), record.TemplateID, deployed, outcome)
 		style := lipgloss.NewStyle().Width(width-10).Padding(0, 1)
 		if index == m.cursor {
-			style = style.Bold(true).Foreground(white).Background(lipgloss.Color("#16355F"))
+			style = style.Bold(true).Foreground(white).Background(navy)
 		}
 		rows = append(rows, style.Render(line))
 	}
@@ -3335,7 +3347,7 @@ func (m rootShellModel) viewDashboard(width int) string {
 		}
 		style := lipgloss.NewStyle().Width(width-10).Padding(0, 1)
 		if i == m.cursor {
-			style = style.Copy().Bold(true).Foreground(white).Background(lipgloss.Color("#16355F"))
+			style = style.Copy().Bold(true).Foreground(white).Background(navy)
 		}
 		rows = append(rows, style.Render(line))
 	}
@@ -3644,7 +3656,7 @@ func (m rootShellModel) viewBoxComponents(width int) string {
 		line := fmt.Sprintf("%s  %-25s %s", marker, capability.ComponentType, status)
 		style := lipgloss.NewStyle().Width(width - 10).Foreground(tone)
 		if i == m.cursor {
-			style = style.Copy().Bold(true).Background(lipgloss.Color("#12384A"))
+			style = style.Copy().Bold(true).Background(navy)
 		}
 		rows = append(rows, style.Render(line))
 	}
@@ -3862,7 +3874,7 @@ func (m rootShellModel) validationViewport(width int) (prefix, suffix string, li
 		if m.validationHasFailures() {
 			status = "Validation stopped"
 		}
-		prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Checking provider state and deployment prerequisites.") + "\n\n"
+		prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(status) + "\n" + subtleStyle.Render("Checking provider state and deployment prerequisites.") + "\n\n"
 	} else {
 		prefix = m.stageHeader() + "\n\n" + titleStyle.Render(status) + "\n" + dimStyle.Render("Receipts identify existing provider state; unverified packaged assets remain visible as deployment work.") + "\n\n"
 	}
@@ -4232,7 +4244,7 @@ func (m rootShellModel) clampedTeardownScroll(total, visible int) int {
 func (m rootShellModel) viewDeploy(width int) string {
 	if m.confirmingDeploy && m.deploymentPhase == deploymentPhaseReview {
 		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Deploy solution") + "\n" +
-			dimStyle.Render("One confirmation starts package assembly, validation, prerequisites, and provider deployment.") + "\n\n" +
+			subtleStyle.Render("One confirmation starts package assembly, validation, prerequisites, and provider deployment.") + "\n\n" +
 			activePane.Copy().Width(width-4).Render(m.renderDeployConfirm(width-8))
 	}
 	if m.deploymentPhase == deploymentPhasePackage {
@@ -4240,11 +4252,16 @@ func (m rootShellModel) viewDeploy(width int) string {
 		if !m.packageStarted {
 			status = "○ Package assembly stopped"
 		}
-		body := panel.Copy().Width(width-4).Padding(1, 2).Render(lipgloss.NewStyle().Bold(true).Foreground(gold).Render(status))
-		if activity := m.renderActivity(width - 4); activity != "" {
-			body += "\n" + activity
+		content := lipgloss.NewStyle().Bold(true).Foreground(gold).Render(status)
+		activity := m.renderActivity(width - 8)
+		if activity == "" {
+			activity = renderCurrentTask(m.message, width-8)
 		}
-		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Assembling package") + "\n" + dimStyle.Render("Preparing the reviewed solution for validation.") + "\n\n" + body
+		if activity != "" {
+			content += "\n\n" + activity
+		}
+		body := panel.Copy().Width(width-4).Padding(1, 2).Render(content)
+		return m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render("Assembling package") + "\n" + subtleStyle.Render("Preparing the reviewed solution for validation.") + "\n\n" + body
 	}
 	if m.deploymentPhase == deploymentPhaseValidate || (m.deploymentPhase == deploymentPhaseFailed && m.validateDone) {
 		return m.viewValidate(width)
@@ -4265,11 +4282,10 @@ func (m rootShellModel) viewDeploy(width int) string {
 }
 
 // deployPipelineStrip is the stable local orientation for the unified Deploy
-// stage. It stays in place while the content below changes from assembly to
-// validation, apply and completion, so the operator never has to reconstruct
-// where the long-running workflow is.
+// stage. Its label, inset, left rule, and title-case task names distinguish
+// these child tasks from the primary all-caps workflow stepper above it.
 func (m rootShellModel) deployPipelineStrip() string {
-	labels := []string{"ASSEMBLE", "VALIDATE", "APPLY", "FINISH"}
+	labels := []string{"Assemble", "Validate", "Apply", "Finish"}
 	active := 0
 	switch m.deploymentPhase {
 	case deploymentPhaseValidate:
@@ -4295,7 +4311,7 @@ func (m rootShellModel) deployPipelineStrip() string {
 	parts := make([]string, 0, len(labels)*2-1)
 	for index, label := range labels {
 		if index > 0 {
-			parts = append(parts, dimStyle.Render(" ─ "))
+			parts = append(parts, dimStyle.Render("  ·  "))
 		}
 		style, marker := dimStyle, "○"
 		switch {
@@ -4308,7 +4324,22 @@ func (m rootShellModel) deployPipelineStrip() string {
 		}
 		parts = append(parts, style.Render(marker+" "+label))
 	}
-	return strings.Join(parts, "")
+	label := lipgloss.NewStyle().Bold(true).Foreground(ice).Render("DEPLOY PROGRESS")
+	track := strings.Join(parts, "")
+	content := label + "\n" + track
+	if m.height > 0 && m.height < 30 {
+		content = label + "  " + track
+	}
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(coral).
+		BorderTop(false).
+		BorderRight(false).
+		BorderBottom(false).
+		BorderLeft(true).
+		PaddingLeft(1).
+		MarginLeft(2).
+		Render(content)
 }
 
 func (m rootShellModel) deploymentFailureCount() int {
@@ -4344,7 +4375,7 @@ func (m rootShellModel) deploymentDurationSuffix() string {
 		return ""
 	}
 	duration := m.deploymentCompletedAt.Sub(m.deploymentStartedAt).Round(time.Second)
-	if duration < 0 {
+	if duration < time.Second {
 		return ""
 	}
 	return " · " + duration.String()
@@ -4371,7 +4402,7 @@ func (m rootShellModel) deployProviderViewport(width int) (prefix, action string
 	if m.deployDone {
 		title, subtitle = m.deploymentOutcomeTitle(), "The deployment is finished. Open a destination or review the detailed resources."
 	}
-	prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(title) + "\n" + dimStyle.Render(subtitle) + "\n\n"
+	prefix = m.stageHeader() + "\n\n" + m.deployPipelineStrip() + "\n\n" + titleStyle.Render(title) + "\n" + subtleStyle.Render(subtitle) + "\n\n"
 	lines = lifecycleResultLines(rows, rowSep)
 	visible = m.lifecycleViewportCapacity(width, prefix, "\n"+action)
 	return prefix, action, lines, visible
@@ -4421,8 +4452,7 @@ func (m rootShellModel) deployAction(width, deployable int) string {
 		if failed > 0 {
 			tone, marker = coral, "×"
 		}
-		action = lipgloss.NewStyle().Bold(true).Foreground(tone).Render(marker + " " + m.deploymentOutcomeTitle())
-		action += "\n" + dimStyle.Render(fmt.Sprintf("%d created · %d already present · %d failed%s", created, existing, failed, m.deploymentDurationSuffix()))
+		action = lipgloss.NewStyle().Bold(true).Foreground(tone).Render(fmt.Sprintf("%s %d created · %d already present · %d failed%s", marker, created, existing, failed, m.deploymentDurationSuffix()))
 		if m.deploymentAuditPath == "" {
 			action += "\n" + lipgloss.NewStyle().Foreground(coral).Render("× Audit export needs attention")
 		} else {
@@ -4673,7 +4703,7 @@ func (m rootShellModel) focusedProviderRow(provider string, value float64, item 
 			}
 			return m.providerSummaryLine(*item, width)
 		}
-		return dimStyle.Render("○  ") + titleStyle.Render(providerLabel(provider)) + dimStyle.Render("  WAITING")
+		return subtleStyle.Render("○  " + providerLabel(provider) + "  WAITING")
 	}
 	bar := m.progress
 	bar.ShowPercentage = false
@@ -4686,18 +4716,25 @@ func (m rootShellModel) focusedProviderRow(provider string, value float64, item 
 		if phase == "validate" {
 			detail = "Checking provider state and prerequisites"
 			if count > 0 {
-				detail = fmt.Sprintf("Checking %d configuration component(s)", count)
+				detail = fmt.Sprintf("Checking %s", componentCount(count))
 			}
 		} else {
 			count = len(item.DeployableComponents)
 			detail = "Applying supported missing configuration"
 			if count > 0 {
-				detail = fmt.Sprintf("Applying %d supported missing component(s)", count)
+				detail = fmt.Sprintf("Applying %s", componentCount(count))
 			}
 		}
 	}
 	header := titleStyle.Render(providerLabel(provider)) + "  " + lipgloss.NewStyle().Bold(true).Foreground(gold).Render(m.spinner.View()+" IN PROGRESS")
-	return header + "\n" + bar.ViewAs(value) + "\n" + dimStyle.Copy().Width(width).Render(detail)
+	return header + "\n" + bar.ViewAs(value) + "\n" + subtleStyle.Copy().Width(width).Render(detail)
+}
+
+func componentCount(count int) string {
+	if count == 1 {
+		return "1 configuration component"
+	}
+	return fmt.Sprintf("%d configuration components", count)
 }
 
 // providerSummaryLine is the compact one-line provider state shown on the
@@ -4954,7 +4991,11 @@ func (m rootShellModel) footer() string {
 			bindings = append(bindings, key.NewBinding(key.WithKeys("v"), key.WithHelp("v", label)))
 		}
 		if len(m.activityLog) > 0 {
-			bindings = append(bindings, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "activity")))
+			label := "activity"
+			if m.activityExpanded {
+				label = "collapse activity"
+			}
+			bindings = append(bindings, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", label)))
 		}
 		if !m.taskRunning() {
 			bindings = append(bindings, key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "review")))
@@ -5029,9 +5070,10 @@ func (m rootShellModel) footer() string {
 	}
 	helpView := m.help.View(bindings)
 	content := helpView
-	// While the activity feed is live it owns the status area; showing m.message
-	// too would duplicate a line at the bottom of the screen.
-	if m.message != "" && !(m.taskRunning() && len(m.activityLog) > 0) {
+	// Active Deploy views own their status in the main work area. Repeating that
+	// message above the controls makes the footer compete with the current task.
+	deployOwnsStatus := m.screen == screenDeploy && m.deploymentPhase != deploymentPhaseReview
+	if m.message != "" && !deployOwnsStatus && !(m.taskRunning() && len(m.activityLog) > 0) {
 		content = lipgloss.NewStyle().Foreground(gold).Render(m.message) + "\n" + helpView
 	}
 	// A hairline rule mirrors the header and anchors the help line to the frame.
