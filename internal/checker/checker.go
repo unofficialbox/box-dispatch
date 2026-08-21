@@ -729,7 +729,11 @@ func unknownGuidance(name string) []string {
 var allProviderBuilders = map[string]provider{
 	"box": {
 		name: "box",
-		tool: func() bool { return true },
+		tool: func() bool {
+			// The box CLI is required for file operations even when using CCG auth.
+			// CCG handles authentication but the CLI is still needed for uploads.
+			return toolExists("box")
+		},
 		configured: func() bool {
 			if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
 				return true
