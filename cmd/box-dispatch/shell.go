@@ -427,7 +427,7 @@ type rootShellModel struct {
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	spin := spinner.New()
 	spin.Spinner = spinner.Dot
-	spin.Style = lipgloss.NewStyle().Foreground(cyan)
+	spin.Style = lipgloss.NewStyle().Foreground(gold)
 	host := textinput.New()
 	host.Placeholder = "https://dbc-....cloud.databricks.com"
 	host.Prompt = "  Workspace URL  "
@@ -438,8 +438,8 @@ func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
 	)
 	helpModel := help.New()
 	helpModel.ShortSeparator = "  •  "
-	helpModel.Styles.ShortKey = lipgloss.NewStyle().Bold(true).Foreground(cyan)
-	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(muted)
+	helpModel.Styles.ShortKey = lipgloss.NewStyle().Bold(true).Foreground(white).Background(lipgloss.Color("#1a3a5a"))
+	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(ice)
 	helpModel.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(muted)
 
 	// BCL runtime config is the source of truth for scenarios and providers.
@@ -3847,7 +3847,7 @@ func (m rootShellModel) validationViewport(width int) (prefix, suffix string, li
 	rows := m.validationRows(width)
 	status := "VALIDATION RESULTS"
 	if m.validateRunning {
-		status = m.spinner.View() + " VALIDATING PACKAGE AND PROVIDERS"
+		status = m.spinner.View() + " " + lipgloss.NewStyle().Foreground(gold).Render("VALIDATING PACKAGE AND PROVIDERS")
 	}
 	footer := accent.Render("Enter / →  Continue to Deploy    r  Validate again")
 	if m.screen == screenDeploy {
