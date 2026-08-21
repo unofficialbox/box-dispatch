@@ -2660,15 +2660,15 @@ func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
 	}
 	if err := shellstate.SaveConnectionSettings(settings); err != nil {
 		m.message = "Could not save Box CCG credentials: " + err.Error()
-	} else {
-		m.message = "Box CCG credentials saved. Verifying the new default connection..."
 		m.screen, m.cursor = screenProvider, 0
 		m.boxCCGForm = nil
-		return m.beginChecks([]string{"box"})
+		return m, nil
 	}
+	m.message = "Box CCG credentials saved. Verifying the new default connection..."
 	m.screen, m.cursor = screenProvider, 0
 	m.boxCCGForm = nil
-	return m, nil
+	m.provider = "box"
+	return m.beginChecks([]string{"box"})
 }
 
 // openBoxSwitch lists every Box connection box-dispatch can use — the box CLI
