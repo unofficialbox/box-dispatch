@@ -56,3 +56,24 @@ func TestCCGTokenSurfacesOAuthError(t *testing.T) {
 		t.Fatalf("error should carry the OAuth reason: %v", err)
 	}
 }
+
+func TestOAuthTokenSendsRefreshGrant(t *testing.T) {
+	var gotForm url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		gotForm = r.PostForm
+		_, _ = w.Write([]byte(`{"access_token":"oauth-abc"}`))
+	}))
+	defer server.Close()
+	orig := TokenURL
+	TokenURL = server.URL
+	defer func() { TokenURL = orig }()
+
+	token, err := OAuthToken(context.Background(), "cid", "csecret", "refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "oauth-abc" || gotForm.Get("grant_type") != "refresh_token" || gotForm.Get("refresh_token") != "refresh" {
+		t.Fatalf("refresh-token exchange = token %q form %#v", token, gotForm)
+	}
+}

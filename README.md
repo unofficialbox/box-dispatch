@@ -58,7 +58,7 @@ resources and requires explicit confirmation before removing anything.
 The launch shell verifies a provider the first time it connects, then stores a credential-free
 verification snapshot in `.dispatch/connection-settings.bcl`. Later shell sessions reuse that
 CONNECTED state instead of repeating provider calls. **Recheck connections** always performs a
-fresh check, and choosing another alias, profile, Box environment, or CCG app invalidates the old
+fresh check, and choosing another alias, profile, Box OAuth client, or CCG app invalidates the old
 snapshot and verifies the replacement immediately. Open a connected provider and choose
 **Forget saved verification** to remove only its snapshot; Dispatch keeps the configured
 connection and returns that provider to NOT CHECKED.
@@ -241,7 +241,7 @@ encountered in a cloned template. See
 
 The checker looks for:
 
-- **Box**: `BOX_ACCESS_TOKEN`
+- **Box**: a CCG app configured in Dispatch, or `BOX_CLIENT_ID`, `BOX_CLIENT_SECRET`, and `BOX_REFRESH_TOKEN`
 - **Salesforce**: `SF_ALIAS` (or `SALESFORCE_ACCESS_TOKEN`)
 - **Databricks**: `DATABRICKS_HOST`, `DATABRICKS_TOKEN`
 - **AWS**: `AWS_PROFILE`, `AWS_REGION`/`AWS_DEFAULT_REGION`

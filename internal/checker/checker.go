@@ -14,7 +14,6 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
-	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
 type CheckConfig struct {
@@ -34,7 +33,7 @@ type ProviderDiscovery struct {
 	Host       string   `json:"host,omitempty"`       // Salesforce instance URL, Databricks workspace
 	Region     string   `json:"region,omitempty"`     // AWS region
 	Options    []string `json:"options,omitempty"`    // selectable authenticated profiles/aliases
-	AuthType   string   `json:"auth_type,omitempty"`  // Box auth of the active connection: OAuth2 | CCG | JWT
+	AuthType   string   `json:"auth_type,omitempty"`  // Box auth of the active connection: OAuth2 | CCG
 	OrgID      string   `json:"org_id,omitempty"`     // Salesforce organization ID
 	OrgStatus  string   `json:"org_status,omitempty"` // Salesforce Active / Connected / Deleted status
 	OrgType    string   `json:"org_type,omitempty"`   // Salesforce scratch or persistent
@@ -224,79 +223,27 @@ func (u boxUser) discovery() ProviderDiscovery {
 	return ProviderDiscovery{Identity: u.Login, Account: u.ID, Enterprise: u.Enterprise.ID}
 }
 
-// connectivityBox validates the connection box-dispatch will actually deploy
-// with. When that is the box-dispatch CCG app, it mints a CCG token and checks
-// it directly — the box CLI is a different (OAuth) identity, so testing the CLI
-// would report on the wrong connection. Otherwise it prefers an explicit
-// BOX_ACCESS_TOKEN, then the authenticated CLI session as the transport (the CLI
-// cannot hand back a raw token under an OAuth login).
+// connectivityBox validates the exact supported authentication configuration
+// lifecycle work will use. This keeps Connect from reporting a successful Box
+// CLI or developer-token path that Deploy cannot use.
 func connectivityBox() (bool, string, ProviderDiscovery) {
-	active, found := boxconn.Active()
-	if found && active.Source == boxconn.SourceDispatch {
-		ok, detail, discovery := connectivityBoxCCG()
-		discovery.AuthType = active.AuthType
-		return ok, detail, discovery
+	connection, err := boxconn.ResolveAuth()
+	if err != nil {
+		return false, err.Error(), ProviderDiscovery{}
 	}
-	ok, detail, discovery := connectivityBoxTransport()
-	if found {
-		discovery.AuthType = active.AuthType
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	token, err := connection.AccessToken(ctx)
+	if err != nil {
+		return false, "Box " + string(connection.Method) + " credentials could not authenticate: " + firstLine(err.Error()), ProviderDiscovery{AuthType: string(connection.Method)}
 	}
+	ok, detail, discovery := connectivityBoxBearer(token)
+	discovery.AuthType = string(connection.Method)
 	return ok, detail, discovery
 }
 
-// connectivityBoxCCG mints a token for the captured CCG app and confirms it can
-// read the acting user, so the reported status reflects the CCG connection
-// itself rather than the CLI's separate OAuth login.
-func connectivityBoxCCG() (bool, string, ProviderDiscovery) {
-	var discovery ProviderDiscovery
-	settings, err := shellstate.LoadConnectionSettings()
-	if err != nil || !settings.HasBoxCCG() {
-		return false, "box CCG app is not fully configured", discovery
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	token, err := boxconn.CCGTokenFromSettings(ctx, settings)
-	if err != nil {
-		return false, "box CCG app could not authenticate: " + firstLine(err.Error()), discovery
-	}
-	return connectivityBoxBearer(token)
-}
-
-func connectivityBoxTransport() (bool, string, ProviderDiscovery) {
-	if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
-		return connectivityBoxToken()
-	}
-	if toolExists("box") {
-		return connectivityBoxCLI()
-	}
-	return false, "missing BOX_ACCESS_TOKEN and no authenticated Box CLI", ProviderDiscovery{}
-}
-
-func connectivityBoxCLI() (bool, string, ProviderDiscovery) {
-	var discovery ProviderDiscovery
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	out, err := runCommandOutput(ctx, "box", "users:get", "me", "--json", "--fields="+boxUserFields)
-	if err != nil {
-		return false, fmt.Sprintf("box cli not authenticated: %s", firstLine(out)), discovery
-	}
-	var user boxUser
-	if err := json.Unmarshal([]byte(out), &user); err != nil {
-		return false, "box cli returned an unreadable user record", discovery
-	}
-	discovery = user.discovery()
-	if discovery.Identity == "" {
-		return false, "box cli returned no authenticated user", discovery
-	}
-	return true, fmt.Sprintf("box cli authenticated as %s", discovery.Identity), discovery
-}
-
-func connectivityBoxToken() (bool, string, ProviderDiscovery) {
-	return connectivityBoxBearer(strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")))
-}
-
-// connectivityBoxBearer reads the acting user from the Box API with a bearer
-// token, shared by the BOX_ACCESS_TOKEN and CCG paths.
+// connectivityBoxBearer reads the acting user from the Box API with an access
+// token minted from the selected CCG or OAuth2 configuration.
 func connectivityBoxBearer(token string) (bool, string, ProviderDiscovery) {
 	var discovery ProviderDiscovery
 	req, _ := http.NewRequest("GET", "https://api.box.com/2.0/users/me?fields="+boxUserFields, nil)
@@ -687,9 +634,9 @@ func dedupe(values []string) []string {
 
 func boxGuidance() []string {
 	return []string{
-		"Authenticate the Box CLI: box login",
-		"or export BOX_ACCESS_TOKEN=<your-box-access-token>",
-		"Verify with: box users:get me --json",
+		"Add a Box CCG app in Dispatch, or export OAuth2 refresh-token credentials:",
+		"BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN",
+		"Then choose Check connection again.",
 	}
 }
 
@@ -729,26 +676,10 @@ func unknownGuidance(name string) []string {
 var allProviderBuilders = map[string]provider{
 	"box": {
 		name: "box",
-		tool: func() bool {
-			// The box CLI is only required when using OAuth authentication.
-			// When CCG credentials are configured, the SDK handles all operations.
-			if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
-				return true
-			}
-			return toolExists("box")
-		},
+		tool: func() bool { return true }, // Box calls use the SDK; no local CLI is required.
 		configured: func() bool {
-			if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
-				return true
-			}
-			if toolExists("box") {
-				return true
-			}
-			// Check if CCG credentials are configured
-			if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
-				return true
-			}
-			return false
+			_, err := boxconn.ResolveAuth()
+			return err == nil || boxconn.HasLegacyCLISelection()
 		},
 		connect:  connectivityBox,
 		guidance: boxGuidance,

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/model"
 	"github.com/unofficialbox/box-dispatch/internal/providers"
@@ -93,8 +94,8 @@ func providerConnectivityGuide(providerKey string) []string {
 	switch providerKey {
 	case "box":
 		return []string{
-			"Set BOX_ACCESS_TOKEN and retry this check.",
-			"Example: export BOX_ACCESS_TOKEN=<token>",
+			"Add a Box CCG app in Dispatch, or set BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN.",
+			"Then retry this check.",
 		}
 	case "salesforce-agentforce":
 		return []string{
@@ -144,14 +145,18 @@ func (e *Engine) validateConnectivity(providerKey string, resolved map[string]an
 	}
 }
 
-func validateBoxConnectivity(tokens map[string]string) error {
-	accessToken := strings.TrimSpace(tokens["BOX_ACCESS_TOKEN"])
-	if accessToken == "" {
-		return fmt.Errorf("BOX_ACCESS_TOKEN is empty")
+func validateBoxConnectivity(_ map[string]string) error {
+	connection, err := boxconn.ResolveAuth()
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
+	accessToken, err := connection.AccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("Box %s authentication failed: %w", connection.Method, err)
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.box.com/2.0/users/me", nil)
 	if err != nil {
 		return err

@@ -47,7 +47,7 @@ func TestRootHelpGroupsCommonAndAdvancedCommands(t *testing.T) {
 			t.Errorf("common help omitted %q:\n%s", command, common)
 		}
 	}
-	for _, command := range []string{"init", "resolve", "validate", "present"} {
+	for _, command := range []string{"init", "resolve", "validate", "present", "serve"} {
 		commandRow := "\n  " + command + " "
 		if strings.Contains(common, commandRow) {
 			t.Errorf("advanced command %q leaked into common help:\n%s", command, common)

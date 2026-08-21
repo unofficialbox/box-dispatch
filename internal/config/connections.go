@@ -28,9 +28,9 @@ type ConnectionSettings struct {
 	BoxCCGSubjectType  string `json:"boxCcgSubjectType,omitempty"` // "user" or "enterprise"
 	BoxCCGSubjectID    string `json:"boxCcgSubjectId,omitempty"`
 
-	// BoxDefaultConnection pins which Box connection box-dispatch uses: a CLI
-	// environment name, or the box-dispatch CCG sentinel. Empty means fall back
-	// to precedence (CCG when configured, else the CLI's current environment).
+	// BoxDefaultConnection records the selected CCG app. Older installations may
+	// contain a Box CLI environment name; Dispatch surfaces a migration message
+	// instead of attempting to use that unsupported path.
 	BoxDefaultConnection string `json:"boxDefaultConnection,omitempty"`
 
 	// VerifiedConnections stores credential-free identity details from the last

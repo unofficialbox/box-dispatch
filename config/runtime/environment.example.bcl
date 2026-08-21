@@ -53,7 +53,6 @@
       "displayName": "Box",
       "role": "Content, unstructured data, and AI",
       "env": {
-        "BOX_ACCESS_TOKEN": "${BOX_ACCESS_TOKEN}",
         "BOX_FOLDER_ID": "${BOX_FOLDER_ID}",
         "BOX_ENTERPRISE_ID": "${BOX_ENTERPRISE_ID}"
       },

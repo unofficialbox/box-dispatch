@@ -15,10 +15,9 @@ var Specs = map[string]ProviderSpec{
 		Key:            "box",
 		DisplayName:    "Box",
 		Platform:       "box",
-		RequiredTools:  []string{"box"},
-		RequiredTokens: []string{"BOX_ACCESS_TOKEN", "BOX_FOLDER_ID"},
+		RequiredTokens: []string{"BOX_FOLDER_ID"},
 		BootstrapSteps: []string{"validate-box-prereqs", "materialize-box-artifacts", "deploy-box-resources", "verify-box-end-state"},
-		SmokeSteps:     []string{"confirm box folder_id can be resolved", "confirm folder scaffold artifacts are available", "confirm access token source is configured"},
+		SmokeSteps:     []string{"confirm box folder_id can be resolved", "confirm folder scaffold artifacts are available", "confirm CCG or OAuth2 refresh-token credentials are configured"},
 	},
 	"salesforce-agentforce": {
 		Key:            "salesforce-agentforce",
