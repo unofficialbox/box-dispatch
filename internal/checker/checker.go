@@ -730,8 +730,11 @@ var allProviderBuilders = map[string]provider{
 	"box": {
 		name: "box",
 		tool: func() bool {
-			// The box CLI is required for file operations even when using CCG auth.
-			// CCG handles authentication but the CLI is still needed for uploads.
+			// The box CLI is only required when using OAuth authentication.
+			// When CCG credentials are configured, the SDK handles all operations.
+			if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
+				return true
+			}
 			return toolExists("box")
 		},
 		configured: func() bool {

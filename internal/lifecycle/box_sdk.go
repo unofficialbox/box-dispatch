@@ -15,8 +15,8 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+	"github.com/unofficialbox/box-open-go-sdk/auth"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
-	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 	"github.com/unofficialbox/box-open-go-sdk/serialization"
@@ -94,11 +94,19 @@ func newBoxSDK() (*boxSDK, error) {
 	// carries the enterprise scopes (e.g. Doc Gen) the CLI's OAuth token lacks,
 	// while the resources it creates stay owned by that user.
 	if settings, err := shellstate.LoadConnectionSettings(); err == nil && prefersBoxCCG(settings) {
-		token, tokenErr := boxconn.CCGTokenFromSettings(context.Background(), settings)
-		if tokenErr != nil {
-			return nil, tokenErr
+		subjectID := settings.BoxCCGSubjectID
+		ccgConfig := auth.CCGConfig{
+			ClientID:     settings.BoxCCGClientID,
+			ClientSecret: settings.BoxCCGClientSecret,
+			UserID:       subjectID,
 		}
-		return &boxSDK{client: boxclient.NewClient(gantryruntime.DeveloperToken(token))}, nil
+		// If subject type is enterprise, set EnterpriseID instead of UserID
+		if settings.BoxCCGSubjectType == "enterprise" {
+			ccgConfig.EnterpriseID = subjectID
+			ccgConfig.UserID = ""
+		}
+		client := boxclient.NewClient(auth.ClientCredentials(ccgConfig))
+		return &boxSDK{client: client}, nil
 	}
 
 	identityOutput, err := exec.Command("box", "users:get", "me", "--json").Output()
@@ -117,7 +125,7 @@ func newBoxSDK() (*boxSDK, error) {
 	if token == "" {
 		return nil, fmt.Errorf("Box CLI returned an unreadable access token")
 	}
-	return &boxSDK{client: boxclient.NewClient(gantryruntime.DeveloperToken(token))}, nil
+	return &boxSDK{client: boxclient.NewClient(auth.DeveloperToken(token))}, nil
 }
 
 func boxUserID(output []byte) string {
@@ -187,7 +195,7 @@ func (sdk *boxSDK) ensureFolder(ctx context.Context, parentID, name string) (str
 	} else if found {
 		return id, nil
 	}
-	folder, err := sdk.client.Folders.Create(ctx, &schemas.FolderCreateRequest{
+	folder, err := sdk.client.Folders.Create(ctx, &schemas.CreateFolderRequest{
 		Name:   name,
 		Parent: schemas.AttributesParent{Id: parentID},
 	}, nil)
@@ -214,16 +222,72 @@ func (sdk *boxSDK) fileExists(ctx context.Context, folderID, name string) (bool,
 	return found, err
 }
 
-func (sdk *boxSDK) fileDigest(_ context.Context, folderID, name string) (string, string, bool, error) {
-	return fileDigestViaCLI(folderID, name)
+func (sdk *boxSDK) fileDigest(ctx context.Context, folderID, name string) (string, string, bool, error) {
+	for item, err := range sdk.client.Folders.ListItems(ctx, folderID, nil) {
+		if err != nil {
+			return "", "", false, err
+		}
+		if item.File != nil && item.File.Name != nil && *item.File.Name == name {
+			sha1 := ""
+			if item.File.Sha1 != nil {
+				sha1 = strings.ToLower(strings.TrimSpace(*item.File.Sha1))
+			}
+			return item.File.Id, sha1, true, nil
+		}
+	}
+	return "", "", false, nil
 }
 
-func (sdk *boxSDK) uploadFile(_ context.Context, folderID, source string) error {
-	return uploadFileWithCLI(folderID, source, false)
+func (sdk *boxSDK) uploadFile(ctx context.Context, folderID, source string) error {
+	f, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", filepath.Base(source), err)
+	}
+	defer func() { _ = f.Close() }()
+
+	request := &schemas.CreateFileContentRequest{
+		Attributes: schemas.PostFileContentAttributes{
+			Name:   filepath.Base(source),
+			Parent: schemas.AttributesParent{Id: folderID},
+		},
+		File: f,
+	}
+
+	_, err = sdk.client.Uploads.UploadFile(ctx, request, nil)
+	if err != nil {
+		return fmt.Errorf("upload %s: %w", filepath.Base(source), err)
+	}
+	return nil
 }
 
-func (sdk *boxSDK) uploadFileVersion(_ context.Context, folderID, source string) error {
-	return uploadFileWithCLI(folderID, source, true)
+func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source string) error {
+	// First find the existing file ID
+	fileID, found, err := sdk.findFile(ctx, folderID, filepath.Base(source))
+	if err != nil {
+		return fmt.Errorf("find existing file: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("file %s not found in folder %s", filepath.Base(source), folderID)
+	}
+
+	f, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", filepath.Base(source), err)
+	}
+	defer func() { _ = f.Close() }()
+
+	request := &schemas.CreateFileIdContentRequest{
+		Attributes: schemas.PostFileIdContentAttributes{
+			Name: filepath.Base(source),
+		},
+		File: f,
+	}
+
+	_, err = sdk.client.Uploads.UploadFileVersion(ctx, fileID, request, nil)
+	if err != nil {
+		return fmt.Errorf("upload version of %s: %w", filepath.Base(source), err)
+	}
+	return nil
 }
 
 func (sdk *boxSDK) metadataTemplateKeys(ctx context.Context, _ []string) (map[string]bool, error) {
@@ -484,9 +548,9 @@ func (boxCLI) createMetadataTemplate(_ context.Context, template boxMetadataTemp
 func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
 	fields := make([]schemas.PostSchemaFields, 0, len(template.Fields))
 	for _, field := range template.Fields {
-		fieldType := schemas.FieldsType3(field.Type)
+		fieldType := schemas.CreateSchemaRequestFieldsType(field.Type)
 		switch fieldType {
-		case schemas.FieldsType3String, schemas.FieldsType3Float, schemas.FieldsType3Date, schemas.FieldsType3Enum, schemas.FieldsType3MultiSelect:
+		case schemas.CreateSchemaRequestFieldsTypeString, schemas.CreateSchemaRequestFieldsTypeFloat, schemas.CreateSchemaRequestFieldsTypeDate, schemas.CreateSchemaRequestFieldsTypeEnum, schemas.CreateSchemaRequestFieldsTypeMultiSelect:
 		default:
 			continue
 		}
@@ -496,7 +560,7 @@ func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetad
 		}
 		fields = append(fields, schemas.PostSchemaFields{Type: fieldType, Key: field.Key, DisplayName: field.DisplayName, Options: options})
 	}
-	_, err := sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.SchemaCreateRequest{
+	_, err := sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
 		Scope: "enterprise", TemplateKey: &template.TemplateKey, DisplayName: template.DisplayName, Fields: fields,
 	})
 	return err
@@ -577,7 +641,7 @@ func (sdk *boxSDK) deleteFile(ctx context.Context, fileID string) error {
 }
 
 func (sdk *boxSDK) deleteMetadataTemplate(ctx context.Context, templateKey string) error {
-	return sdk.client.MetadataTemplates.DeleteSchema(ctx, schemas.GetFileIdMetadataIdIdScopeEnterprise, templateKey)
+	return sdk.client.MetadataTemplates.DeleteSchema(ctx, schemas.GetFileIdMetadataIdScopeEnterprise, templateKey)
 }
 
 // deleteDocgenTemplate takes the template's file ID, which is what
