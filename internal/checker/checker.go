@@ -729,9 +729,26 @@ func unknownGuidance(name string) []string {
 var allProviderBuilders = map[string]provider{
 	"box": {
 		name: "box",
-		tool: func() bool { return true },
+		tool: func() bool {
+			// The box CLI is only required when using OAuth authentication.
+			// When CCG credentials are configured, the SDK handles all operations.
+			if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
+				return true
+			}
+			return toolExists("box")
+		},
 		configured: func() bool {
-			return strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" || toolExists("box")
+			if strings.TrimSpace(os.Getenv("BOX_ACCESS_TOKEN")) != "" {
+				return true
+			}
+			if toolExists("box") {
+				return true
+			}
+			// Check if CCG credentials are configured
+			if settings, err := shellstate.LoadConnectionSettings(); err == nil && settings.HasBoxCCG() {
+				return true
+			}
+			return false
 		},
 		connect:  connectivityBox,
 		guidance: boxGuidance,

@@ -1421,6 +1421,12 @@ func inspectSalesforceMetadataConflicts(project, target string, metadata []strin
 	cmd.Dir = project
 	output, runErr := cmd.CombinedOutput()
 	if runErr != nil {
+		// NonSourceTrackedOrgError means this is a persistent org or a scratch org
+		// without source tracking. Since preview only detects source-tracking conflicts,
+		// and those don't apply here, return an empty conflict list instead of failing.
+		if strings.Contains(string(output), "NonSourceTrackedOrgError") {
+			return nil, nil
+		}
 		return nil, salesforceorg.NewFailure("Unable to preview missing Salesforce metadata. Recheck the org connection and retry.", output, runErr)
 	}
 	conflicts, parseErr := readSalesforceMetadataConflicts(output)
