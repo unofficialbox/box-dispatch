@@ -43,6 +43,42 @@ type DevHub struct {
 	ConnectedStatus string `json:"connectedStatus"`
 }
 
+// Target is a credential-free Salesforce alias that Dispatch can safely offer
+// to the browser. Aliases are the only selectable identifier so usernames and
+// instance URLs never leave the local CLI boundary.
+type Target struct {
+	Alias           string `json:"alias"`
+	ConnectedStatus string `json:"connectedStatus"`
+	Status          string `json:"status"`
+	ExpirationDate  string `json:"expirationDate"`
+	DevHubID        string `json:"devHubId"`
+}
+
+func (t Target) IsScratch() bool {
+	return strings.TrimSpace(t.DevHubID) != "" || strings.TrimSpace(t.ExpirationDate) != ""
+}
+
+func (t Target) Connected() bool {
+	return strings.EqualFold(strings.TrimSpace(t.ConnectedStatus), "connected")
+}
+
+// Healthy reports whether an authenticated target can be selected for a new
+// Dispatch run. Deployment performs a full `sf org display` health check
+// later; this keeps obviously expired scratch orgs out of the browser picker.
+func (t Target) Healthy(now time.Time) bool {
+	if !t.Connected() {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(t.Status))
+	if status == "deleted" || status == "expired" {
+		return false
+	}
+	if expiration, ok := parseExpiration(t.ExpirationDate); ok && !expiration.After(dateOnly(now)) {
+		return false
+	}
+	return true
+}
+
 func (d DevHub) Target() string {
 	if value := strings.TrimSpace(d.Alias); value != "" {
 		return value
@@ -190,6 +226,56 @@ func ListDevHubs() ([]DevHub, error) {
 		return nil, NewFailure("Salesforce returned an unreadable Dev Hub inventory. Update the Salesforce CLI and retry.", output, parseErr)
 	}
 	return hubs, nil
+}
+
+// ListTargets discovers aliased Salesforce orgs already authenticated by the
+// local Salesforce CLI. It never returns usernames, organization IDs, or URLs.
+func ListTargets() ([]Target, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), displayTimeout)
+	defer cancel()
+	output, runErr := exec.CommandContext(ctx, "sf", "org", "list", "--json").CombinedOutput()
+	if runErr != nil {
+		return nil, NewFailure("Unable to discover authenticated Salesforce orgs. Reauthenticate an org in the Salesforce CLI and retry.", output, runErr)
+	}
+	targets, parseErr := ParseTargets(output)
+	if parseErr != nil {
+		return nil, NewFailure("Salesforce returned an unreadable authenticated-org inventory. Update the Salesforce CLI and retry.", output, parseErr)
+	}
+	return targets, nil
+}
+
+// ParseTargets extracts the aliased non-scratch and scratch org records from
+// `sf org list --json`, removing duplicate aliases and disconnected records.
+func ParseTargets(output []byte) ([]Target, error) {
+	var payload struct {
+		Result struct {
+			NonScratchOrgs []Target `json:"nonScratchOrgs"`
+			ScratchOrgs    []Target `json:"scratchOrgs"`
+		} `json:"result"`
+	}
+	if err := decodeJSON(output, &payload); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	targets := make([]Target, 0, len(payload.Result.NonScratchOrgs)+len(payload.Result.ScratchOrgs))
+	for _, target := range append(payload.Result.NonScratchOrgs, payload.Result.ScratchOrgs...) {
+		target.Alias = strings.TrimSpace(target.Alias)
+		if target.Alias == "" || !target.Connected() || seen[target.Alias] {
+			continue
+		}
+		seen[target.Alias] = true
+		targets = append(targets, target)
+	}
+	slices.SortStableFunc(targets, func(a, b Target) int {
+		if a.IsScratch() != b.IsScratch() {
+			if a.IsScratch() {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(strings.ToLower(a.Alias), strings.ToLower(b.Alias))
+	})
+	return targets, nil
 }
 
 // ParseDevHubs decodes, deduplicates, and sorts the Dev Hub inventory. Known

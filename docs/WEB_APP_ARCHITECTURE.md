@@ -42,6 +42,8 @@ save a non-secret BCL plan draft, but it is not an alternate deployment client:
 | --- | --- | --- |
 | `GET /api/health` | active profile and server time | environment values |
 | `GET /api/connections` | sanitized configured and verified connection state | tokens, CCG secret, client ID, provider identity, host names |
+| `GET /api/connections/salesforce/options` | currently authenticated, aliased Salesforce orgs that are healthy enough to select | usernames, org IDs, instance URLs, credentials |
+| `PUT /api/connections/salesforce` | select one authenticated Salesforce alias and require it to be revalidated | arbitrary targets, raw CLI output, credentials |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |
@@ -60,6 +62,11 @@ Every response is `Cache-Control: no-store`. The server has no cross-origin
 policy and must remain loopback-only. The plan writer accepts only Box and
 Salesforce selections; future providers remain unavailable until Dispatch can
 execute their public lifecycle safely.
+
+The browser can change only a Salesforce alias that the local Salesforce CLI
+already knows and reports as connected. Choosing an alias clears its prior
+verification snapshot, so the next validation performs the full org-health
+check. Box CCG credentials remain terminal-managed and are never browser input.
 
 ## API progression
 

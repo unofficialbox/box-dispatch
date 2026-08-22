@@ -22,13 +22,15 @@ type connectionStore func() (config.ConnectionSettings, error)
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
-	Profile         string
-	DeploymentStore deploymentStore
-	ConnectionStore connectionStore
-	PlanStore       planStore
-	PlanSaver       planSaver
-	Runs            *runManager
-	Now             func() time.Time
+	Profile           string
+	DeploymentStore   deploymentStore
+	ConnectionStore   connectionStore
+	ConnectionSaver   connectionSaver
+	SalesforceTargets salesforceTargetStore
+	PlanStore         planStore
+	PlanSaver         planSaver
+	Runs              *runManager
+	Now               func() time.Time
 }
 
 // NewHandler returns the API exposed to a local browser. Mount it only on a
@@ -44,6 +46,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.ConnectionStore == nil {
 		options.ConnectionStore = loadConnections
+	}
+	if options.ConnectionSaver == nil {
+		options.ConnectionSaver = savePersistedConnections
+	}
+	if options.SalesforceTargets == nil {
+		options.SalesforceTargets = listSalesforceTargets
 	}
 	if options.PlanStore == nil {
 		options.PlanStore = loadPlan
@@ -103,6 +111,60 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, connectionSummaries(settings))
+	})
+	mux.HandleFunc("GET /api/connections/salesforce/options", func(w http.ResponseWriter, _ *http.Request) {
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		targets, err := options.SalesforceTargets()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "authenticated Salesforce orgs are unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentSalesforceOptions(settings, targets))
+	})
+	mux.HandleFunc("PUT /api/connections/salesforce", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input salesforceConnectionSelection
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "connection selection must be valid JSON")
+			return
+		}
+		if err := ensureEndOfJSON(decoder); err != nil {
+			writeError(w, http.StatusBadRequest, "connection selection must contain one JSON object")
+			return
+		}
+		input.Alias = strings.TrimSpace(input.Alias)
+		if input.Alias == "" {
+			writeError(w, http.StatusBadRequest, "select an authenticated Salesforce org")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		targets, err := options.SalesforceTargets()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "authenticated Salesforce orgs are unavailable")
+			return
+		}
+		for _, target := range targets {
+			if strings.EqualFold(target.Alias, input.Alias) && target.Healthy(options.Now()) {
+				settings = saveSalesforceSelection(settings, target)
+				if err := options.ConnectionSaver(settings); err != nil {
+					writeError(w, http.StatusInternalServerError, "could not save the Salesforce selection")
+					return
+				}
+				writeJSON(w, http.StatusOK, connectionSummary{Name: "Salesforce", Configured: true, Selection: settings.SalesforceAlias, Status: settings.SalesforceOrgStatus, ExpiresAt: settings.SalesforceExpirationDate})
+				return
+			}
+		}
+		writeError(w, http.StatusBadRequest, "select a currently authenticated Salesforce org")
 	})
 	mux.HandleFunc("GET /api/plan", func(w http.ResponseWriter, _ *http.Request) {
 		plan, err := options.PlanStore()

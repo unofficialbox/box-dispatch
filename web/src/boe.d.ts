@@ -6,6 +6,8 @@ declare module 'react' {
       'box-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
         tone?: 'primary' | 'secondary' | 'danger' | 'success'
+        disabled?: boolean
+        isLoading?: boolean
       }
     }
   }

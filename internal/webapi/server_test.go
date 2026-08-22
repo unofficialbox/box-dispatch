@@ -11,6 +11,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 )
 
 func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
@@ -108,6 +109,49 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 	}
 	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") {
 		t.Fatalf("response omitted safe connection state: %s", body)
+	}
+}
+
+func TestSalesforceConnectionSelectionOnlyAcceptsAuthenticatedAlias(t *testing.T) {
+	settings := config.ConnectionSettings{
+		SalesforceAlias: "old-org", SalesforceOrgID: "00Dold",
+		VerifiedConnections: map[string]config.VerifiedConnection{"salesforce": {VerifiedAt: "2026-08-21", Selection: "old-org"}},
+	}
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		SalesforceTargets: func() ([]salesforceorg.Target, error) {
+			return []salesforceorg.Target{
+				{Alias: "dispatch-scratch", ConnectedStatus: "Connected", Status: "Active", ExpirationDate: "2026-09-15", DevHubID: "00Dhub"},
+				{Alias: "disconnected", ConnectedStatus: "Disconnected"},
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) },
+	})
+
+	options := httptest.NewRecorder()
+	handler.ServeHTTP(options, httptest.NewRequest(http.MethodGet, "/api/connections/salesforce/options", nil))
+	if options.Code != http.StatusOK || !strings.Contains(options.Body.String(), "dispatch-scratch") || strings.Contains(options.Body.String(), "disconnected") {
+		t.Fatalf("options = %d: %s", options.Code, options.Body.String())
+	}
+
+	selectRequest := httptest.NewRequest(http.MethodPut, "/api/connections/salesforce", strings.NewReader(`{"alias":"dispatch-scratch"}`))
+	selected := httptest.NewRecorder()
+	handler.ServeHTTP(selected, selectRequest)
+	if selected.Code != http.StatusOK {
+		t.Fatalf("selection = %d: %s", selected.Code, selected.Body.String())
+	}
+	if settings.SalesforceAlias != "dispatch-scratch" || settings.SalesforceOrgID != "" || settings.SalesforceOrgType != "scratch" {
+		t.Fatalf("saved settings = %#v", settings)
+	}
+	if _, found := settings.VerifiedConnections["salesforce"]; found {
+		t.Fatalf("selection retained stale verification: %#v", settings.VerifiedConnections)
+	}
+
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, httptest.NewRequest(http.MethodPut, "/api/connections/salesforce", strings.NewReader(`{"alias":"unknown"}`)))
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("rejected selection = %d: %s", rejected.Code, rejected.Body.String())
 	}
 }
 

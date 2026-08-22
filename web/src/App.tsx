@@ -52,6 +52,14 @@ type RunEvent = {
   status: DispatchRun['status']
 }
 
+type SalesforceConnectionOption = {
+  alias: string
+  kind: string
+  status: string
+  expiresAt?: string
+  selected: boolean
+}
+
 const phases: Phase[] = ['Choose', 'Connect', 'Configure', 'Review', 'Deploy']
 
 const fallbackDeployments: Deployment[] = [
@@ -79,6 +87,10 @@ function App() {
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
 	const [diagnostic, setDiagnostic] = useState<RunDiagnostic | null>(null)
 	const [diagnosticRunID, setDiagnosticRunID] = useState<string | null>(null)
+	const [connectionDrawerOpen, setConnectionDrawerOpen] = useState(false)
+	const [salesforceOptions, setSalesforceOptions] = useState<SalesforceConnectionOption[]>([])
+	const [selectedSalesforceAlias, setSelectedSalesforceAlias] = useState('')
+	const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [notice, setNotice] = useState('Loading the saved deployment plan…')
   const activeRunID = run && (run.status === 'queued' || run.status === 'running') ? run.id : null
 	const refreshRunHistory = () => {
@@ -156,6 +168,33 @@ function App() {
 		}).then(setDiagnostic).catch(() => setNotice('Diagnostic guidance is unavailable. Open the failed run in the Dispatch terminal for the original provider output.'))
 	}
 
+	const openConnectionDrawer = () => {
+		setConnectionDrawerOpen(true)
+		setConnectionsLoading(true)
+		void fetch('/api/connections/salesforce/options').then(async (response) => {
+			if (!response.ok) throw new Error('Authenticated Salesforce orgs are unavailable.')
+			return (await response.json()) as SalesforceConnectionOption[]
+		}).then((options) => {
+			setSalesforceOptions(options)
+			setSelectedSalesforceAlias(options.find((option) => option.selected)?.alias ?? options[0]?.alias ?? '')
+		}).catch(() => setNotice('Authenticated Salesforce orgs are unavailable. Connect one with the Salesforce CLI, then try again.')).finally(() => setConnectionsLoading(false))
+	}
+
+	const selectSalesforceConnection = () => {
+		if (!selectedSalesforceAlias) return
+		setConnectionsLoading(true)
+		void fetch('/api/connections/salesforce', {
+			method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: selectedSalesforceAlias }),
+		}).then(async (response) => {
+			if (!response.ok) throw new Error('Salesforce org could not be selected.')
+			return await response.json()
+		}).then(() => {
+			setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'salesforce' ? { ...component, configured: true, verified: false, ready: false } : component) }))
+			setConnectionDrawerOpen(false)
+			setNotice('Salesforce org saved. Validate configuration to verify the new connection.')
+		}).catch(() => setNotice('Salesforce org could not be selected. Choose an authenticated org and try again.')).finally(() => setConnectionsLoading(false))
+	}
+
   const savePlan = () => {
 		void fetch('/api/plan', {
 			method: 'PUT',
@@ -202,7 +241,7 @@ function App() {
           })}
         </ol>
 
-		{activePhase === 'Deploy' ? <DeployView run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} />}
+		{activePhase === 'Deploy' ? <DeployView run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} onConnections={openConnectionDrawer} />}
 
         <section id="history" className="history" aria-labelledby="history-title">
           <div className="section-heading"><div><h2 id="history-title">Recent deployments</h2></div><a href="#history">View full history</a></div>
@@ -211,6 +250,7 @@ function App() {
 		{recentRuns.length > 0 && <section className="run-history" aria-labelledby="run-history-title"><div className="section-heading"><div><h2 id="run-history-title">Recent web runs</h2></div><span>{recentRuns.length} saved locally</span></div><ol>{recentRuns.slice(0, 5).map((savedRun) => <li key={savedRun.id}><div><strong>{savedRun.action === 'deploy' ? 'Apply configuration' : 'Validate configuration'}</strong><span>{savedRun.id}</span></div><span className={`status ${savedRun.status === 'completed' ? 'ready' : 'running'}`}>{savedRun.status === 'failed' ? 'Needs attention' : savedRun.status}</span>{savedRun.status === 'failed' && <button className="text-button" type="button" onClick={() => openDiagnostics(savedRun.id)}>View diagnostics</button>}</li>)}</ol></section>}
       </main>
 		{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)} />}
+		{connectionDrawerOpen && <ConnectionsDrawer options={salesforceOptions} selectedAlias={selectedSalesforceAlias} loading={connectionsLoading} onChange={setSelectedSalesforceAlias} onSave={selectSalesforceConnection} onClose={() => setConnectionDrawerOpen(false)} />}
     </div>
   )
 }
@@ -227,9 +267,9 @@ async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   return (await response.json()) as T
 }
 
-function ReviewView({ plan, notice, onSave, onDeploy }: { plan: DeploymentPlan; notice: string; onSave: () => void; onDeploy: () => void }) {
+function ReviewView({ plan, notice, onSave, onDeploy, onConnections }: { plan: DeploymentPlan; notice: string; onSave: () => void; onDeploy: () => void; onConnections: () => void }) {
   const status = plan.components.every((component) => component.ready) ? 'Ready' : 'Needs attention'
-  return <section className="review-layout" aria-label="Review deployment plan"><article className="plan-card"><div className="section-heading"><div><h2>Review deployment plan</h2></div><span className={`status ${status === 'Ready' ? 'ready' : 'running'}`}>{status}</span></div><PlanGroup title="Solution" rows={[["Template", plan.template], ["Repository", plan.repository], ["Deployment strategy", "Reuse existing"]]} />{plan.components.map((component) => <PlanGroup key={component.id} title={component.name} rows={[["Selected", "Included in this plan"], ["Connection", component.ready ? 'Verified and ready' : component.configured ? 'Configured — needs verification' : 'Not configured']]} />)}<p className="notice" role="status">{notice}</p><footer className="action-row"><box-button label="Save plan" tone="secondary" onClick={onSave}></box-button><box-button label="Validate configuration" tone="primary" onClick={onDeploy}></box-button></footer></article><ActivityRail events={[]} /></section>
+  return <section className="review-layout" aria-label="Review deployment plan"><article className="plan-card"><div className="section-heading"><div><h2>Review deployment plan</h2></div><span className={`status ${status === 'Ready' ? 'ready' : 'running'}`}>{status}</span></div><PlanGroup title="Solution" rows={[["Template", plan.template], ["Repository", plan.repository], ["Deployment strategy", "Reuse existing"]]} />{plan.components.map((component) => <PlanGroup key={component.id} title={component.name} rows={[["Selected", "Included in this plan"], ["Connection", component.ready ? 'Verified and ready' : component.configured ? 'Configured — needs verification' : 'Not configured']]} />)}<p className="notice" role="status">{notice}</p><footer className="action-row"><box-button label="Save plan" tone="secondary" onClick={onSave}></box-button><box-button label="Validate configuration" tone="primary" onClick={onDeploy}></box-button></footer></article><ActivityRail events={[]} onConnections={onConnections} /></section>
 }
 
 function DeployView({ run, events, notice, onApply, onDiagnostics }: { run: DispatchRun | null; events: RunEvent[]; notice: string; onApply: () => void; onDiagnostics: (runID: string) => void }) {
@@ -243,12 +283,16 @@ function PlanGroup({ title, rows }: { title: string; rows: [string, string][] })
   return <section className="plan-group"><h3>{title}</h3>{rows.map(([label, value]) => <div className="plan-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
 }
 
-function ActivityRail({ events }: { events: RunEvent[] }) {
-  return <aside className="activity-card" aria-labelledby="activity-title"><div className="section-heading"><div><h2 id="activity-title">Activity</h2></div>{events.length > 0 && <span className="live-dot">Live</span>}</div>{events.length === 0 ? <p className="empty-activity">Run activity will appear here.</p> : <ol className="activity-list">{events.map((event, index) => <li className={index === events.length - 1 ? 'current' : ''} key={event.sequence}><span>{event.status === 'completed' ? '✓' : event.status === 'failed' ? '!' : '•'}</span><div><strong>{event.message}</strong><small>{event.provider || 'Dispatch'}</small></div></li>)}</ol>}<div className="target-summary"><strong>Destinations</strong><a href="#box">Open Box enterprise</a><a href="#salesforce">Open Salesforce org</a></div></aside>
+function ActivityRail({ events, onConnections }: { events: RunEvent[]; onConnections?: () => void }) {
+  return <aside className="activity-card" aria-labelledby="activity-title"><div className="section-heading"><div><h2 id="activity-title">Activity</h2></div>{events.length > 0 && <span className="live-dot">Live</span>}</div>{events.length === 0 ? <p className="empty-activity">Run activity will appear here.</p> : <ol className="activity-list">{events.map((event, index) => <li className={index === events.length - 1 ? 'current' : ''} key={event.sequence}><span>{event.status === 'completed' ? '✓' : event.status === 'failed' ? '!' : '•'}</span><div><strong>{event.message}</strong><small>{event.provider || 'Dispatch'}</small></div></li>)}</ol>}<div className="target-summary"><strong>Connections</strong><span>Box is managed in Dispatch CLI.</span>{onConnections ? <button className="text-button" type="button" onClick={onConnections}>Change Salesforce org</button> : <span>Salesforce connection is locked while this run is active.</span>}</div></aside>
 }
 
 function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiagnostic | null; onClose: () => void }) {
 	return <div className="drawer-backdrop" role="presentation"><aside className="diagnostics-drawer" role="dialog" aria-modal="true" aria-labelledby="diagnostics-title"><button className="drawer-close" type="button" onClick={onClose} aria-label="Close diagnostics">×</button>{diagnostic ? <><h2 id="diagnostics-title">{diagnostic.title}</h2><p>{diagnostic.summary}</p><h3>Recommended next steps</h3><ol>{diagnostic.nextSteps.map((step) => <li key={step}>{step}</li>)}</ol><div className="cli-hint"><strong>Full provider detail</strong><p>{diagnostic.cliHint}</p></div></> : <><h2 id="diagnostics-title">Loading diagnostic guidance</h2><p>Dispatch is preparing safe next steps for this failed run.</p></>}</aside></div>
+}
+
+function ConnectionsDrawer({ options, selectedAlias, loading, onChange, onSave, onClose }: { options: SalesforceConnectionOption[]; selectedAlias: string; loading: boolean; onChange: (alias: string) => void; onSave: () => void; onClose: () => void }) {
+	return <div className="drawer-backdrop" role="presentation"><aside className="diagnostics-drawer" role="dialog" aria-modal="true" aria-labelledby="connections-title"><button className="drawer-close" type="button" onClick={onClose} aria-label="Close connections">×</button><h2 id="connections-title">Salesforce connection</h2><p>Choose an org that is already authenticated in the Salesforce CLI. Selecting it clears its previous verification so Dispatch can recheck it before deployment.</p>{loading && options.length === 0 ? <p>Loading authenticated orgs…</p> : options.length === 0 ? <div className="cli-hint"><strong>No authenticated aliases found</strong><p>Authenticate an org and give it an alias with the Salesforce CLI, then reopen this panel.</p></div> : <><label className="connection-select" htmlFor="salesforce-org"><span>Authenticated org</span><select id="salesforce-org" value={selectedAlias} onChange={(event) => onChange(event.target.value)} disabled={loading}>{options.map((option) => <option key={option.alias} value={option.alias}>{option.alias} · {option.kind}{option.expiresAt ? ` · expires ${option.expiresAt}` : ''}</option>)}</select></label><p className="connection-footnote">Only aliases, status, and scratch-org expiration are shown here. Credentials remain in the local Salesforce CLI.</p><footer className="drawer-actions"><box-button label={loading ? 'Saving…' : 'Use this Salesforce org'} tone="primary" disabled={loading || !selectedAlias} onClick={onSave}></box-button></footer></>}</aside></div>
 }
 
 export default App
