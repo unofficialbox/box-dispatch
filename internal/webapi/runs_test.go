@@ -15,8 +15,8 @@ import (
 )
 
 func TestValidationRunStreamsSafeProgressAndCompletes(t *testing.T) {
-	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, emit func(string, string)) ([]lifecycle.Item, error) {
-		emit("box", "Inspecting Box configuration")
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		emit("box", lifecycle.ProgressUpdate{Message: "Inspecting Box configuration", Component: "Metadata Template:Contract", State: lifecycle.ProgressRunning, Current: 1, Total: 2})
 		return []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent, Detail: "raw provider diagnostic"}}, nil
 	}
 	runs := newRunManagerWithExecutors(validate, nil, func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) })
@@ -41,12 +41,12 @@ func TestValidationRunStreamsSafeProgressAndCompletes(t *testing.T) {
 }
 
 func TestRunEndpointsProvideSSEAndRequireCompletedValidationForDeploy(t *testing.T) {
-	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, emit func(string, string)) ([]lifecycle.Item, error) {
-		emit("box", "Reading package")
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		emit("box", lifecycle.ProgressUpdate{Message: "Reading package", Component: "Workspace structure", State: lifecycle.ProgressCompleted, Current: 1, Total: 1})
 		return []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}, nil
 	}
-	deploy := func(_ context.Context, _ config.SolutionPlan, items []lifecycle.Item, emit func(string, string)) ([]lifecycle.Item, error) {
-		emit("box", "No changes needed")
+	deploy := func(_ context.Context, _ config.SolutionPlan, items []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		emit("box", lifecycle.ProgressUpdate{Message: "No changes needed", State: lifecycle.ProgressCompleted})
 		return items, nil
 	}
 	runs := newRunManagerWithExecutors(validate, deploy, time.Now)
@@ -84,6 +84,11 @@ func TestRunEndpointsProvideSSEAndRequireCompletedValidationForDeploy(t *testing
 			t.Fatalf("stream omitted %q: %s", required, stream.Body.String())
 		}
 	}
+	for _, required := range []string{`"component":"Workspace structure"`, `"progressState":"completed"`, `"current":1`, `"total":1`} {
+		if !strings.Contains(stream.Body.String(), required) {
+			t.Fatalf("stream omitted structured progress %q: %s", required, stream.Body.String())
+		}
+	}
 	if strings.Contains(stream.Body.String(), "raw provider diagnostic") {
 		t.Fatalf("stream leaked raw diagnostic: %s", stream.Body.String())
 	}
@@ -106,10 +111,11 @@ func TestDeploymentRequiresSuccessfulValidation(t *testing.T) {
 }
 
 func TestValidationFailsWhenProviderReturnsFailedItem(t *testing.T) {
-	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, string)) ([]lifecycle.Item, error) {
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
 		return []lifecycle.Item{{
 			Provider: "salesforce", Status: lifecycle.StatusFailed,
-			Detail: "Unable to read Salesforce metadata: ERROR_HTTP_420",
+			Detail:     "Unable to read Salesforce metadata: ERROR_HTTP_420",
+			Diagnostic: `{"message":"Session unavailable","instance":"https://example.my.salesforce.com?sid=secret"}`,
 		}}, nil
 	}
 	runs := newRunManagerWithExecutors(validate, nil, time.Now)
@@ -129,6 +135,9 @@ func TestValidationFailsWhenProviderReturnsFailedItem(t *testing.T) {
 	diagnostic, ok := runs.diagnostics(run.ID)
 	if !ok || !strings.Contains(diagnostic.Summary, "Salesforce could not be reached") {
 		t.Fatalf("diagnostic = %#v, found=%t", diagnostic, ok)
+	}
+	if diagnostic.Provider != "Salesforce" || diagnostic.Code != "SALESFORCE_ORG_UNREACHABLE" || !strings.Contains(diagnostic.TechnicalDetail, "Session unavailable") {
+		t.Fatalf("diagnostic did not preserve safe provider context: %#v", diagnostic)
 	}
 	if _, err := runs.startDeployment(run.ID); err == nil || !strings.Contains(err.Error(), "successful validation") {
 		t.Fatalf("deploy error = %v", err)
@@ -166,7 +175,7 @@ func TestRestoredValidationCannotApplyWithoutItsLivePackage(t *testing.T) {
 }
 
 func TestDiagnosticEndpointProvidesSafeGuidance(t *testing.T) {
-	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, string)) ([]lifecycle.Item, error) {
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
 		return nil, errors.New("ERROR_HTTP_420 secret-adjacent response at /private/path")
 	}
 	runs := newRunManagerWithExecutors(validate, nil, time.Now)
@@ -189,6 +198,27 @@ func TestDiagnosticEndpointProvidesSafeGuidance(t *testing.T) {
 	}
 	if !strings.Contains(body, "Salesforce could not be reached") {
 		t.Fatalf("diagnostic did not include actionable guidance: %s", body)
+	}
+}
+
+func TestSafeDiagnosticExplainsMissingScratchOrg(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "salesforce",
+		Detail:   "Unable to inspect Salesforce org box-dispatch-scratch.",
+		Diagnostic: `{
+			"code":"NoScratchInfo",
+			"message":"No information for scratch org with ID 00D000000000000 found in Dev Hub devhub@example.com."
+		}`,
+	})
+
+	if diagnostic.Provider != "Salesforce" || diagnostic.Code != "SALESFORCE_SCRATCH_ORG_UNAVAILABLE" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !strings.Contains(diagnostic.Summary, "no longer available") || len(diagnostic.NextSteps) != 3 {
+		t.Fatalf("diagnostic was not actionable: %#v", diagnostic)
+	}
+	if strings.Contains(strings.ToLower(strings.Join(diagnostic.NextSteps, " ")), "cli") {
+		t.Fatalf("diagnostic requires CLI knowledge: %#v", diagnostic.NextSteps)
 	}
 }
 

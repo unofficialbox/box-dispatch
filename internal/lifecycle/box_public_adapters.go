@@ -21,7 +21,7 @@ type boxAIResource struct {
 	Instructions string
 }
 
-func validateBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, item *Item) error {
+func validateBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, item *Item, report Reporter, components []string) error {
 	if manifest.CapabilityEnabled("Doc Gen Template", selection) {
 		registered, err := api.docgenTemplateFileIDs(ctx)
 		if err != nil {
@@ -32,6 +32,7 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 				continue
 			}
 			component := "Doc Gen Template:" + filepath.Base(file.Source)
+			report.component(component, ProgressRunning, "Inspecting the Doc Gen template", componentIndex(components, component), len(components))
 			fileID, found, err := findWorkspaceFile(ctx, api, workspaceID, file.TargetFolder, filepath.Base(file.Source))
 			if err != nil {
 				return fmt.Errorf("inspect %s: %w", component, err)
@@ -45,6 +46,7 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 				}
 			}
 			classifyBoxComponent(item, component, present, deployable)
+			report.component(component, ProgressCompleted, validationResultMessage(present, deployable), componentIndex(components, component)+1, len(components))
 		}
 	}
 
@@ -58,12 +60,16 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 			return fmt.Errorf("inspect Box AI Studio agents: %w", err)
 		}
 		for _, agent := range agents {
-			classifyBoxComponent(item, agent.Component, existing[agent.Name], !existing[agent.Name])
+			present := existing[agent.Name]
+			report.component(agent.Component, ProgressRunning, "Inspecting the Box AI agent", componentIndex(components, agent.Component), len(components))
+			classifyBoxComponent(item, agent.Component, present, !present)
+			report.component(agent.Component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, agent.Component)+1, len(components))
 		}
 	}
 
 	if capability, enabled := enabledCapability(manifest, selection, "Box Hub"); enabled {
 		component := "Box Hub:" + capability.DisplayName
+		report.component(component, ProgressRunning, "Inspecting the Box hub", componentIndex(components, component), len(components))
 		existing, err := api.hubTitles(ctx)
 		switch {
 		case isBoxPermissionError(err):
@@ -77,6 +83,9 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 		default:
 			classifyBoxComponent(item, component, existing[capability.DisplayName], !existing[capability.DisplayName])
 		}
+		present := slices.Contains(item.Present, component)
+		deployable := slices.Contains(item.DeployableComponents, component)
+		report.component(component, ProgressCompleted, validationResultMessage(present, deployable), componentIndex(components, component)+1, len(components))
 	}
 
 	if manifest.CapabilityEnabled("Automate Workflow", selection) && workspaceID != "" {
@@ -86,7 +95,9 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 		}
 		for _, component := range componentsOfType(item.Missing, "Automate Workflow") {
 			name := strings.TrimPrefix(component, "Automate Workflow:")
+			report.component(component, ProgressRunning, "Inspecting the Box Automate workflow", componentIndex(components, component), len(components))
 			classifyBoxComponent(item, component, existing[name], false)
+			report.component(component, ProgressCompleted, validationResultMessage(existing[name], false), componentIndex(components, component)+1, len(components))
 		}
 	}
 	return nil

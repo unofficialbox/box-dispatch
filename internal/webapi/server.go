@@ -4,6 +4,7 @@
 package webapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -28,6 +30,8 @@ type ServerOptions struct {
 	ConnectionStore   connectionStore
 	ConnectionSaver   connectionSaver
 	SalesforceTargets salesforceTargetStore
+	SalesforceCheck   salesforceCheck
+	SalesforceCreate  salesforceScratchCreate
 	PlanStore         planStore
 	PlanSaver         planSaver
 	Templates         templateStore
@@ -56,6 +60,13 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
 	}
+	salesforceClient := salesforceapi.NewClient()
+	if options.SalesforceCheck == nil {
+		options.SalesforceCheck = salesforceClient.Check
+	}
+	if options.SalesforceCreate == nil {
+		options.SalesforceCreate = salesforceClient.CreateScratch
+	}
 	if options.PlanStore == nil {
 		options.PlanStore = loadPlan
 	}
@@ -78,6 +89,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	if profile == "" {
 		profile = strings.TrimSpace(os.Getenv("BOX_DISPATCH_PROFILE"))
 	}
+	scratchJobs := newScratchJobManager(options.SalesforceCreate, options.ConnectionStore, options.ConnectionSaver)
 	if profile == "" {
 		profile = "default"
 	}
@@ -127,12 +139,110 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
 			return
 		}
+		if settings.HasSalesforceREST() {
+			writeJSON(w, http.StatusOK, presentSalesforceRESTOption(settings))
+			return
+		}
 		targets, err := options.SalesforceTargets()
 		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "authenticated Salesforce orgs are unavailable")
+			writeJSON(w, http.StatusOK, []salesforceConnectionOption{})
 			return
 		}
 		writeJSON(w, http.StatusOK, presentSalesforceOptions(settings, targets))
+	})
+	mux.HandleFunc("PUT /api/connections/salesforce/rest", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input salesforceRESTInput
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "Salesforce connection must be one valid JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings = saveSalesforceREST(settings, input)
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not save the Salesforce connection")
+			return
+		}
+		writeJSON(w, http.StatusOK, connectionSummary{Name: "Salesforce", Configured: true, AuthType: "Salesforce REST API", Selection: settings.SalesforceAlias, Status: "Needs availability check", ExpiresAt: settings.SalesforceExpirationDate})
+	})
+	mux.HandleFunc("POST /api/connections/salesforce/check", func(w http.ResponseWriter, r *http.Request) {
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		if !settings.HasSalesforceREST() {
+			writeError(w, http.StatusBadRequest, "connect a Salesforce org before checking availability")
+			return
+		}
+		if strings.EqualFold(settings.SalesforceOrgType, "scratch") && settings.SalesforceExpirationDate != "" {
+			expiresAt, parseErr := time.Parse("2006-01-02", settings.SalesforceExpirationDate)
+			if parseErr == nil && expiresAt.Before(options.Now().UTC().Truncate(24*time.Hour)) {
+				settings.SalesforceOrgStatus = "Expired"
+				_ = options.ConnectionSaver(settings)
+				writeError(w, http.StatusGone, "The selected Salesforce scratch org expired. Create a replacement scratch org to continue.")
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		status, err := options.SalesforceCheck(ctx, targetCredential(settings))
+		if err != nil {
+			settings.SalesforceOrgStatus = "Unavailable"
+			_ = options.ConnectionSaver(settings)
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		settings.SalesforceOrgID = status.OrgID
+		settings.SalesforceOrgStatus = status.Status
+		if settings.VerifiedConnections == nil {
+			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
+		}
+		settings.VerifiedConnections["salesforce"] = config.VerifiedConnection{VerifiedAt: options.Now().UTC().Format(time.RFC3339), Selection: settings.SalesforceAlias, Identity: status.Username, OrgID: status.OrgID, OrgStatus: status.Status, OrgType: settings.SalesforceOrgType, ExpiresAt: settings.SalesforceExpirationDate, AuthType: "Salesforce REST API"}
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "Salesforce is available, but Dispatch could not save the check")
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	})
+	mux.HandleFunc("POST /api/salesforce/scratch-orgs", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input scratchCreateInput
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "scratch-org request must be one valid JSON object")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		if !settings.HasSalesforceDevHub() {
+			writeError(w, http.StatusBadRequest, "connect a Salesforce Dev Hub before creating a scratch org")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, scratchJobs.start(input))
+	})
+	mux.HandleFunc("GET /api/salesforce/scratch-orgs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		job, ok := scratchJobs.get(r.PathValue("id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "scratch-org request was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
 	})
 	mux.HandleFunc("PUT /api/connections/box", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -302,10 +412,10 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		plan, err := options.PackageAssembler(selected, input.Components, input.Strategy)
 		if err != nil {
-			// Workspace and git diagnostics can reveal local paths. The CLI keeps
-			// those details; the browser receives an actionable, credential-safe
-			// status instead.
-			writeError(w, http.StatusInternalServerError, "Dispatch could not assemble the selected template. Check the local Dispatch terminal, then try again.")
+			// Workspace and git diagnostics can reveal local paths. Keep those
+			// details in the local service log while giving the browser a complete
+			// recovery action that does not assume terminal knowledge.
+			writeError(w, http.StatusInternalServerError, "Dispatch could not assemble the selected template. Verify the template source is available, then try again.")
 			return
 		}
 		if err := options.PlanSaver(plan); err != nil {
@@ -579,7 +689,13 @@ func connectionSummaries(settings config.ConnectionSettings) []connectionSummary
 			Status: boxVerification.AuthType,
 		},
 		{
-			Name: "Salesforce", Configured: settings.SalesforceAlias != "", Verified: salesforceVerification.VerifiedAt != "",
+			Name: "Salesforce", Configured: settings.SalesforceAlias != "" || settings.HasSalesforceREST() || settings.HasSalesforceDevHub(), Verified: salesforceVerification.VerifiedAt != "",
+			AuthType: func() string {
+				if settings.HasSalesforceREST() || settings.HasSalesforceDevHub() {
+					return "Salesforce REST API"
+				}
+				return "Salesforce CLI"
+			}(),
 			Selection: settings.SalesforceAlias, Status: settings.SalesforceOrgStatus,
 			ExpiresAt: settings.SalesforceExpirationDate,
 		},

@@ -1149,7 +1149,7 @@ func (m rootShellModel) startNextValidation() (tea.Model, tea.Cmd) {
 	ch := make(chan tea.Msg, 64)
 	m.activityCh = ch
 	go func() {
-		report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: provider, line: line} })
+		report := lifecycle.Reporter(func(update lifecycle.ProgressUpdate) { ch <- activityMsg{provider: provider, line: update.Message} })
 		item, err := lifecycle.ValidateProvider(root, provider, report)
 		ch <- providerValidationFinishedMsg{provider: provider, item: item, err: err}
 	}()
@@ -1178,7 +1178,9 @@ func (m rootShellModel) startNextDeployment() (tea.Model, tea.Cmd) {
 		ch := make(chan tea.Msg, 64)
 		m.activityCh = ch
 		go func() {
-			report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: deployItem.Provider, line: line} })
+			report := lifecycle.Reporter(func(update lifecycle.ProgressUpdate) {
+				ch <- activityMsg{provider: deployItem.Provider, line: update.Message}
+			})
 			result, err := lifecycle.DeployProvider(root, deployItem, report)
 			ch <- providerDeployFinishedMsg{provider: deployItem.Provider, item: result, err: err}
 		}()
@@ -1296,7 +1298,7 @@ func (m rootShellModel) startNextTeardown() (tea.Model, tea.Cmd) {
 		ch := make(chan tea.Msg, 64)
 		m.activityCh = ch
 		go func() {
-			report := lifecycle.Reporter(func(line string) { ch <- activityMsg{provider: provider, line: line} })
+			report := lifecycle.Reporter(func(update lifecycle.ProgressUpdate) { ch <- activityMsg{provider: provider, line: update.Message} })
 			result, err := lifecycle.DestroyProvider(root, provider, resources, report)
 			ch <- providerTeardownFinishedMsg{provider: provider, result: result, err: err}
 		}()

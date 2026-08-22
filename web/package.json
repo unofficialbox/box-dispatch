@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@unofficialbox/box-open-elements": "0.5.0",
+    "@unofficialbox/box-open-elements": "0.6.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

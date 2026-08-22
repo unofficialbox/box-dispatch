@@ -15,6 +15,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/bcl"
 	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
@@ -72,14 +73,40 @@ func addResource(item *Item, component, kind, name, id, resourceURL string) {
 	})
 }
 
-// Reporter receives human-readable progress lines from a long-running lifecycle
-// operation so the caller can surface live activity. The nil Reporter is safe
-// and simply discards messages.
-type Reporter func(message string)
+type ProgressState string
+
+const (
+	ProgressActivity  ProgressState = "activity"
+	ProgressQueued    ProgressState = "queued"
+	ProgressRunning   ProgressState = "running"
+	ProgressCompleted ProgressState = "completed"
+	ProgressFailed    ProgressState = "failed"
+)
+
+// ProgressUpdate describes either a provider-level activity message or the
+// state of one packaged component. Component updates let browser clients show
+// every validation item without parsing human-readable log lines.
+type ProgressUpdate struct {
+	Message   string
+	Component string
+	State     ProgressState
+	Current   int
+	Total     int
+}
+
+// Reporter receives structured progress from a long-running lifecycle
+// operation. The nil Reporter is safe and simply discards updates.
+type Reporter func(update ProgressUpdate)
 
 func (r Reporter) step(message string) {
 	if r != nil {
-		r(message)
+		r(ProgressUpdate{Message: message, State: ProgressActivity})
+	}
+}
+
+func (r Reporter) component(component string, state ProgressState, message string, current, total int) {
+	if r != nil {
+		r(ProgressUpdate{Message: message, Component: component, State: state, Current: current, Total: total})
 	}
 }
 
@@ -233,59 +260,18 @@ func providerComponentEntries(root, provider string, count int) ([]string, error
 	return entries, nil
 }
 
-// salesforcePlannedComponents inventories local Metadata API descriptor files
-// without contacting an org or requiring Salesforce CLI. The XML root element
-// is the metadata type, which gives Validate a real category checklist from its
-// first frame instead of replacing one generic row only after validation ends.
+// salesforcePlannedComponents inventories the source package without contacting
+// an org or invoking Salesforce CLI. The shared API-native source reader keeps
+// planning, validation, and deployment on one canonical component identity.
 func salesforcePlannedComponents(root string) ([]string, error) {
 	project := findSalesforceProject(root)
 	if project == "" {
 		return nil, nil
 	}
-	source := filepath.Join(project, "force-app")
-	entries := []string{}
-	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case "node_modules", ".git":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(entry.Name(), "-meta.xml") {
-			return nil
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		decoder := xml.NewDecoder(bytes.NewReader(data))
-		metadataType := ""
-		for {
-			token, tokenErr := decoder.Token()
-			if tokenErr != nil {
-				return fmt.Errorf("parse Salesforce metadata descriptor %s: %w", entry.Name(), tokenErr)
-			}
-			if start, ok := token.(xml.StartElement); ok {
-				metadataType = strings.TrimSpace(start.Name.Local)
-				break
-			}
-		}
-		if metadataType == "" {
-			return nil
-		}
-		relative, relErr := filepath.Rel(source, path)
-		if relErr != nil {
-			return relErr
-		}
-		entries = append(entries, metadataType+":"+filepath.ToSlash(strings.TrimSuffix(relative, "-meta.xml")))
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return nil, nil
+	inventory, _, err := salesforceapi.InventorySource(project)
+	entries := make([]string, 0, len(inventory))
+	for component := range inventory {
+		entries = append(entries, component)
 	}
 	slices.Sort(entries)
 	return entries, err
@@ -403,6 +389,9 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 		item.Missing = nil
 		return item, nil
 	}
+	for index, component := range components {
+		report.component(component, ProgressQueued, "Queued for Box validation", index, len(components))
+	}
 	workspace := manifest.Box.Workspace
 	workspaceComponent := workspace.ComponentType + ":" + workspace.DisplayName
 	target, err := loadBoxTarget(root, workspace.Name)
@@ -429,6 +418,7 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 		lookupParentID = "0"
 	}
 	workspaceID := ""
+	report.component(workspaceComponent, ProgressRunning, "Inspecting the Box workspace", componentIndex(components, workspaceComponent), len(components))
 	if folderTargetConfigured {
 		present, inspectErr := boxFolderStructureExists(ctx, api, target, workspace.Children)
 		if inspectErr != nil {
@@ -437,6 +427,7 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 		}
 		if folderEnabled {
 			classifyBoxComponent(&item, workspaceComponent, present, !present)
+			report.component(workspaceComponent, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, workspaceComponent)+1, len(components))
 		}
 	} else {
 		readOnlyRootTarget := target
@@ -452,6 +443,7 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			} else {
 				classifyBoxComponent(&item, workspaceComponent, false, true)
 			}
+			report.component(workspaceComponent, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, workspaceComponent)+1, len(components))
 		}
 	}
 	if id, found, inspectErr := api.findFolder(ctx, lookupParentID, target.WorkspaceName); inspectErr != nil {
@@ -467,6 +459,8 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 		}
 		templateKeys := make([]string, 0, len(templates))
 		for _, template := range templates {
+			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
+			report.component(component, ProgressRunning, "Inspecting the Box metadata template", componentIndex(components, component), len(components))
 			templateKeys = append(templateKeys, template.TemplateKey)
 		}
 		existingTemplates, templateErr := api.metadataTemplateKeys(ctx, templateKeys)
@@ -478,11 +472,13 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
 			present := existingTemplates[template.TemplateKey]
 			classifyBoxComponent(&item, component, present, !present)
+			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
 		}
 	}
 	if manifest.CapabilityEnabled("Sample Content", selection) {
 		for _, file := range manifest.Box.SampleContent {
 			component := "Sample Content:" + filepath.Base(file.Source)
+			report.component(component, ProgressRunning, "Inspecting the Box file", componentIndex(components, component), len(components))
 			source := filepath.Join(root, filepath.FromSlash(file.Source))
 			if stat, statErr := os.Stat(source); statErr != nil || stat.IsDir() {
 				item.Status, item.Detail = StatusFailed, "Sample content source is missing: "+file.Source
@@ -516,9 +512,10 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 				}
 			}
 			classifyBoxComponent(&item, component, present, !present)
+			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
 		}
 	}
-	if publicErr := validateBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, &item); publicErr != nil {
+	if publicErr := validateBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, &item, report, components); publicErr != nil {
 		item.Status, item.Detail = StatusFailed, publicErr.Error()
 		return item, nil
 	}
@@ -550,7 +547,50 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			item.Detail += " The workspace was not found at the Box root; select a parent folder to check or deploy it."
 		}
 	}
+	reportValidationResults(report, components, item.Present, item.Missing)
 	return item, nil
+}
+
+func reportValidationResults(report Reporter, components, present, missing []string) {
+	presentSet := make(map[string]bool, len(present))
+	for _, component := range present {
+		presentSet[component] = true
+	}
+	missingSet := make(map[string]bool, len(missing))
+	for _, component := range missing {
+		missingSet[component] = true
+	}
+	ordered := append([]string(nil), components...)
+	slices.Sort(ordered)
+	for index, component := range ordered {
+		report.component(component, ProgressRunning, "Checking "+component, index, len(ordered))
+		message := "Validation complete"
+		switch {
+		case presentSet[component]:
+			message = "Already present"
+		case missingSet[component]:
+			message = "Ready to deploy"
+		}
+		report.component(component, ProgressCompleted, message, index+1, len(ordered))
+	}
+}
+
+func componentIndex(components []string, component string) int {
+	index := slices.Index(components, component)
+	if index < 0 {
+		return 0
+	}
+	return index
+}
+
+func validationResultMessage(present, deployable bool) string {
+	if present {
+		return "Already present"
+	}
+	if deployable {
+		return "Ready to deploy"
+	}
+	return "Manual review required"
 }
 
 func classifyBoxComponent(item *Item, component string, present, deployable bool) {
@@ -692,6 +732,9 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 	}
 	if item.Provider != "salesforce" {
 		return item
+	}
+	if settings.HasSalesforceREST() {
+		return deploySalesforceREST(root, item, settings, report)
 	}
 	project := findSalesforceProject(root)
 	if settings.SalesforceAlias == "" {
@@ -983,6 +1026,9 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	if err != nil {
 		return item, err
 	}
+	if settings.HasSalesforceREST() {
+		return validateSalesforceREST(root, item, report, settings)
+	}
 	if settings.SalesforceAlias == "" {
 		item.Status, item.Detail = StatusFailed, "No Salesforce alias is selected. Connect Salesforce before validation."
 		return item, nil
@@ -1008,6 +1054,9 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 		return item, nil
 	}
 	item.ComponentOrder = []string{"Managed Package"}
+	for index, requirement := range manifestContract.Salesforce.RequiredPackages {
+		report.component(salesforcePackageComponent(requirement), ProgressRunning, "Checking installed package version", index, len(manifestContract.Salesforce.RequiredPackages))
+	}
 	report.step("Checking required Salesforce managed packages")
 	installedPackages, packageErr := listInstalledSalesforcePackages(settings.SalesforceAlias)
 	if packageErr != nil {
@@ -1018,6 +1067,16 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 		}
 		return item, nil
 	}
+	for index, requirement := range manifestContract.Salesforce.RequiredPackages {
+		message := "Required version is installed"
+		if len(missingSalesforcePackages([]solution.SalesforcePackageRequirement{requirement}, installedPackages)) > 0 {
+			message = "Package installation required"
+		}
+		report.component(salesforcePackageComponent(requirement), ProgressCompleted, message, index+1, len(manifestContract.Salesforce.RequiredPackages))
+	}
+	for index, requirement := range manifestContract.Salesforce.RequiredPermissionSets {
+		report.component(salesforcePermissionSetComponent(requirement), ProgressRunning, "Checking assignment for the deployment user", index, len(manifestContract.Salesforce.RequiredPermissionSets))
+	}
 	report.step("Checking required Salesforce permission sets")
 	permissionInventory, permissionErr := readSalesforceUserPermissionInventory(settings.SalesforceAlias, orgInfo.Username)
 	if permissionErr != nil {
@@ -1027,6 +1086,13 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 			item.Diagnostic = failure.Diagnostic
 		}
 		return item, nil
+	}
+	for index, requirement := range manifestContract.Salesforce.RequiredPermissionSets {
+		message := "Assigned to the deployment user"
+		if !permissionInventory.Assigned[strings.ToLower(strings.TrimSpace(requirement.Name))] {
+			message = "Assignment required"
+		}
+		report.component(salesforcePermissionSetComponent(requirement), ProgressCompleted, message, index+1, len(manifestContract.Salesforce.RequiredPermissionSets))
 	}
 	if !strings.EqualFold(permissionInventory.Profile, "System Administrator") {
 		item.Status = StatusFailed
@@ -1059,6 +1125,15 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	if err != nil {
 		return item, err
 	}
+	metadataComponents := make([]string, 0, len(expected))
+	for component := range expected {
+		metadataComponents = append(metadataComponents, component)
+	}
+	slices.Sort(metadataComponents)
+	for index, component := range metadataComponents {
+		report.component(component, ProgressRunning, "Reading current Salesforce state", index, len(metadataComponents))
+	}
+	report.step(fmt.Sprintf("Retrieving Salesforce state for %d metadata components", len(metadataComponents)))
 	retrievedDir := filepath.Join(temp, "retrieved")
 	retrieve := exec.Command("sf", "project", "retrieve", "start", "--manifest", manifest, "--target-org", settings.SalesforceAlias, "--target-metadata-dir", retrievedDir, "--unzip", "--json")
 	retrieve.Dir = project
@@ -1092,6 +1167,7 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 		}
 	}
 	result := classifySalesforceInventory(item, expected, existing, settings.SalesforceAlias)
+	reportValidationResults(report, metadataComponents, result.Present, result.Missing)
 	result = addSalesforcePackageResults(result, manifestContract.Salesforce.RequiredPackages, installedPackages, settings.SalesforceAlias)
 	return addSalesforcePermissionSetResults(result, manifestContract.Salesforce.RequiredPermissionSets, permissionInventory.Assigned, settings.SalesforceAlias), nil
 }

@@ -2,7 +2,9 @@ package webapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -30,12 +32,16 @@ const (
 )
 
 type runEvent struct {
-	Sequence int       `json:"sequence"`
-	At       time.Time `json:"at"`
-	Type     string    `json:"type"`
-	Provider string    `json:"provider,omitempty"`
-	Message  string    `json:"message"`
-	Status   runStatus `json:"status,omitempty"`
+	Sequence      int                     `json:"sequence"`
+	At            time.Time               `json:"at"`
+	Type          string                  `json:"type"`
+	Provider      string                  `json:"provider,omitempty"`
+	Message       string                  `json:"message"`
+	Status        runStatus               `json:"status,omitempty"`
+	Component     string                  `json:"component,omitempty"`
+	ProgressState lifecycle.ProgressState `json:"progressState,omitempty"`
+	Current       int                     `json:"current,omitempty"`
+	Total         int                     `json:"total,omitempty"`
 }
 
 type runResponse struct {
@@ -49,10 +55,12 @@ type runResponse struct {
 }
 
 type runDiagnostic struct {
-	Title     string   `json:"title"`
-	Summary   string   `json:"summary"`
-	NextSteps []string `json:"nextSteps"`
-	CLIHint   string   `json:"cliHint"`
+	Title           string   `json:"title"`
+	Summary         string   `json:"summary"`
+	Provider        string   `json:"provider,omitempty"`
+	Code            string   `json:"code,omitempty"`
+	NextSteps       []string `json:"nextSteps"`
+	TechnicalDetail string   `json:"technicalDetail,omitempty"`
 }
 
 type persistedRun struct {
@@ -67,7 +75,7 @@ type persistedRun struct {
 	Diagnostic  *runDiagnostic    `json:"diagnostic,omitempty"`
 }
 
-type runExecutor func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, string)) ([]lifecycle.Item, error)
+type runExecutor func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error)
 
 type runManager struct {
 	mu       sync.RWMutex
@@ -171,10 +179,10 @@ func (m *runManager) execute(id string, executor runExecutor) {
 	m.saveLocked()
 	m.mu.Unlock()
 
-	result, err := executor(context.Background(), plan, items, func(provider, message string) {
+	result, err := executor(context.Background(), plan, items, func(provider string, update lifecycle.ProgressUpdate) {
 		m.mu.Lock()
 		if current := m.runs[id]; current != nil {
-			m.appendEventLocked(current, "activity", provider, message, current.status)
+			m.appendProgressEventLocked(current, provider, update)
 		}
 		m.mu.Unlock()
 	})
@@ -203,8 +211,19 @@ func (m *runManager) execute(id string, executor runExecutor) {
 	m.saveLocked()
 }
 
+type providerRunFailure struct {
+	Provider   string
+	Detail     string
+	Diagnostic string
+}
+
+func (f *providerRunFailure) Error() string {
+	return providerName(f.Provider) + ": " + f.Detail
+}
+
 func failedRunResult(items []lifecycle.Item) error {
 	failures := make([]string, 0)
+	var primary *providerRunFailure
 	for _, item := range items {
 		if item.Status != lifecycle.StatusFailed {
 			continue
@@ -213,12 +232,16 @@ func failedRunResult(items []lifecycle.Item) error {
 		if detail == "" {
 			detail = "provider returned a failed result"
 		}
-		failures = append(failures, item.Provider+": "+detail)
+		failures = append(failures, providerName(item.Provider)+": "+detail)
+		if primary == nil {
+			primary = &providerRunFailure{Provider: item.Provider, Detail: detail, Diagnostic: strings.TrimSpace(item.Diagnostic)}
+		}
 	}
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("provider validation failed: %s", strings.Join(failures, "; "))
+	primary.Detail = strings.Join(failures, "; ")
+	return primary
 }
 
 func (m *runManager) response(id string) (runResponse, bool) {
@@ -264,7 +287,7 @@ func (m *runManager) subscribe(id string) ([]runEvent, <-chan runEvent, func(), 
 		m.mu.Unlock()
 		return snapshot, nil, func() {}, true
 	}
-	listener := make(chan runEvent, 32)
+	listener := make(chan runEvent, 1024)
 	run.listeners[listener] = struct{}{}
 	cancel := func() {
 		m.mu.Lock()
@@ -277,6 +300,21 @@ func (m *runManager) subscribe(id string) ([]runEvent, <-chan runEvent, func(), 
 
 func (m *runManager) appendEventLocked(run *deploymentRun, eventType, provider, message string, status runStatus) {
 	event := runEvent{Sequence: len(run.events) + 1, At: m.now().UTC(), Type: eventType, Provider: provider, Message: message, Status: status}
+	run.events = append(run.events, event)
+	for listener := range run.listeners {
+		select {
+		case listener <- event:
+		default:
+		}
+	}
+}
+
+func (m *runManager) appendProgressEventLocked(run *deploymentRun, provider string, update lifecycle.ProgressUpdate) {
+	event := runEvent{
+		Sequence: len(run.events) + 1, At: m.now().UTC(), Type: "activity", Provider: provider,
+		Message: update.Message, Status: run.status, Component: update.Component,
+		ProgressState: update.State, Current: update.Current, Total: update.Total,
+	}
 	run.events = append(run.events, event)
 	for listener := range run.listeners {
 		select {
@@ -318,10 +356,11 @@ func (m *runManager) restoreHistory() {
 			completed := m.now().UTC()
 			run.status, run.completedAt = runFailed, &completed
 			run.diagnostic = &runDiagnostic{
-				Title:     "Local run was interrupted",
-				Summary:   "Dispatch was stopped before this run completed. No result was recorded.",
-				NextSteps: []string{"Start validation again after the local API is running."},
-				CLIHint:   "Run box-dispatch in a terminal for the original provider diagnostics.",
+				Title:           "Local run was interrupted",
+				Summary:         "Dispatch stopped before this run completed, so no provider result was recorded.",
+				Code:            "RUN_INTERRUPTED",
+				NextSteps:       []string{"Confirm the local Dispatch service is running, then start validation again."},
+				TechnicalDetail: "The local service stopped while the run was queued or active.",
 			}
 			run.events = append(run.events, runEvent{Sequence: len(run.events) + 1, At: completed, Type: "status", Message: "Run was interrupted when the local API stopped.", Status: runFailed})
 		}
@@ -357,48 +396,131 @@ func summariesToItems(summaries []providerSummary) []lifecycle.Item {
 func safeDiagnostic(action runAction, err error) *runDiagnostic {
 	summary := "Dispatch could not complete the provider operation."
 	nextSteps := []string{"Check the selected connection and package configuration, then run validation again."}
+	provider := ""
+	detail := err.Error()
+	var providerFailure *providerRunFailure
+	if errors.As(err, &providerFailure) {
+		provider = providerName(providerFailure.Provider)
+		detail = strings.TrimSpace(strings.Join([]string{providerFailure.Detail, providerFailure.Diagnostic}, "\n\n"))
+		if provider != "" {
+			summary = provider + " could not complete validation."
+		}
+	}
 	if action == runActionDeploy {
 		summary = "Dispatch could not apply the validated configuration."
 		nextSteps = []string{"Review the provider configuration and retry deployment after validation succeeds."}
 	}
-	message := strings.ToLower(err.Error())
+	message := strings.ToLower(detail)
+	code := "PROVIDER_OPERATION_FAILED"
 	switch {
 	case strings.Contains(message, "conflict"):
 		summary = "Existing Salesforce source conflicts with the package you are applying."
 		nextSteps = []string{"Resolve the source conflicts in the Salesforce project.", "Run validation again before applying changes."}
+		code = "SALESFORCE_SOURCE_CONFLICT"
 	case strings.Contains(message, "http 420"), strings.Contains(message, "http_420"), strings.Contains(message, "unable to read salesforce metadata"):
 		summary = "Salesforce could not be reached with the current org session."
 		nextSteps = []string{"Confirm the selected Salesforce org is active and authenticated.", "Recheck the connection, then run validation again."}
+		code = "SALESFORCE_ORG_UNREACHABLE"
+		provider = "Salesforce"
+	case strings.Contains(message, "noscratchinfo"), strings.Contains(message, "no information for scratch org"), strings.Contains(message, "unable to inspect salesforce org"):
+		summary = "The selected Salesforce scratch org is no longer available through its Dev Hub."
+		nextSteps = []string{
+			"Return to Connect and reconnect the Salesforce org to refresh its authorization.",
+			"If the org has expired or was deleted, choose an active org or create a replacement scratch org.",
+			"Run validation again after the replacement connection is verified.",
+		}
+		code = "SALESFORCE_SCRATCH_ORG_UNAVAILABLE"
+		provider = "Salesforce"
+	case strings.Contains(message, "expired"), strings.Contains(message, "scratch org") && strings.Contains(message, "inactive"):
+		summary = "The selected Salesforce org is expired or inactive."
+		nextSteps = []string{"Choose an active Salesforce org on the Connect step.", "Run validation again with the replacement org."}
+		code = "SALESFORCE_ORG_INACTIVE"
+		provider = "Salesforce"
 	case strings.Contains(message, "managed package"):
 		summary = "The required managed package is unavailable in the selected Salesforce org."
 		nextSteps = []string{"Install or update the managed package, then run validation again."}
+		code = "SALESFORCE_PACKAGE_MISSING"
+		provider = "Salesforce"
+	case strings.Contains(message, "system administrator"):
+		summary = "The selected Salesforce user is not a System Administrator."
+		nextSteps = []string{"Return to Connect and choose a Salesforce org authenticated by a System Administrator.", "Run validation again."}
+		code = "SALESFORCE_ADMIN_REQUIRED"
+		provider = "Salesforce"
+	case strings.Contains(message, "maximum size of request"):
+		summary = "The Salesforce metadata request exceeded the provider limit."
+		nextSteps = []string{"Reduce the number of Salesforce components in this deployment.", "Run validation again with a smaller component set."}
+		code = "SALESFORCE_REQUEST_TOO_LARGE"
+		provider = "Salesforce"
+	case strings.Contains(message, "did not contain json"), strings.Contains(message, "unreadable"):
+		summary = "Salesforce returned an unreadable response during validation."
+		nextSteps = []string{"Reconnect the Salesforce org and retry validation.", "If the problem continues, update the local Salesforce provider integration."}
+		code = "SALESFORCE_RESPONSE_UNREADABLE"
+		provider = "Salesforce"
+	}
+	title := "Run needs attention"
+	if provider != "" {
+		title = provider + " validation needs attention"
 	}
 	return &runDiagnostic{
-		Title:     "Run needs attention",
-		Summary:   summary,
-		NextSteps: nextSteps,
-		CLIHint:   "Run box-dispatch in a terminal and press d on the failed result to view the original provider diagnostics.",
+		Title:           title,
+		Summary:         summary,
+		Provider:        provider,
+		Code:            code,
+		NextSteps:       nextSteps,
+		TechnicalDetail: sanitizeDiagnosticDetail(detail),
 	}
 }
 
-func validatePlanRun(ctx context.Context, plan config.SolutionPlan, _ []lifecycle.Item, emit func(string, string)) ([]lifecycle.Item, error) {
+var (
+	diagnosticSecretPattern = regexp.MustCompile(`(?i)("?(?:access_token|refresh_token|client_secret|authorization)"?\s*[:=]\s*"?)[^",\s]+`)
+	diagnosticBearerPattern = regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]+`)
+	diagnosticTokenPattern  = regexp.MustCompile(`(?i)\b[a-z0-9._-]*secret[a-z0-9._-]*\b`)
+	diagnosticPathPattern   = regexp.MustCompile(`(?:/Users|/private|/var|/tmp)/[^\s"']+`)
+	diagnosticQueryPattern  = regexp.MustCompile(`(https?://[^\s?]+)\?[^\s]+`)
+)
+
+func sanitizeDiagnosticDetail(value string) string {
+	value = strings.TrimSpace(value)
+	value = diagnosticSecretPattern.ReplaceAllString(value, `${1}[redacted]`)
+	value = diagnosticBearerPattern.ReplaceAllString(value, "Bearer [redacted]")
+	value = diagnosticTokenPattern.ReplaceAllString(value, "[redacted]")
+	value = diagnosticPathPattern.ReplaceAllString(value, "[local path]")
+	value = diagnosticQueryPattern.ReplaceAllString(value, `${1}?[redacted]`)
+	value = strings.ReplaceAll(value, "ERROR_HTTP_420", "HTTP 420")
+	value = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || r >= 32 {
+			return r
+		}
+		return -1
+	}, value)
+	const maxDiagnosticLength = 8000
+	if len(value) > maxDiagnosticLength {
+		value = value[:maxDiagnosticLength] + "\n… diagnostic truncated"
+	}
+	if value == "" {
+		return "The provider did not return additional technical detail."
+	}
+	return value
+}
+
+func validatePlanRun(ctx context.Context, plan config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
 	items := make([]lifecycle.Item, 0, len(plan.Components))
 	for _, provider := range plan.Components {
 		if err := ctx.Err(); err != nil {
 			return items, err
 		}
-		emit(provider, "Validating "+providerName(provider)+" configuration")
-		item, err := lifecycle.ValidateProvider(plan.PackagePath, provider, func(message string) { emit(provider, message) })
+		emit(provider, lifecycle.ProgressUpdate{Message: "Validating " + providerName(provider) + " configuration", State: lifecycle.ProgressActivity})
+		item, err := lifecycle.ValidateProvider(plan.PackagePath, provider, func(update lifecycle.ProgressUpdate) { emit(provider, update) })
 		if err != nil {
 			return items, err
 		}
 		items = append(items, item)
-		emit(provider, providerName(provider)+" validation complete")
+		emit(provider, lifecycle.ProgressUpdate{Message: providerName(provider) + " validation complete", State: lifecycle.ProgressCompleted})
 	}
 	return items, nil
 }
 
-func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecycle.Item, emit func(string, string)) ([]lifecycle.Item, error) {
+func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
 	before := append([]lifecycle.Item(nil), items...)
 	startedAt := time.Now().UTC()
 	for index, item := range items {
@@ -406,16 +528,16 @@ func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecy
 			return items, err
 		}
 		if item.Status != lifecycle.StatusMissing || !item.Deployable {
-			emit(item.Provider, providerName(item.Provider)+" requires no supported changes")
+			emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " requires no supported changes", State: lifecycle.ProgressCompleted})
 			continue
 		}
-		emit(item.Provider, "Applying "+providerName(item.Provider)+" configuration")
-		result, err := lifecycle.DeployProvider(plan.PackagePath, item, func(message string) { emit(item.Provider, message) })
+		emit(item.Provider, lifecycle.ProgressUpdate{Message: "Applying " + providerName(item.Provider) + " configuration", State: lifecycle.ProgressRunning})
+		result, err := lifecycle.DeployProvider(plan.PackagePath, item, func(update lifecycle.ProgressUpdate) { emit(item.Provider, update) })
 		if err != nil {
 			return items, err
 		}
 		items[index] = result
-		emit(item.Provider, providerName(item.Provider)+" configuration applied")
+		emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " configuration applied", State: lifecycle.ProgressCompleted})
 	}
 	if _, err := audit.ExportDeployment(plan.PackagePath, before, items, startedAt, time.Now().UTC()); err != nil {
 		return items, fmt.Errorf("record deployment audit: %w", err)

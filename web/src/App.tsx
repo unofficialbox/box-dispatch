@@ -9,7 +9,7 @@ import { ConfigurePage } from './pages/ConfigurePage'
 import { DeployPage } from './pages/DeployPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { ReviewPage } from './pages/ReviewPage'
-import type { BoxConnectionInput, ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun, Phase, RunDiagnostic, RunEvent, SalesforceConnectionOption, SolutionTemplate } from './types'
+import type { BoxConnectionInput, ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun, Phase, RunDiagnostic, RunEvent, SalesforceConnectionOption, SalesforceRESTInput, ScratchOrgJob, SolutionTemplate } from './types'
 
 const fallbackPlan: DeploymentPlan = { exists: false, templateId: 'clm', template: 'CLM deployment', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }, { id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true }] }
 const fallbackTemplates: SolutionTemplate[] = [
@@ -38,6 +38,7 @@ function App() {
   const [connections, setConnections] = useState<ConnectionSummary[]>([])
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([])
   const [selectedSalesforceAlias, setSelectedSalesforceAlias] = useState('')
+  const [scratchJob, setScratchJob] = useState<ScratchOrgJob | null>(null)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [boxConnectionLoading, setBoxConnectionLoading] = useState(false)
   const [notice, setNotice] = useState('Loading the saved deployment plan…')
@@ -69,14 +70,17 @@ function App() {
     const stream = new EventSource(`/api/runs/${activeRunID}/events`)
     const receiveEvent = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as RunEvent
-      setRunEvents((events) => events.some((existing) => existing.sequence === event.sequence) ? events : [...events.slice(-59), event])
+      setRunEvents((events) => events.some((existing) => existing.sequence === event.sequence) ? events : [...events, event])
       if (event.type === 'status' && (event.status === 'completed' || event.status === 'failed')) {
         setRun((current) => current ? { ...current, status: event.status } : current)
+        void fetch(`/api/runs/${activeRunID}`).then(async (response) => {
+          if (!response.ok) throw new Error('Run details are unavailable.')
+          return (await response.json()) as DispatchRun
+        }).then(setRun).catch(() => undefined)
         stream.close()
       }
     }
     stream.addEventListener('dispatch', receiveEvent)
-    stream.onerror = () => stream.close()
     return () => stream.close()
   }, [activeRunID])
 
@@ -98,14 +102,14 @@ function App() {
     void fetch(`/api/runs/${runID}/diagnostics`).then(async (response) => {
       if (!response.ok) throw new Error('Diagnostic guidance is unavailable.')
       return (await response.json()) as RunDiagnostic
-    }).then(setDiagnostic).catch(() => setNotice('Diagnostic guidance is unavailable. Open the failed run in the Dispatch terminal for the original provider output.'))
+    }).then(setDiagnostic).catch(() => setNotice('Diagnostic guidance is unavailable. Refresh the failed run and try again.'))
   }
   const openSalesforceConnection = () => {
     setConnectionDrawerOpen(true); setConnectionsLoading(true)
     void fetch('/api/connections/salesforce/options').then(async (response) => {
       if (!response.ok) throw new Error('Authenticated Salesforce orgs are unavailable.')
       return (await response.json()) as SalesforceConnectionOption[]
-    }).then((options) => { setSalesforceOptions(options); setSelectedSalesforceAlias(options.find((option) => option.selected)?.alias ?? options[0]?.alias ?? '') }).catch(() => setNotice('Authenticated Salesforce orgs are unavailable. Connect one with the Salesforce CLI, then try again.')).finally(() => setConnectionsLoading(false))
+    }).then((options) => { setSalesforceOptions(options); setSelectedSalesforceAlias(options.find((option) => option.selected)?.alias ?? options[0]?.alias ?? '') }).catch(() => setNotice('Salesforce environment details are unavailable. Add the REST connection in the Salesforce panel, then try again.')).finally(() => setConnectionsLoading(false))
   }
   const selectSalesforceConnection = () => {
     if (!selectedSalesforceAlias) return
@@ -121,6 +125,81 @@ function App() {
       if (!response.ok) throw new Error('Box connection could not be saved.')
       return await response.json() as ConnectionSummary
     }).then((selection) => { setConnections((current) => [...current.filter((connection) => connection.name !== 'Box'), selection]); setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'box' ? { ...component, configured: true, verified: false, ready: false } : component) })); setBoxConnectionDrawerOpen(false); setNotice('Box CCG saved. Validate configuration to verify the connection.') }).catch(() => setNotice('Box connection could not be saved. Check the CCG details and try again.')).finally(() => setBoxConnectionLoading(false))
+  }
+  const refreshSalesforceConnection = async () => {
+    const [connectionResponse, optionsResponse] = await Promise.all([fetch('/api/connections'), fetch('/api/connections/salesforce/options')])
+    if (!connectionResponse.ok || !optionsResponse.ok) throw new Error('Salesforce connection state could not be refreshed.')
+    const nextConnections = await connectionResponse.json() as ConnectionSummary[]
+    const nextOptions = await optionsResponse.json() as SalesforceConnectionOption[]
+    setConnections(nextConnections)
+    setSalesforceOptions(nextOptions)
+    setSelectedSalesforceAlias(nextOptions.find((option) => option.selected)?.alias ?? nextOptions[0]?.alias ?? '')
+    const salesforce = nextConnections.find((connection) => connection.name === 'Salesforce')
+    setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'salesforce' ? { ...component, configured: salesforce?.configured ?? false, verified: salesforce?.verified ?? false, ready: salesforce?.verified ?? false } : component) }))
+  }
+  const saveSalesforceREST = (input: SalesforceRESTInput) => {
+    setConnectionsLoading(true)
+    void fetch('/api/connections/salesforce/rest', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }).then(async (response) => {
+      if (!response.ok) throw new Error(await responseError(response, 'Salesforce REST connection could not be saved.'))
+      return response.json() as Promise<ConnectionSummary>
+    }).then((selection) => {
+      setConnections((current) => [...current.filter((connection) => connection.name !== 'Salesforce'), selection])
+      setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'salesforce' ? { ...component, configured: true, verified: false, ready: false } : component) }))
+      setNotice('Salesforce REST connection saved in the local Go service. Check availability or create a scratch org next.')
+    }).catch((error: Error) => setNotice(error.message)).finally(() => setConnectionsLoading(false))
+  }
+  const checkSalesforceAvailability = () => {
+    setConnectionsLoading(true)
+    void fetch('/api/connections/salesforce/check', { method: 'POST' }).then(async (response) => {
+      if (!response.ok) throw new Error(await responseError(response, 'Salesforce org is unavailable.'))
+      return response.json()
+    }).then(async () => {
+      await refreshSalesforceConnection()
+      setScratchJob(null)
+      setNotice('Salesforce org is available and ready for validation.')
+    }).catch((error: Error) => {
+      setScratchJob({ id: 'availability-check', status: 'failed', message: error.message })
+      setNotice(error.message)
+    }).finally(() => setConnectionsLoading(false))
+  }
+  const createScratchOrg = (alias: string) => {
+    setConnectionsLoading(true)
+    setScratchJob({ id: 'starting', status: 'queued', message: 'Starting the scratch-org request…', alias })
+    void fetch('/api/salesforce/scratch-orgs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias, orgName: 'Box Dispatch', durationDays: 30 }) }).then(async (response) => {
+      if (!response.ok) throw new Error(await responseError(response, 'Scratch org creation could not start.'))
+      return response.json() as Promise<ScratchOrgJob>
+    }).then((job) => {
+      setScratchJob(job)
+      const poll = async () => {
+        const response = await fetch(`/api/salesforce/scratch-orgs/${job.id}`)
+        if (!response.ok) throw new Error(await responseError(response, 'Scratch-org status is unavailable.'))
+        const nextJob = await response.json() as ScratchOrgJob
+        setScratchJob(nextJob)
+        if (nextJob.status === 'active') {
+          await refreshSalesforceConnection()
+          setNotice(`Scratch org ${nextJob.alias ?? ''} is active and selected.`.trim())
+          setConnectionsLoading(false)
+          return
+        }
+        if (nextJob.status === 'failed') {
+          setNotice(nextJob.message)
+          setConnectionsLoading(false)
+          return
+        }
+        window.setTimeout(() => { void poll().catch(handleScratchError) }, 1000)
+      }
+      const handleScratchError = (error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Scratch-org status is unavailable.'
+        setScratchJob((current) => ({ id: current?.id ?? job.id, status: 'failed', message }))
+        setNotice(message)
+        setConnectionsLoading(false)
+      }
+      void poll().catch(handleScratchError)
+    }).catch((error: Error) => {
+      setScratchJob({ id: 'failed', status: 'failed', message: error.message })
+      setNotice(error.message)
+      setConnectionsLoading(false)
+    })
   }
   const beginNewDeployment = () => { setScreen('workflow'); setRun(null); setRunEvents([]); setActivePhase('Choose'); setNotice('Choose a supported solution quickstart, then Dispatch will assemble its BCL package locally.') }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
@@ -151,13 +230,18 @@ function App() {
   const continueToReview = () => savePlan(() => setActivePhase('Review'))
   const setWorkflowPhase = (phase: Phase) => { setScreen('workflow'); setActivePhase(phase) }
 
-  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => setScreen('overview')} onNewDeployment={beginNewDeployment}/><main id="workspace" className="workspace">{screen === 'overview' ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={() => setWorkflowPhase(activePhase)}/> : <><DeploymentHeader plan={plan} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={() => setBoxConnectionDrawerOpen(true)} onSalesforceConnection={openSalesforceConnection} onBack={() => setActivePhase('Choose')} onNext={() => setActivePhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setActivePhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics}/> : <ReviewPage plan={plan} notice={notice} onDeploy={beginValidation} onEditConnections={() => setActivePhase('Connect')} onBack={() => setActivePhase('Configure')}/>}</>}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer options={salesforceOptions} selectedAlias={selectedSalesforceAlias} loading={connectionsLoading} onChange={setSelectedSalesforceAlias} onSave={selectSalesforceConnection} onClose={() => setConnectionDrawerOpen(false)}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer loading={boxConnectionLoading} onSave={saveBoxConnection} onClose={() => setBoxConnectionDrawerOpen(false)}/>}</div>
+  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => setScreen('overview')} onNewDeployment={beginNewDeployment}/><main id="workspace" className="workspace">{screen === 'overview' ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={() => setWorkflowPhase(activePhase)} onBoxConnection={() => setBoxConnectionDrawerOpen(true)} onSalesforceConnection={openSalesforceConnection}/> : <><DeploymentHeader plan={plan} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={() => setBoxConnectionDrawerOpen(true)} onSalesforceConnection={openSalesforceConnection} onBack={() => setActivePhase('Choose')} onNext={() => setActivePhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setActivePhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics}/> : <ReviewPage plan={plan} notice={notice} onDeploy={beginValidation} onEditConnections={() => setActivePhase('Connect')} onBack={() => setActivePhase('Configure')}/>}</>}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer options={salesforceOptions} selectedAlias={selectedSalesforceAlias} loading={connectionsLoading} scratchJob={scratchJob} onChange={setSelectedSalesforceAlias} onSave={selectSalesforceConnection} onSaveREST={saveSalesforceREST} onCheck={checkSalesforceAvailability} onCreateScratch={createScratchOrg} onClose={() => setConnectionDrawerOpen(false)}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer loading={boxConnectionLoading} onSave={saveBoxConnection} onClose={() => setBoxConnectionDrawerOpen(false)}/>}</div>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal })
   if (!response.ok) throw new Error(`${path} is unavailable.`)
   return (await response.json()) as T
+}
+
+async function responseError(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => null) as { error?: string } | null
+  return payload?.error?.trim() || fallback
 }
 
 export default App

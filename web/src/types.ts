@@ -39,8 +39,10 @@ export type DispatchRun = {
 export type RunDiagnostic = {
   title: string
   summary: string
+  provider?: string
+  code?: string
   nextSteps: string[]
-  cliHint: string
+  technicalDetail?: string
 }
 
 export type RunEvent = {
@@ -50,6 +52,10 @@ export type RunEvent = {
   provider?: string
   message: string
   status: DispatchRun['status']
+  component?: string
+  progressState?: 'activity' | 'queued' | 'running' | 'completed' | 'failed'
+  current?: number
+  total?: number
 }
 
 export type SalesforceConnectionOption = {
@@ -58,6 +64,25 @@ export type SalesforceConnectionOption = {
   status: string
   expiresAt?: string
   selected: boolean
+}
+
+export type SalesforceRESTInput = {
+  instanceUrl: string
+  accessToken: string
+  devHubUrl: string
+  devHubAccessToken: string
+  clientId: string
+  clientSecret: string
+}
+
+export type ScratchOrgJob = {
+  id: string
+  status: 'queued' | 'creating' | 'active' | 'failed'
+  message: string
+  alias?: string
+  username?: string
+  orgId?: string
+  expirationDate?: string
 }
 
 export type ConnectionSummary = {

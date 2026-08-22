@@ -11,6 +11,25 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
+func TestReportValidationResultsStreamsEveryComponentState(t *testing.T) {
+	updates := make([]ProgressUpdate, 0)
+	reportValidationResults(Reporter(func(update ProgressUpdate) {
+		updates = append(updates, update)
+	}), []string{"CustomField:Contract__c.Status__c", "CustomObject:Contract__c"}, []string{"CustomObject:Contract__c"}, []string{"CustomField:Contract__c.Status__c"})
+
+	if len(updates) != 4 {
+		t.Fatalf("updates = %#v", updates)
+	}
+	for index := 0; index < len(updates); index += 2 {
+		if updates[index].State != ProgressRunning || updates[index+1].State != ProgressCompleted {
+			t.Fatalf("component updates = %#v", updates[index:index+2])
+		}
+		if updates[index+1].Current != index/2+1 || updates[index+1].Total != 2 {
+			t.Fatalf("progress counters = %#v", updates[index+1])
+		}
+	}
+}
+
 // TestReadBoxConfigObjectPrefersBCL confirms the migrated BCL artifact wins over
 // a legacy JSON file of the same stem, and that its envelope fields are stripped.
 func TestReadBoxConfigObjectPrefersBCL(t *testing.T) {

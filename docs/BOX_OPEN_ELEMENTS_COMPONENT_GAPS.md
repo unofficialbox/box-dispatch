@@ -23,15 +23,15 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.5.0.
+The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.6.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
 work must remain distinct from functionality available in the installed package.
 
-The maintainer response records several completed and accepted items. Some completed
-items are not yet available in the published 0.5.0 package, so Dispatch must not depend
-on them until a release containing those APIs is installed and verified.
+Version 0.6.0 contains several items that were previously tracked as accepted gaps or
+enhancements. Dispatch adopted those APIs in the same upgrade and removed the local
+substitutes where the published contract matched the approved workflow.
 
 ## Adopted in Dispatch
 
@@ -43,9 +43,12 @@ on them until a release containing those APIs is installed and verified.
 | Components | `box-switch` | Provider and component enablement. |
 | Components | `box-badge` | Live and verified state labels. |
 | Components | `box-progress-bar` | Connection and run progress. |
-| Components | `box-drawer` | Connection editing and run diagnostics, including focus management, Escape/backdrop dismissal, and controlled open state. |
-| Components | `box-text-field` and `box-select` | Box credentials and authenticated Salesforce-org selection. |
+| Components | `box-metric-card` | Overview summary metrics and readiness state. |
+| Components | `box-table` | Overview deployment history with rich cell content and empty state. |
+| Components | `box-drawer` | Connection editing and run diagnostics, including large sizing, busy state, sticky footer actions, focus management, Escape/backdrop dismissal, and controlled open state. |
+| Components | `box-text-field` and `box-select` | Box credentials and authenticated Salesforce-org selection, including autocomplete, password reveal, loading, and empty-state support. |
 | Components | `box-split-view` | Connect and Configure master-detail page structure. |
+| Patterns | `box-run-trace` | Live provider and component validation/deployment activity. |
 
 React 19 sets custom-element properties directly. Dispatch currently keeps a small
 local JSX declaration file and listens to typed custom events at the application
@@ -55,16 +58,14 @@ boundary; an official React wrapper is not required.
 
 | Category | Component | Verified contract | Dispatch decision |
 | --- | --- | --- | --- |
-| Components | `box-progress-steps` | Published 0.5.0 provides controlled `value`, `value-changed`, arrow/Home/End navigation, roving tab index, and `aria-current`. | Do not use it as the horizontal wizard header. Its vertical setup-rail semantics do not match the clickable deployment workflow. Re-evaluate after per-step statuses are published. |
-| Components | `box-table` | Controlled sorting and selection are already supported. | Use for ordinary history and selection tables. Rich cells and responsive behavior remain enhancements, not reasons to replace its current API. |
-| Components | `box-drawer` | Controlled `open`, `open-changed`, `dismiss`, `show()`, `close()`, focus containment/restoration, backdrop and Escape behavior, and body portaling are present. | Adopted. Sticky actions and richer sizing remain enhancements. |
-| Components | `box-text-field` | Shared field contract plus `value-changed`, loading, and valid states are present. | Adopted for connection forms. Autocomplete and password reveal remain enhancements. |
-| Components | `box-select` | Shared field contract plus options, single/multiple values, and `value-changed` are present. | Adopted for authenticated-org and subject selection. Async loading, empty, and error states remain enhancements. |
+| Components | `box-progress-steps` | Published 0.6.0 provides controlled navigation and per-step complete, current, pending, blocked, failed, and disabled states. | Do not use it as the horizontal wizard header. Its vertical setup-rail semantics do not match the approved clickable deployment workflow. |
+| Components | `box-table` | Rich cells, expansion, loading, empty, error, sorting, and selection are supported. | Adopted for deployment history. Product-specific run-stage summaries remain application composition. |
+| Components | `box-drawer` | Controlled state, focus behavior, sticky footer, size presets, busy state, mobile presentation, and cancelable dismissal are present. | Adopted for connection and diagnostics workflows. |
+| Components | `box-text-field` | Shared field contract, autocomplete, password reveal, loading, and valid states are present. | Adopted for connection forms. |
+| Components | `box-select` | Shared field contract, loading and empty states, options, single/multiple values, and `value-changed` are present. | Adopted for authenticated-org and subject selection. |
 | Components | `box-split-view` | Controlled ratio, optional resizing, and `ratio-changed` are present. | Adopted as the Connect and Configure layout primitive. Selection and detail behavior remain application composition. |
-
-`box-stage-path` exists on upstream `main`, but it is not in the published 0.5.0
-package and currently represents a read-only horizontal record lifecycle. It is not
-a replacement for Dispatch's clickable, eligibility-gated wizard navigation.
+| Components | `box-nav-sidebar` | Structured navigation items, collapsible behavior, slots, and badges are present. | Keep the compact Dispatch rail for now because the approved interaction uses route links, icon-only geometry, and application-owned active state. Track a compact-link recipe rather than forking the component. |
+| Components | `box-stage-path` | Read-only horizontal lifecycle steps are published. | Do not use for editable wizard navigation because it does not expose eligibility-gated step activation. |
 
 ## Composition recipes needed
 
@@ -76,32 +77,28 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Accepted enhancements not yet available in published 0.5.0
+## Remaining enhancements after the 0.6.0 upgrade
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
-| P0 | Components | `box-progress-steps` | Per-step statuses for complete, current, pending, blocked, and failed steps. The maintainer reports this as completed, but the API is not in the installed release. | Keep the local clickable workflow header and re-evaluate when the containing package release is published. |
-| P1 | Components | `box-select` | Loading, empty, and error states. | Render adjacent application feedback without changing the select contract. |
-| P1 | Components | `box-text-field` | Autocomplete and password-visibility support. | Keep security guidance adjacent to the field; do not recreate a competing generic field. |
 | P1 | Foundations | TypeScript custom-element declarations | JSX tag maps and typed event maps for React and TypeScript consumers. | Maintain the narrow local `boe.d.ts` boundary and native event listeners. Remove redundant declarations after adoption. |
-| P1 | Components | `box-table` | Rich cell content, row expansion, loading/empty/error states, and responsive behavior. | Use the table where plain controlled rows fit; retain application layout for rich run-stage summaries. |
-| P1 | Components | `box-drawer` | Sticky footer/action slots, size presets, busy state, mobile full-screen behavior, and unsaved-change guard. | Keep actions in slotted body content and application-owned save state. |
+| P1 | Patterns | Horizontal workflow navigation | A clickable horizontal wizard that combines eligibility gating with complete, current, pending, blocked, and failed states. | Keep the small local workflow header; neither the vertical `box-progress-steps` nor read-only `box-stage-path` matches the approved workflow. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
 Accessibility corrections for `box-dropdown`, `box-selectable-card`, and
 `box-action-bar` are reported complete by the maintainer. Dispatch should consume
 them through the next containing package release rather than applying local forks.
 
-## Missing component gap
+## Resolved component gap
 
-### Live run timeline
+### Live run trace
 
 **Category:** Patterns  
-**Roadmap status:** Accepted as `box-run-timeline`
+**Roadmap status:** Published in 0.6.0 as `box-run-trace`
 
 Validation and deployment need aligned event nodes, connectors, timestamps,
 expandable details, nested progress rows, and live success/warning/failure state.
-The generic timeline primitives do not provide that complete operational model.
+Version 0.6.0 now provides the operational model through `box-run-trace`.
 
 The accepted pattern should support:
 
@@ -110,8 +107,9 @@ The accepted pattern should support:
 - stable node and connector alignment at all viewport widths;
 - accessible live-state announcements and failure recovery context.
 
-Dispatch will keep its temporary page-level run composition until
-`box-run-timeline` is published. It should then migrate rather than fork the pattern.
+Dispatch migrated its provider/component progress adapter to `box-run-trace` and
+removed the custom timeline DOM and styling. The application still owns the mapping
+from Dispatch server events to the reusable run-step data model.
 
 ## Declined proposal
 
@@ -122,10 +120,10 @@ parallel wrapper library.
 
 ## Dispatch adoption sequence
 
-1. Use the published drawer, field, select, split-view, table, and progress APIs where their verified contracts fit.
+1. Use the published drawer, field, select, split-view, metric-card, table, run-trace, and progress APIs where their verified contracts fit.
 2. Retain the custom clickable wizard header until a published Box Open Elements pattern supports horizontal navigation and eligibility/status semantics.
-3. Retain the local live-run composition until `box-run-timeline` is published.
-4. Replace local JSX declarations with the official TypeScript maps after release.
+3. Replace local JSX declarations with official React JSX tag maps if they are published.
+4. Re-evaluate `box-nav-sidebar` after a compact link-navigation recipe is available.
 5. Re-run this source-level intake on each Box Open Elements upgrade and update this document with published-version evidence.
 
 ## Adoption rule

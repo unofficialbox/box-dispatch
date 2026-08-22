@@ -13,6 +13,29 @@ declare module 'react' {
         eyebrow?: string
         heading?: string
       }
+      'box-metric-card': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        eyebrow?: string
+        heading?: string
+        value?: string
+        message?: string
+        status?: string
+        action?: { id: string; label: string; tone?: string } | null
+        trend?: { direction?: 'up' | 'down' | 'flat'; label: string; tone?: string } | null
+      }
+      'box-run-trace': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        heading?: string
+        steps?: import('@unofficialbox/box-open-elements/patterns/run').RunStep[]
+      }
+      'box-table': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        label?: string
+        columns?: import('@unofficialbox/box-open-elements/table').TableColumn[]
+        rows?: import('@unofficialbox/box-open-elements/table').TableRow[]
+        loading?: boolean
+        emptyText?: string
+        errorText?: string
+        selectionMode?: import('@unofficialbox/box-open-elements/table').TableSelectionMode
+        selectedIds?: string[]
+      }
       'box-switch': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         checked?: boolean
         disabled?: boolean
@@ -34,6 +57,8 @@ declare module 'react' {
         description?: string
         open?: boolean
         position?: 'left' | 'right' | 'bottom'
+        size?: 'small' | 'medium' | 'large' | 'full'
+        busy?: boolean
       }
       'box-text-field': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
@@ -48,6 +73,8 @@ declare module 'react' {
         invalid?: boolean
         errorMessage?: string
         hideLabel?: boolean
+        autocomplete?: string
+        reveal?: boolean
       }
       'box-select': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
@@ -61,6 +88,8 @@ declare module 'react' {
         invalid?: boolean
         errorMessage?: string
         hideLabel?: boolean
+        loading?: boolean
+        emptyText?: string
       }
       'box-split-view': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
