@@ -175,12 +175,19 @@ org, use an existing Salesforce org, or create/replace a 30-day scratch org. Cho
 Salesforce CLI profile validates it immediately; the same screen can open Salesforce login
 for a new profile. Press `r` to recheck the current org without adding another menu action.
 
-Scratch-org creation discovers authenticated Dev Hubs and asks which one to use. If none are
-available, Dispatch opens Dev Hub authentication inside the scratch-org flow, then resumes
-discovery. The selected Dev Hub is passed explicitly to Salesforce CLI, so a CLI-wide default
-is not required. Creation is confirmation-gated and the selected Dev Hub plus generated alias,
-org ID, org type, status, and expiration date are persisted in
-`.dispatch/connection-settings.bcl`; no Salesforce access token is stored.
+The browser workspace does not require that CLI flow. Its Salesforce environment drawer sends
+target-org and Dev Hub credentials only to the loopback Go service, which checks availability
+through Salesforce REST and can create, poll, authorize, save, and select a replacement scratch
+org. Secrets are never returned in browser API responses. With REST credentials saved, Go uses
+Salesforce REST for org and permission operations, Tooling API for managed-package inventory and
+installation, and Metadata API for source inventory and deployment. The browser receives safe
+per-component progress and sanitized provider diagnostics; it does not require Salesforce CLI.
+
+The terminal flow discovers authenticated Dev Hubs and passes the selected alias explicitly to
+Salesforce CLI, so a CLI-wide default is not required. The browser flow instead uses the Dev Hub
+REST credential saved in the owner-only `.dispatch/connection-settings.bcl` store. Creation is
+confirmation-gated; the generated alias, org ID, org type, status, expiration date, instance URL,
+and target access token remain in that local Go-owned store and are never returned to browser code.
 Scratch-org creation itself remains provider-neutral. During solution validation, Dispatch
 checks the managed-package versions declared in `dispatch.bcl` and shows missing packages as
 explicit deployment prerequisites. After the operator confirms **Deploy**, Dispatch installs
@@ -203,9 +210,10 @@ EID in the action label so the operator can confirm the target. The completion s
 created, existing, and failed counts; press `v` to inspect the deployed-resource table and full
 credential-free audit path.
 
-Normal failures show a concise remediation message. Press `d` when offered to open the full
-Salesforce CLI JSON diagnostic, including `stack` and `error.data`; token-, secret-, password-,
-and session-shaped fields are redacted.
+Normal failures show a concise remediation message. The browser diagnostic drawer includes the
+provider, error code, recommended next steps, and sanitized technical detail. The terminal fallback
+offers the equivalent detail with `d`; token-, secret-, password-, session-, query-, and local-path
+values are redacted.
 
 ```mermaid
 flowchart LR
@@ -221,7 +229,7 @@ flowchart LR
     H1 --> I["Install missing pinned packages"]
     I --> J["Send solution metadata"]
     J --> K["Assign and verify required permission sets"]
-    B --> H["d: full sanitized CLI diagnostics"]
+    B --> H["Safe browser diagnostics"]
 ```
 
 Generated solution packages use BCL for their complete package contract:

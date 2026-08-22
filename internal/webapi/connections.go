@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -69,7 +70,31 @@ func saveBoxCCGSelection(settings config.ConnectionSettings, input boxConnection
 }
 
 func loadPersistedConnections() (config.ConnectionSettings, error) {
-	return shellstate.LoadConnectionSettings()
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return settings, err
+	}
+	// Environment variables provide a server-side bootstrap path for CI and
+	// headless use. Persisted browser settings take precedence.
+	if settings.SalesforceInstanceURL == "" {
+		settings.SalesforceInstanceURL = strings.TrimSpace(os.Getenv("SALESFORCE_INSTANCE_URL"))
+	}
+	if settings.SalesforceAccessToken == "" {
+		settings.SalesforceAccessToken = strings.TrimSpace(os.Getenv("SALESFORCE_ACCESS_TOKEN"))
+	}
+	if settings.SalesforceDevHubURL == "" {
+		settings.SalesforceDevHubURL = strings.TrimSpace(os.Getenv("SALESFORCE_DEV_HUB_URL"))
+	}
+	if settings.SalesforceDevHubToken == "" {
+		settings.SalesforceDevHubToken = strings.TrimSpace(os.Getenv("SALESFORCE_DEV_HUB_ACCESS_TOKEN"))
+	}
+	if settings.SalesforceClientID == "" {
+		settings.SalesforceClientID = strings.TrimSpace(os.Getenv("SALESFORCE_CLIENT_ID"))
+	}
+	if settings.SalesforceClientSecret == "" {
+		settings.SalesforceClientSecret = strings.TrimSpace(os.Getenv("SALESFORCE_CLIENT_SECRET"))
+	}
+	return settings, nil
 }
 
 func savePersistedConnections(settings config.ConnectionSettings) error {
@@ -96,6 +121,21 @@ func presentSalesforceOptions(settings config.ConnectionSettings, targets []sale
 		})
 	}
 	return options
+}
+
+func presentSalesforceRESTOption(settings config.ConnectionSettings) []salesforceConnectionOption {
+	if !settings.HasSalesforceREST() {
+		return []salesforceConnectionOption{}
+	}
+	alias := strings.TrimSpace(settings.SalesforceAlias)
+	if alias == "" {
+		alias = "Connected Salesforce org"
+	}
+	kind := "Org"
+	if strings.EqualFold(settings.SalesforceOrgType, "scratch") {
+		kind = "Scratch org"
+	}
+	return []salesforceConnectionOption{{Alias: alias, Kind: kind, Status: settings.SalesforceOrgStatus, ExpiresAt: settings.SalesforceExpirationDate, Selected: true}}
 }
 
 func saveSalesforceSelection(settings config.ConnectionSettings, target salesforceorg.Target) config.ConnectionSettings {

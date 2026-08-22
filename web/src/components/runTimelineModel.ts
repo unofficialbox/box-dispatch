@@ -5,6 +5,16 @@ export type ProviderProgress = {
   name: string
   state: 'pending' | 'active' | 'complete' | 'failed'
   updates: RunEvent[]
+  components: ComponentProgress[]
+}
+
+export type ComponentProgress = {
+  id: string
+  state: 'queued' | 'running' | 'completed' | 'failed'
+  message: string
+  at: string
+  sequence: number
+  firstSequence: number
 }
 
 export function presentProviderProgress(components: DeploymentPlan['components'], run: DispatchRun | null, events: RunEvent[]): ProviderProgress[] {
@@ -13,13 +23,31 @@ export function presentProviderProgress(components: DeploymentPlan['components']
     const result = (run?.providers ?? []).find((provider) => provider.name.toLowerCase() === component.id)
     const componentEvents = events.filter((event) => event.provider === component.id)
     const updates = componentEvents.filter((event) => event.type === 'activity')
-    if (result) return { id: component.id, name: component.name, state: result.status === 'failed' ? 'failed' : 'complete', updates }
-    if (run?.status === 'failed' && currentProvider === component.id) return { id: component.id, name: component.name, state: 'failed', updates }
-    if (providerFinished(updates.at(-1)?.message)) return { id: component.id, name: component.name, state: 'complete', updates }
-    if (run?.status === 'completed' && updates.length > 0) return { id: component.id, name: component.name, state: 'complete', updates }
-    if (currentProvider === component.id) return { id: component.id, name: component.name, state: 'active', updates }
-    return { id: component.id, name: component.name, state: 'pending', updates }
+    const componentProgress = presentComponents(updates)
+    if (result) return { id: component.id, name: component.name, state: result.status === 'failed' ? 'failed' : 'complete', updates, components: componentProgress }
+    if (run?.status === 'failed' && currentProvider === component.id) return { id: component.id, name: component.name, state: 'failed', updates, components: componentProgress }
+    if (providerFinished(updates.at(-1)?.message)) return { id: component.id, name: component.name, state: 'complete', updates, components: componentProgress }
+    if (run?.status === 'completed' && updates.length > 0) return { id: component.id, name: component.name, state: 'complete', updates, components: componentProgress }
+    if (currentProvider === component.id) return { id: component.id, name: component.name, state: 'active', updates, components: componentProgress }
+    return { id: component.id, name: component.name, state: 'pending', updates, components: componentProgress }
   })
+}
+
+function presentComponents(events: RunEvent[]): ComponentProgress[] {
+  const byComponent = new Map<string, ComponentProgress>()
+  for (const event of events) {
+    if (!event.component || !event.progressState || event.progressState === 'activity') continue
+    const previous = byComponent.get(event.component)
+    byComponent.set(event.component, {
+      id: event.component,
+      state: event.progressState,
+      message: event.message,
+      at: event.at,
+      sequence: event.sequence,
+      firstSequence: previous?.firstSequence ?? event.sequence,
+    })
+  }
+  return [...byComponent.values()].sort((left, right) => left.firstSequence - right.firstSequence)
 }
 
 function providerFinished(message = '') {

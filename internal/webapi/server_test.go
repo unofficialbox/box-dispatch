@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 )
 
@@ -45,6 +47,92 @@ func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
 	}
 	if len(summaries) != 1 || summaries[0].ID != "run-42" || summaries[0].Providers[0].Status != string(lifecycle.StatusPresent) {
 		t.Fatalf("summaries = %#v", summaries)
+	}
+}
+
+func TestSalesforceRESTConnectionCheckAndScratchCreation(t *testing.T) {
+	settings := config.ConnectionSettings{}
+	created := make(chan struct{}, 1)
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		SalesforceCheck: func(_ context.Context, credential salesforceapi.Credential) (salesforceapi.OrgStatus, error) {
+			if credential.InstanceURL != "https://scratch.example.com" || credential.AccessToken != "scratch-token" {
+				t.Fatalf("credential = %#v", credential)
+			}
+			return salesforceapi.OrgStatus{Available: true, OrgID: "00Dscratch", Username: "scratch@example.com", Status: "Active"}, nil
+		},
+		SalesforceCreate: func(_ context.Context, credential salesforceapi.Credential, request salesforceapi.ScratchRequest) (salesforceapi.ScratchOrg, error) {
+			if credential.InstanceURL != "https://devhub.example.com" || credential.ClientID != "client-id" || request.Alias != "replacement" {
+				t.Fatalf("credential=%#v request=%#v", credential, request)
+			}
+			created <- struct{}{}
+			return salesforceapi.ScratchOrg{Alias: "replacement", Username: "new@example.com", OrgID: "00Dnew", InstanceURL: "https://new.example.com", AccessToken: "new-token", Status: "Active", ExpirationDate: "2026-09-21"}, nil
+		},
+	})
+
+	connect := httptest.NewRecorder()
+	handler.ServeHTTP(connect, httptest.NewRequest(http.MethodPut, "/api/connections/salesforce/rest", strings.NewReader(`{"instanceUrl":"https://scratch.example.com","accessToken":"scratch-token","devHubUrl":"https://devhub.example.com","devHubAccessToken":"hub-token","clientId":"client-id","clientSecret":"secret"}`)))
+	if connect.Code != http.StatusOK || strings.Contains(connect.Body.String(), "scratch-token") || strings.Contains(connect.Body.String(), "secret") {
+		t.Fatalf("connect = %d %s", connect.Code, connect.Body.String())
+	}
+
+	check := httptest.NewRecorder()
+	handler.ServeHTTP(check, httptest.NewRequest(http.MethodPost, "/api/connections/salesforce/check", nil))
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"available":true`) || settings.SalesforceOrgID != "00Dscratch" {
+		t.Fatalf("check = %d %s settings=%#v", check.Code, check.Body.String(), settings)
+	}
+
+	create := httptest.NewRecorder()
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/salesforce/scratch-orgs", strings.NewReader(`{"alias":"replacement","durationDays":30}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create = %d %s", create.Code, create.Body.String())
+	}
+	var job scratchJob
+	if err := json.Unmarshal(create.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-created:
+	case <-time.After(time.Second):
+		t.Fatal("scratch creation did not start")
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		status := httptest.NewRecorder()
+		handler.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/salesforce/scratch-orgs/"+job.ID, nil))
+		if strings.Contains(status.Body.String(), `"status":"active"`) {
+			if settings.SalesforceAlias != "replacement" || settings.SalesforceAccessToken != "new-token" {
+				t.Fatalf("settings = %#v", settings)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("scratch creation did not complete")
+}
+
+func TestSalesforceRESTCheckRejectsExpiredScratchOrgBeforeCallingProvider(t *testing.T) {
+	settings := config.ConnectionSettings{
+		SalesforceInstanceURL:    "https://expired.example.com",
+		SalesforceAccessToken:    "expired-token",
+		SalesforceOrgType:        "scratch",
+		SalesforceExpirationDate: "2026-08-21",
+	}
+	called := false
+	handler := NewHandlerWithOptions(ServerOptions{
+		Now:             func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) },
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {
+			called = true
+			return salesforceapi.OrgStatus{}, nil
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/connections/salesforce/check", nil))
+	if response.Code != http.StatusGone || called || settings.SalesforceOrgStatus != "Expired" {
+		t.Fatalf("status=%d called=%t settings=%#v body=%s", response.Code, called, settings, response.Body.String())
 	}
 }
 

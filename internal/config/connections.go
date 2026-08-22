@@ -14,10 +14,20 @@ type ConnectionSettings struct {
 	SalesforceOrgStatus      string `json:"salesforceOrgStatus,omitempty"`
 	SalesforceExpirationDate string `json:"salesforceExpirationDate,omitempty"`
 	SalesforceDevHubAlias    string `json:"salesforceDevHubAlias,omitempty"`
-	DatabricksHost           string `json:"databricksHost,omitempty"`
-	DatabricksProfile        string `json:"databricksProfile,omitempty"`
-	AWSProfile               string `json:"awsProfile,omitempty"`
-	AWSRegion                string `json:"awsRegion,omitempty"`
+	// Salesforce REST credentials are owned by the local Go backend. The browser
+	// may submit them during connection setup, but API responses never return
+	// them. Like Box CCG credentials, these values are stored in the 0600 BCL
+	// settings file until a system keychain-backed store is introduced.
+	SalesforceInstanceURL  string `json:"salesforceInstanceUrl,omitempty"`
+	SalesforceAccessToken  string `json:"salesforceAccessToken,omitempty"`
+	SalesforceDevHubURL    string `json:"salesforceDevHubUrl,omitempty"`
+	SalesforceDevHubToken  string `json:"salesforceDevHubToken,omitempty"`
+	SalesforceClientID     string `json:"salesforceClientId,omitempty"`
+	SalesforceClientSecret string `json:"salesforceClientSecret,omitempty"`
+	DatabricksHost         string `json:"databricksHost,omitempty"`
+	DatabricksProfile      string `json:"databricksProfile,omitempty"`
+	AWSProfile             string `json:"awsProfile,omitempty"`
+	AWSRegion              string `json:"awsRegion,omitempty"`
 
 	// Box Client Credentials Grant app. The subject determines who the token acts
 	// as: box_subject_type "user" keeps created resources owned by that user,
@@ -63,4 +73,12 @@ type VerifiedConnection struct {
 func (c ConnectionSettings) HasBoxCCG() bool {
 	return c.BoxCCGClientID != "" && c.BoxCCGClientSecret != "" &&
 		c.BoxCCGSubjectType != "" && c.BoxCCGSubjectID != ""
+}
+
+func (c ConnectionSettings) HasSalesforceREST() bool {
+	return c.SalesforceInstanceURL != "" && c.SalesforceAccessToken != ""
+}
+
+func (c ConnectionSettings) HasSalesforceDevHub() bool {
+	return c.SalesforceDevHubURL != "" && c.SalesforceDevHubToken != "" && c.SalesforceClientID != ""
 }

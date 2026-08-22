@@ -29,13 +29,19 @@ func isolateRoot(t *testing.T) string {
 func TestConnectionSettingsRoundTripAsBCL(t *testing.T) {
 	root := isolateRoot(t)
 	want := config.ConnectionSettings{
-		SalesforceAlias:       "agentforce",
-		SalesforceDevHubAlias: "devhub",
-		DatabricksProfile:     "clm",
-		AWSProfile:            "demo",
-		AWSRegion:             "us-east-1",
+		SalesforceAlias:        "salesforce",
+		SalesforceDevHubAlias:  "devhub",
+		SalesforceInstanceURL:  "https://scratch.example.com",
+		SalesforceAccessToken:  "scratch-token",
+		SalesforceDevHubURL:    "https://devhub.example.com",
+		SalesforceDevHubToken:  "hub-token",
+		SalesforceClientID:     "client-id",
+		SalesforceClientSecret: "client-secret",
+		DatabricksProfile:      "clm",
+		AWSProfile:             "demo",
+		AWSRegion:              "us-east-1",
 		VerifiedConnections: map[string]config.VerifiedConnection{
-			"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "agentforce", Identity: "user@example.test"},
+			"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "salesforce", Identity: "user@example.test"},
 		},
 	}
 	if err := SaveConnectionSettings(want); err != nil {
