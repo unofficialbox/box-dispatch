@@ -285,15 +285,9 @@ function App() {
           <button className="environment" type="button" aria-label="Selected environment"><span>Environment</span><strong>Development</strong></button>
         </header>
 
-        <ol className="stepper" aria-label="Deployment stages">
-          {phases.map((phase, index) => {
-            const current = phases.indexOf(activePhase)
-            const state = index < current ? 'complete' : index === current ? 'active' : 'pending'
-            return <li className={`step ${state}`} key={phase}><span className="step-index">{state === 'complete' ? '✓' : index + 1}</span><span>{phase}</span></li>
-          })}
-        </ol>
+        <WorkflowRail activePhase={activePhase} />
 
-		{activePhase === 'Choose' ? <ChooseView templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage} /> : activePhase === 'Deploy' ? <DeployView run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} onConnections={openConnectionDrawer} />}
+		{activePhase === 'Choose' ? <ChooseView templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage} /> : activePhase === 'Deploy' ? <DeployView plan={plan} run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} onConnections={openConnectionDrawer} />}
 
         <section id="history" className="history" aria-labelledby="history-title">
           <div className="section-heading"><div><h2 id="history-title">Recent deployments</h2></div><a href="#history">View full history</a></div>
@@ -313,6 +307,15 @@ function formatCompletedAt(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
 }
 
+function WorkflowRail({ activePhase }: { activePhase: Phase }) {
+  const current = phases.indexOf(activePhase)
+  const progress = `${Math.max(current, 0) / (phases.length - 1) * 100}%`
+  return <section className="workflow" aria-label="Deployment workflow"><div className="workflow-heading"><span>Workflow</span><strong>{activePhase}</strong></div><div className="workflow-map"><span className="workflow-track" aria-hidden="true"></span><span className="workflow-progress" aria-hidden="true" style={{ width: progress }}></span><ol className="workflow-steps">{phases.map((phase, index) => {
+    const state = index < current ? 'complete' : index === current ? 'active' : 'pending'
+    return <li className={`workflow-step ${state}`} key={phase} aria-current={state === 'active' ? 'step' : undefined}><span className="workflow-node">{state === 'complete' ? '✓' : index + 1}</span><span>{phase}</span></li>
+  })}</ol></div></section>
+}
+
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal })
   if (!response.ok) throw new Error(`${path} is unavailable.`)
@@ -328,19 +331,37 @@ function ChooseView({ templates, selectedTemplateID, selectedComponents, assembl
   return <section className="choose-layout" aria-label="Choose deployment"><article className="plan-card choose-card"><div className="section-heading"><div><p className="eyebrow">New deployment</p><h2>Choose a solution quickstart</h2></div><span className="status running">Step 1 of 5</span></div><p className="choice-intro">Dispatch will assemble a local BCL package from your choice. You can validate it before any provider changes occur.</p><div className="template-grid" role="radiogroup" aria-label="Solution quickstarts">{templates.map((template) => <button className={`template-choice ${template.id === selectedTemplateID ? 'selected' : ''}`} type="button" role="radio" aria-checked={template.id === selectedTemplateID} key={template.id} onClick={() => onTemplateChange(template.id)} disabled={assembling}><span className="template-sector">{template.sector || 'Solution'}</span><strong>{template.name}</strong><small>{template.description}</small></button>)}</div><section className="provider-choice"><div><h3>Included platforms</h3><p>Box is required. Add Salesforce only when this solution needs CRM records or customer workflows.</p></div><label className="provider-option required"><input type="checkbox" checked disabled /><span><strong>Box</strong><small>Required content and workflow platform</small></span><em>Required</em></label><label className="provider-option"><input type="checkbox" checked={selectedComponents.includes('salesforce')} onChange={onToggleSalesforce} disabled={assembling} /><span><strong>Salesforce</strong><small>Optional CRM and record workflows</small></span></label></section><p className="notice" role="status">{notice}</p><footer className="action-row"><box-button label={assembling ? 'Assembling…' : 'Assemble and review'} tone="primary" disabled={assembling} onClick={onAssemble}></box-button></footer></article><aside className="activity-card choose-aside"><h2>What happens next</h2><ol className="next-steps"><li><span>1</span><div><strong>Assemble</strong><small>Dispatch clones and prepares the selected template locally.</small></div></li><li><span>2</span><div><strong>Review connections</strong><small>Verify only the providers included in your plan.</small></div></li><li><span>3</span><div><strong>Validate, then apply</strong><small>Changes are never applied without an explicit second action.</small></div></li></ol></aside></section>
 }
 
-function DeployView({ run, events, notice, onApply, onDiagnostics }: { run: DispatchRun | null; events: RunEvent[]; notice: string; onApply: () => void; onDiagnostics: (runID: string) => void }) {
+function DeployView({ plan, run, events, notice, onApply, onDiagnostics }: { plan: DeploymentPlan; run: DispatchRun | null; events: RunEvent[]; notice: string; onApply: () => void; onDiagnostics: (runID: string) => void }) {
   const title = run?.action === 'deploy' ? 'Applying configuration' : 'Validating configuration'
   const state = run?.status ?? 'queued'
   const status = state === 'completed' ? 'Complete' : state === 'failed' ? 'Needs attention' : 'In progress'
-  return <section className="review-layout" aria-label="Live deployment progress"><article className="plan-card deploy-card"><div className="section-heading"><div><h2>{title}</h2></div><span className={`status ${state === 'failed' ? 'running' : state === 'completed' ? 'ready' : 'running'}`}>{status}</span></div><div className="stage-list">{(run?.providers ?? []).map((provider, index) => <div className={`deploy-stage ${provider.status === 'present' ? 'complete' : index === 0 && state === 'running' ? 'active' : ''}`} key={provider.name}><span className="stage-mark">{provider.status === 'present' ? '✓' : index + 1}</span><div><strong>{provider.name}</strong><span>{provider.status}</span></div></div>)}</div><p className="notice" role="status">{notice}</p><footer className="action-row">{run?.action === 'validate' && run.status === 'completed' && <box-button label="Apply validated changes" tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <button className="text-button" type="button" onClick={() => onDiagnostics(run.id)}>View diagnostic guidance</button>}</footer></article><ActivityRail events={events} /></section>
+  const providerRows = presentProviderProgress(plan.components, run, events)
+  const completed = providerRows.filter((provider) => provider.state === 'complete').length
+  return <section className="review-layout" aria-label="Live deployment progress"><article className="plan-card deploy-card"><div className="section-heading"><div><h2>{title}</h2></div><span className={`status ${state === 'failed' ? 'running' : state === 'completed' ? 'ready' : 'running'}`}>{status}</span></div><div className="run-summary"><strong>{state === 'running' ? `${completed} of ${providerRows.length} providers checked` : `${providerRows.length} provider${providerRows.length === 1 ? '' : 's'} in this run`}</strong><span>{state === 'running' ? 'Dispatch follows each provider as it reports progress.' : 'Provider progress is retained with this local run.'}</span></div><div className="stage-list">{providerRows.map((provider, index) => <div className={`deploy-stage ${provider.state}`} key={provider.name}><span className="stage-mark">{provider.state === 'complete' ? '✓' : provider.state === 'active' ? '…' : index + 1}</span><div><strong>{provider.name}</strong><span>{provider.detail}</span>{provider.state === 'active' && <span className="stage-pulse" aria-label="Checking in progress"></span>}</div></div>)}</div><p className="notice" role="status">{notice}</p><footer className="action-row">{run?.action === 'validate' && run.status === 'completed' && <box-button label="Apply validated changes" tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <button className="text-button" type="button" onClick={() => onDiagnostics(run.id)}>View diagnostic guidance</button>}</footer></article><ActivityRail events={events} isRunning={state === 'queued' || state === 'running'} /></section>
+}
+
+function presentProviderProgress(components: PlanComponent[], run: DispatchRun | null, events: RunEvent[]) {
+  const currentProvider = [...events].reverse().find((event) => event.type === 'activity' && event.provider)?.provider
+  return components.map((component, index) => {
+    const result = run?.providers.find((provider) => provider.name.toLowerCase() === component.id)
+    if (result) return { name: component.name, state: result.status === 'failed' ? 'failed' : 'complete', detail: result.status === 'present' ? 'Validated and ready' : result.status }
+    if (run?.status === 'failed' && currentProvider === component.id) return { name: component.name, state: 'failed', detail: 'Validation needs attention' }
+    if (run?.status === 'running' && currentProvider === component.id) return { name: component.name, state: 'active', detail: latestProviderMessage(events, component.id) }
+    if ((run?.status === 'running' || run?.status === 'queued') && index === 0 && !currentProvider) return { name: component.name, state: 'active', detail: 'Preparing local validation checks' }
+    return { name: component.name, state: 'pending', detail: 'Queued for validation' }
+  })
+}
+
+function latestProviderMessage(events: RunEvent[], provider: string) {
+  return [...events].reverse().find((event) => event.provider === provider)?.message ?? 'Checking configuration'
 }
 
 function PlanGroup({ title, rows }: { title: string; rows: [string, string][] }) {
   return <section className="plan-group"><h3>{title}</h3>{rows.map(([label, value]) => <div className="plan-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
 }
 
-function ActivityRail({ events, onConnections }: { events: RunEvent[]; onConnections?: () => void }) {
-  return <aside className="activity-card" aria-labelledby="activity-title"><div className="section-heading"><div><h2 id="activity-title">Activity</h2></div>{events.length > 0 && <span className="live-dot">Live</span>}</div>{events.length === 0 ? <p className="empty-activity">Run activity will appear here.</p> : <ol className="activity-list">{events.map((event, index) => <li className={index === events.length - 1 ? 'current' : ''} key={event.sequence}><span>{event.status === 'completed' ? '✓' : event.status === 'failed' ? '!' : '•'}</span><div><strong>{event.message}</strong><small>{event.provider || 'Dispatch'}</small></div></li>)}</ol>}<div className="target-summary"><strong>Connections</strong><span>Box is managed in Dispatch CLI.</span>{onConnections ? <button className="text-button" type="button" onClick={onConnections}>Change Salesforce org</button> : <span>Salesforce connection is locked while this run is active.</span>}</div></aside>
+function ActivityRail({ events, isRunning = false, onConnections }: { events: RunEvent[]; isRunning?: boolean; onConnections?: () => void }) {
+  return <aside className="activity-card" aria-labelledby="activity-title"><div className="section-heading"><div><h2 id="activity-title">Activity</h2></div>{isRunning && <span className="live-dot">Live</span>}</div>{events.length === 0 ? <p className="empty-activity">{isRunning ? 'Connecting to the local run stream…' : 'Run activity will appear here.'}</p> : <ol className="activity-list">{events.map((event, index) => <li className={index === events.length - 1 ? 'current' : ''} key={event.sequence}><span>{event.status === 'completed' ? '✓' : event.status === 'failed' ? '!' : '•'}</span><div><strong>{event.message}</strong><small>{event.provider || 'Dispatch'}</small></div></li>)}</ol>}<div className="target-summary"><strong>Connections</strong><span>Box is managed in Dispatch CLI.</span>{onConnections ? <button className="text-button" type="button" onClick={onConnections}>Change Salesforce org</button> : <span>Salesforce connection is locked while this run is active.</span>}</div></aside>
 }
 
 function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiagnostic | null; onClose: () => void }) {

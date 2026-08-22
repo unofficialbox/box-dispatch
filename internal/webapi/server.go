@@ -624,7 +624,7 @@ func writeEvents(w http.ResponseWriter, flusher http.Flusher, events []runEvent)
 		if err != nil {
 			continue
 		}
-		_, _ = fmt.Fprintf(w, "event: dispatch\\ndata: %s\\n\\n", data)
+		_, _ = fmt.Fprintf(w, "event: dispatch\ndata: %s\n\n", data)
 	}
 	flusher.Flush()
 }

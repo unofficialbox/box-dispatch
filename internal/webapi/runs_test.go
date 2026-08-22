@@ -87,6 +87,9 @@ func TestRunEndpointsProvideSSEAndRequireCompletedValidationForDeploy(t *testing
 	if strings.Contains(stream.Body.String(), "raw provider diagnostic") {
 		t.Fatalf("stream leaked raw diagnostic: %s", stream.Body.String())
 	}
+	if strings.Contains(stream.Body.String(), `\n`) {
+		t.Fatalf("stream contains literal newline escapes instead of SSE boundaries: %q", stream.Body.String())
+	}
 
 	deployResponse := httptest.NewRecorder()
 	handler.ServeHTTP(deployResponse, httptest.NewRequest(http.MethodPost, "/api/runs/"+run.ID+"/deploy", nil))
