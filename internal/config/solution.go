@@ -8,5 +8,6 @@ type SolutionPlan struct {
 	TemplateID  string   `json:"template_id"`
 	Template    string   `json:"template"`
 	Repository  string   `json:"repository"`
+	Strategy    string   `json:"strategy,omitempty"`
 	PackagePath string   `json:"package_path,omitempty"`
 }

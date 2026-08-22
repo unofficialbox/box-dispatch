@@ -80,6 +80,7 @@ func newRootCommand() *cobra.Command {
 		makePresentCommand(),
 		makeSmokeCommand(),
 		makePublishCheckCommand(),
+		makeServeCommand(),
 	}
 	for _, cmd := range commonCommands {
 		cmd.GroupID = commonCommandGroup

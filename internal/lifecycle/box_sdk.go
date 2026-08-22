@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
-	"github.com/unofficialbox/box-dispatch/internal/config"
-	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-open-go-sdk/auth"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
@@ -65,56 +63,36 @@ func newBoxAPI() (boxAPI, error) {
 	return sdk, nil
 }
 
-// prefersBoxCCG reports whether box-dispatch should authenticate with the
-// captured CCG app: it must be complete, and the pinned default must not be a
-// specific CLI environment (which the user chose over CCG). An empty pin or the
-// box-dispatch CCG sentinel both select the CCG app.
-func prefersBoxCCG(settings config.ConnectionSettings) bool {
-	if !settings.HasBoxCCG() {
-		return false
-	}
-	switch settings.BoxDefaultConnection {
-	case "", boxconn.DispatchCCGName:
-		return true
-	default:
-		return false
-	}
-}
-
 func newBoxSDK() (*boxSDK, error) {
-	// CCG (Client Credentials Grant) is the preferred auth for deployments: it
-	// carries enterprise scopes (e.g. Doc Gen) and resources stay owned by the user.
-	if settings, err := shellstate.LoadConnectionSettings(); err == nil && prefersBoxCCG(settings) {
-		subjectID := settings.BoxCCGSubjectID
+	connection, err := boxconn.ResolveAuth()
+	if err != nil {
+		return nil, err
+	}
+	switch connection.Method {
+	case boxconn.AuthCCG:
+		subjectID := connection.SubjectID
 		ccgConfig := auth.CCGConfig{
-			ClientID:     settings.BoxCCGClientID,
-			ClientSecret: settings.BoxCCGClientSecret,
+			ClientID:     connection.ClientID,
+			ClientSecret: connection.ClientSecret,
 			UserID:       subjectID,
 		}
 		// If subject type is enterprise, set EnterpriseID instead of UserID
-		if settings.BoxCCGSubjectType == "enterprise" {
+		if connection.SubjectType == "enterprise" {
 			ccgConfig.EnterpriseID = subjectID
 			ccgConfig.UserID = ""
 		}
 		client := boxclient.NewClient(auth.ClientCredentials(ccgConfig))
 		return &boxSDK{client: client}, nil
-	}
-
-	// OAuth2 with refresh token from environment
-	clientID := strings.TrimSpace(os.Getenv("BOX_CLIENT_ID"))
-	clientSecret := strings.TrimSpace(os.Getenv("BOX_CLIENT_SECRET"))
-	refreshToken := strings.TrimSpace(os.Getenv("BOX_REFRESH_TOKEN"))
-
-	if clientID != "" && clientSecret != "" && refreshToken != "" {
+	case boxconn.AuthOAuth2:
 		oauthConfig := auth.OAuthConfig{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
+			ClientID:     connection.ClientID,
+			ClientSecret: connection.ClientSecret,
 		}
-		client := boxclient.NewClient(auth.OAuth(oauthConfig, refreshToken))
+		client := boxclient.NewClient(auth.OAuth(oauthConfig, connection.RefreshToken))
 		return &boxSDK{client: client}, nil
+	default:
+		return nil, fmt.Errorf("unsupported Box authentication method %q", connection.Method)
 	}
-
-	return nil, fmt.Errorf("no Box authentication configured: set up CCG credentials in the app or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN for OAuth2")
 }
 
 func (sdk *boxSDK) findFolder(ctx context.Context, parentID, name string) (string, bool, error) {

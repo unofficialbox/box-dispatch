@@ -82,11 +82,13 @@ func TestEnteringConnectChecksOnlySelectedProviders(t *testing.T) {
 func TestEnteringConnectReusesSavedVerifiedConnections(t *testing.T) {
 	isolateShellRoot(t)
 	if err := shellstate.SaveConnectionSettings(config.ConnectionSettings{
-		BoxDefaultConnection: "box-dispatch-ccg",
+		BoxCCGClientID: "client", BoxCCGClientSecret: "secret",
+		BoxCCGSubjectType: "user", BoxCCGSubjectID: "123",
+		BoxDefaultConnection: boxconn.DispatchCCGName,
 		SalesforceAlias:      "dispatch-scratch",
 		VerifiedConnections: map[string]config.VerifiedConnection{
 			"box": {
-				VerifiedAt: "2026-08-12T12:00:00Z", Selection: "box-dispatch-ccg",
+				VerifiedAt: "2026-08-12T12:00:00Z", Selection: boxconn.DispatchCCGName,
 				Identity: "box@example.test", Enterprise: "5105484", AuthType: "CCG",
 			},
 			"salesforce": {
@@ -2233,8 +2235,12 @@ func TestTeardownWithNoRecordedResourcesIsInert(t *testing.T) {
 func TestBoxCCGActionIsOfferedOnlyForBox(t *testing.T) {
 	model := newSetupOnlyShell()
 	model.provider = "box"
-	if !containsStr(model.providerActions(), "ccg") {
+	actions := model.providerActions()
+	if !containsStr(actions, "ccg") {
 		t.Fatal("Box should offer the CCG connect action")
+	}
+	if containsStr(actions, "connect") || containsStr(actions, "switch") {
+		t.Fatalf("Box should not offer removed Box CLI actions: %v", actions)
 	}
 	model.provider = "salesforce"
 	if containsStr(model.providerActions(), "ccg") {

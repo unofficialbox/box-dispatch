@@ -29,6 +29,23 @@ func CCGToken(ctx context.Context, clientID, clientSecret, subjectType, subjectI
 		"box_subject_type": {subjectType},
 		"box_subject_id":   {subjectID},
 	}
+	return tokenFromForm(ctx, form, "CCG")
+}
+
+// OAuthToken exchanges an OAuth 2 refresh token for an access token. The
+// caller owns the refresh token and must not log or persist it through this
+// package.
+func OAuthToken(ctx context.Context, clientID, clientSecret, refreshToken string) (string, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"refresh_token": {refreshToken},
+	}
+	return tokenFromForm(ctx, form, "OAuth2")
+}
+
+func tokenFromForm(ctx context.Context, form url.Values, authName string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
@@ -36,21 +53,21 @@ func CCGToken(ctx context.Context, clientID, clientSecret, subjectType, subjectI
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request Box CCG token: %w", err)
+		return "", fmt.Errorf("request Box %s token: %w", authName, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Box CCG token request returned %s: %s", resp.Status, tokenError(body))
+		return "", fmt.Errorf("Box %s token request returned %s: %s", authName, resp.Status, tokenError(body))
 	}
 	var payload struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", fmt.Errorf("parse Box CCG token response: %w", err)
+		return "", fmt.Errorf("parse Box %s token response: %w", authName, err)
 	}
 	if payload.AccessToken == "" {
-		return "", fmt.Errorf("Box CCG token response contained no access token")
+		return "", fmt.Errorf("Box %s token response contained no access token", authName)
 	}
 	return payload.AccessToken, nil
 }

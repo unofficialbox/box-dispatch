@@ -56,6 +56,17 @@ func TestParseDevHubsPrefersConnectedAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestParseTargetsReturnsOnlyAliasedConnectedOrgs(t *testing.T) {
+	output := []byte(`{"result":{"nonScratchOrgs":[{"alias":"production","username":"admin@example.com","orgId":"00D1","connectedStatus":"Connected"},{"alias":"offline","username":"offline@example.com","connectedStatus":"Disconnected"}],"scratchOrgs":[{"alias":"dispatch-scratch","username":"scratch@example.com","orgId":"00D2","connectedStatus":"Connected","status":"Active","expirationDate":"2026-09-15","devHubId":"00Dhub"},{"username":"no-alias@example.com","connectedStatus":"Connected"},{"alias":"production","connectedStatus":"Connected"}]}}`)
+	targets, err := ParseTargets(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 || targets[0].Alias != "dispatch-scratch" || !targets[0].IsScratch() || targets[1].Alias != "production" {
+		t.Fatalf("targets = %#v", targets)
+	}
+}
+
 func TestScratchCreateArgsTargetsSelectedDevHub(t *testing.T) {
 	args := strings.Join(scratchCreateArgs("box-dispatch-test", "devhub"), " ")
 	for _, want := range []string{"--target-dev-hub devhub", "--alias box-dispatch-test", "--duration-days 30", "--set-default"} {

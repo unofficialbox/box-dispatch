@@ -62,7 +62,8 @@ go run ./cmd/box-dispatch                     # same, without building
 
 Providers are configured by env vars — see **`.env.sample`** for the full, commented list.
 Copy it to `.env` (which is **gitignored**; never commit real tokens) to run a real deploy.
-The checker looks for: Box `BOX_ACCESS_TOKEN`; Salesforce `SF_ALIAS` (or
+The checker looks for: a Box CCG app saved by Dispatch, or Box `BOX_CLIENT_ID`,
+`BOX_CLIENT_SECRET`, and `BOX_REFRESH_TOKEN`; Salesforce `SF_ALIAS` (or
 `SALESFORCE_ACCESS_TOKEN`); Databricks `DATABRICKS_HOST` + `DATABRICKS_TOKEN`; AWS
 `AWS_PROFILE` + `AWS_REGION`/`AWS_DEFAULT_REGION`.
 

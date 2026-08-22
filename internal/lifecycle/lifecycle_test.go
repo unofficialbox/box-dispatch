@@ -75,19 +75,6 @@ func TestReadBoxConfigObjectFallsBackToJSON(t *testing.T) {
 	}
 }
 
-func TestBoxAccessTokenParsesCLIJSONWithoutPersistingIt(t *testing.T) {
-	want := strings.Repeat("a", 32)
-	if got := boxAccessToken([]byte(`{"accessToken":"` + want + `"}`)); got != want {
-		t.Fatalf("token parser returned %q", got)
-	}
-}
-
-func TestBoxUserIDParsesAuthenticatedCLIIdentity(t *testing.T) {
-	if got := boxUserID([]byte(`{"id":"123456","name":"Demo User"}`)); got != "123456" {
-		t.Fatalf("user ID parser returned %q", got)
-	}
-}
-
 func TestBoxRootFolderRequiresExplicitApproval(t *testing.T) {
 	t.Setenv("BOX_PARENT_FOLDER_ID", "0")
 	t.Setenv("BOX_ALLOW_ROOT_FOLDER", "")
@@ -563,31 +550,5 @@ func TestBoxComponentsIncludeManifestWorkspaceWithoutMarkerFile(t *testing.T) {
 	want := manifest.Box.Workspace.ComponentType + ":" + manifest.Box.Workspace.DisplayName
 	if !slices.Contains(entries, want) {
 		t.Fatalf("workspace component missing without marker file: got %#v, want %q", entries, want)
-	}
-}
-
-func TestBoxRequestBodyUnwrapsCLIEnvelope(t *testing.T) {
-	// `box request` wraps responses; parsing the envelope instead of the body
-	// made IDs come back empty and existing objects look absent.
-	envelope := []byte(`{"statusCode":201,"headers":{"date":"x"},"body":{"id":"12345","type":"hub"}}`)
-	body, err := boxRequestBody(envelope, "POST", "/hubs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := boxResourceID(body); got != "12345" {
-		t.Fatalf("id = %q, want 12345", got)
-	}
-
-	// A non-2xx status must be an error, not a silently parsed result.
-	failure := []byte(`{"statusCode":403,"headers":{},"body":{"message":"forbidden"}}`)
-	if _, err := boxRequestBody(failure, "POST", "/hubs"); err == nil {
-		t.Fatal("a 403 response must surface as an error")
-	}
-
-	// Output that is not an envelope passes through untouched.
-	plain := []byte(`{"entries":[{"title":"a"}]}`)
-	body, err = boxRequestBody(plain, "GET", "/enterprise_hubs")
-	if err != nil || string(body) != string(plain) {
-		t.Fatalf("plain output should pass through, got %q err %v", body, err)
 	}
 }

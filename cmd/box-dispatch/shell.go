@@ -85,7 +85,6 @@ const (
 	screenDeploy
 	screenTeardown
 	screenBoxCCG
-	screenBoxSwitch
 	screenHelp
 	screenDiagnostic
 	screenScratchConfirm
@@ -418,10 +417,6 @@ type rootShellModel struct {
 	ccgClientSecret *string
 	ccgSubjectType  *string
 	ccgSubjectID    *string
-
-	// Box connection switcher.
-	boxConnections   []boxconn.Connection
-	boxRemovePending string // connection name awaiting a second remove keypress
 }
 
 func newSetupOnlyShell(scopedProvider ...string) rootShellModel {
@@ -1805,7 +1800,7 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// handle it themselves below.
 	if key.String() == " " || key.String() == "spacebar" {
 		switch m.screen {
-		case screenWelcome, screenHistory, screenDashboard, screenProvider, screenOptions, screenBoxSwitch:
+		case screenWelcome, screenHistory, screenDashboard, screenProvider, screenOptions:
 			key = tea.KeyMsg{Type: tea.KeyEnter}
 		}
 	}
@@ -1979,27 +1974,6 @@ func (m rootShellModel) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.String() == "enter" || key.String() == "right" {
 			return m.runProviderAction(m.cursor)
-		}
-	case screenBoxSwitch:
-		switch key.String() {
-		case "up", "down", "k", "j", "tab":
-			m.boxRemovePending = ""
-			m.moveCursor(key, len(m.boxConnections))
-			return m, nil
-		case "left", "esc":
-			m.boxRemovePending = ""
-			m.screen, m.cursor = screenProvider, 0
-			m.message = ""
-			return m, nil
-		case "enter", "right":
-			m.boxRemovePending = ""
-			if m.cursor < len(m.boxConnections) {
-				return m.setBoxDefault(m.boxConnections[m.cursor])
-			}
-		case "x", "delete", "backspace":
-			if m.cursor < len(m.boxConnections) {
-				return m.removeBoxConnection(m.boxConnections[m.cursor])
-			}
 		}
 	case screenOptions:
 		options := m.providerOptions()
@@ -2313,7 +2287,9 @@ func verifiedConnectionMatches(provider string, snapshot config.VerifiedConnecti
 	configured := ""
 	switch provider {
 	case "box":
-		configured = settings.BoxDefaultConnection
+		if connection, err := boxconn.ResolveAuth(); err == nil {
+			configured = connection.Selection()
+		}
 	case "salesforce":
 		configured = settings.SalesforceAlias
 	case "databricks":
@@ -2351,6 +2327,9 @@ func providerResultFromVerifiedConnection(provider string, snapshot config.Verif
 func verifiedConnectionSelection(provider string, discovery checker.ProviderDiscovery, settings config.ConnectionSettings) string {
 	switch provider {
 	case "box":
+		if connection, err := boxconn.ResolveAuth(); err == nil {
+			return connection.Selection()
+		}
 		return settings.BoxDefaultConnection
 	case "salesforce":
 		return firstNonEmptyString(discovery.Profile, settings.SalesforceAlias, discovery.Identity)
@@ -2495,12 +2474,14 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ccg":
 		return m.openBoxCCGForm()
-	case "switch":
-		return m.openBoxSwitch()
 	case "scratch":
 		m.message = "Discovering authenticated Salesforce Dev Hubs..."
 		return m, tea.Batch(m.spinner.Tick, listDevHubsCmd())
 	case "connect":
+		if m.provider == "box" {
+			m.message = "Box uses a CCG app or OAuth2 refresh-token credentials; add a CCG app or set BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN."
+			return m, nil
+		}
 		if m.provider == "databricks" {
 			m.screen = screenDatabricksHost
 			m.hostInput.Focus()
@@ -2519,7 +2500,6 @@ func (m rootShellModel) runProviderAction(index int) (tea.Model, tea.Cmd) {
 
 func providerCLIConnectCommand(provider string) []string {
 	commands := map[string][]string{
-		"box":        {"box", "login"},
 		"salesforce": {"sf", "org", "login", "web", "--set-default"},
 		"aws":        {"aws", "configure", "sso"},
 	}
@@ -2575,7 +2555,8 @@ func (m rootShellModel) providerActions() []string {
 		actions = append(actions, "choose")
 	}
 	if m.provider == "box" {
-		actions = append(actions, "ccg", "switch")
+		actions = append(actions, "ccg")
+		return append(actions, "back")
 	}
 	actions = append(actions, "connect", "back")
 	return actions
@@ -2669,107 +2650,6 @@ func (m rootShellModel) saveBoxCCG() (tea.Model, tea.Cmd) {
 	m.boxCCGForm = nil
 	m.provider = "box"
 	return m.beginChecks([]string{"box"})
-}
-
-// openBoxSwitch lists every Box connection box-dispatch can use — the box CLI
-// environments (each OAuth2, CCG or JWT) plus the box-dispatch CCG app — so the
-// user can pin which one deploys run against.
-func (m rootShellModel) openBoxSwitch() (tea.Model, tea.Cmd) {
-	m.boxConnections = boxconn.List()
-	m.screen, m.cursor = screenBoxSwitch, 0
-	if len(m.boxConnections) == 0 {
-		m.message = "No Box connection found. Run box login or add a CCG app first."
-	} else {
-		m.message = "Enter pins the highlighted connection as the default. Esc cancels."
-	}
-	return m, nil
-}
-
-// setBoxDefault pins the chosen connection as box-dispatch's default. A CLI
-// connection also becomes the CLI's current environment (the CLI has no
-// per-command selection), so the two never disagree.
-func (m rootShellModel) setBoxDefault(conn boxconn.Connection) (tea.Model, tea.Cmd) {
-	if conn.Source == boxconn.SourceCLI {
-		if err := boxconn.SetCLICurrent(conn.Name); err != nil {
-			m.message = "Could not switch the Box CLI to " + conn.Name + ": " + err.Error()
-			return m, nil
-		}
-	}
-	settings, _ := shellstate.LoadConnectionSettings()
-	settings.BoxDefaultConnection = conn.Name
-	if settings.VerifiedConnections != nil {
-		delete(settings.VerifiedConnections, "box")
-	}
-	if err := shellstate.SaveConnectionSettings(settings); err != nil {
-		m.message = "Could not save the default Box connection: " + err.Error()
-		return m, nil
-	}
-	m.boxConnections = boxconn.List()
-	m.provider = "box"
-	m.screen, m.cursor = screenProvider, 0
-	m.message = conn.Name + " (" + conn.AuthType + ") is now the default Box connection. Verifying..."
-	return m.beginChecks([]string{"box"})
-}
-
-// removeBoxConnection deletes a connection, guarded by a confirming second
-// keypress since removing a CLI environment is a global, sign-in-losing change.
-func (m rootShellModel) removeBoxConnection(conn boxconn.Connection) (tea.Model, tea.Cmd) {
-	if m.boxRemovePending != conn.Name {
-		m.boxRemovePending = conn.Name
-		what := "the box CLI environment " + conn.Name + " (you would need to sign in again to restore it)"
-		if conn.Source == boxconn.SourceDispatch {
-			what = "the box-dispatch CCG credentials"
-		}
-		m.message = "Press x again to remove " + what + ". Any other key cancels."
-		return m, nil
-	}
-	m.boxRemovePending = ""
-	if err := boxconn.Remove(conn); err != nil {
-		m.message = "Could not remove " + conn.Name + ": " + err.Error()
-		return m, nil
-	}
-	m.clearVerifiedConnection("box")
-	m.boxConnections = boxconn.List()
-	if m.cursor >= len(m.boxConnections) && m.cursor > 0 {
-		m.cursor = len(m.boxConnections) - 1
-	}
-	m.message = "Removed " + conn.Name + "."
-	return m, nil
-}
-
-func (m rootShellModel) viewBoxSwitch(width int) string {
-	rows := []string{}
-	if len(m.boxConnections) == 0 {
-		rows = append(rows, dimStyle.Render("No Box connection is available."))
-	}
-	for i, conn := range m.boxConnections {
-		tags := []string{}
-		if conn.Default {
-			tags = append(tags, lipgloss.NewStyle().Bold(true).Foreground(green).Render("[default]"))
-		}
-		if conn.Current {
-			tags = append(tags, dimStyle.Render("[CLI current]"))
-		}
-		if conn.Source == boxconn.SourceDispatch {
-			tags = append(tags, dimStyle.Render("[box-dispatch]"))
-		}
-		line := fmt.Sprintf("%-28s %-8s", conn.Name, conn.AuthType)
-		if len(tags) > 0 {
-			line += "  " + strings.Join(tags, " ")
-		}
-		if conn.Detail != "" {
-			line += "\n" + dimStyle.Render("   "+conn.Detail)
-		}
-		style := panel.Copy().Width(width - 4)
-		if i == m.cursor {
-			style = activePane.Copy().Width(width - 4)
-		}
-		rows = append(rows, style.Render(line))
-	}
-	return m.stageHeader() + "\n\n" +
-		titleStyle.Render("Switch Box connection") + "\n" +
-		dimStyle.Render("The default is the connection deploys authenticate with. Selecting a CLI environment also makes it the CLI's current environment.") + "\n\n" +
-		strings.Join(rows, "\n")
 }
 
 func (m rootShellModel) viewBoxCCG(width int) string {
@@ -3003,8 +2883,6 @@ func (m rootShellModel) View() string {
 		body = m.viewTeardown(contentWidth)
 	case screenBoxCCG:
 		body = m.viewBoxCCG(contentWidth)
-	case screenBoxSwitch:
-		body = m.viewBoxSwitch(contentWidth)
 	case screenHelp:
 		body = m.viewExpandedHelp(contentWidth)
 	case screenDiagnostic:
@@ -3484,7 +3362,7 @@ func (m rootShellModel) viewProvider(width int) string {
 		}
 	}
 	actionLabels := map[string]string{
-		"salesforce-done": "Continue with this org", "salesforce-existing": "Use a different Salesforce org", "check": "Check connection", "forget-verification": "Forget saved verification", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "switch": "Switch Box connection / set default", "scratch": "Create or replace a 30-day scratch org", "connect": "Connect using provider CLI", "back": "Back to launch plan",
+		"salesforce-done": "Continue with this org", "salesforce-existing": "Use a different Salesforce org", "check": "Check connection", "forget-verification": "Forget saved verification", "choose": "Choose authenticated profile", "ccg": "Connect with a CCG app (client credentials)", "scratch": "Create or replace a 30-day scratch org", "connect": "Connect using provider CLI", "back": "Back to launch plan",
 	}
 	if m.provider == "salesforce" && m.statuses["salesforce"] != connectionConnected {
 		actionLabels["salesforce-existing"] = "Use an existing Salesforce org"
@@ -5019,14 +4897,6 @@ func (m rootShellModel) footer() string {
 			enterHelp = "retry audit"
 		}
 		bindings = append(bindings, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", enterHelp)))
-	}
-	if m.screen == screenBoxSwitch {
-		bindings = contextualHelp{
-			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "navigate")),
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set default")),
-			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "remove")),
-			key.NewBinding(key.WithKeys("left", "esc"), key.WithHelp("←/esc", "back")),
-		}
 	}
 	if m.screen == screenDiagnostic {
 		bindings = contextualHelp{
