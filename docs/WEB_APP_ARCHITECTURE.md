@@ -21,9 +21,11 @@ flowchart LR
 
 - `web/` is a React 19 + Vite + TypeScript application using the published
   `@unofficialbox/box-open-elements` Web Components.
-- The browser starts with a Review and Deploy surface, an activity rail, and audit
-  history. It reads `GET /api/deployments` when the local API is available and falls
-  back to non-sensitive demonstration state while the API facade is being added.
+- The browser starts a new deployment by choosing a configured quickstart and supported
+  provider set. Go resolves the template source, builds the package, and saves the
+  resulting BCL plan before the browser enters review, validation, and deployment.
+  It also exposes an activity rail and audit history, falling back to non-sensitive
+  demonstration state while the local API facade is unavailable.
 - The Vite dev server proxies `/api` to `127.0.0.1:8787`; no token or client secret is
   available to browser code.
 
@@ -48,6 +50,8 @@ save a non-secret BCL plan draft, but it is not an alternate deployment client:
 | `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |
 | `PUT /api/plan` | save a supported template/provider draft to BCL | package path and all deployment execution |
+| `GET /api/templates` | BCL-configured solution quickstarts and safe display copy | repository source URLs, local paths, credentials |
+| `POST /api/packages` | assemble an allowlisted template into a server-chosen local workspace, then save its BCL plan | arbitrary repositories or destinations, package path, raw Git output |
 | `GET /api/runs` | recent browser-run summaries, persisted across local API restarts | package paths, raw diagnostics, provider output |
 | `POST /api/runs` | start a live validation run for the assembled package | raw diagnostics and provider credentials |
 | `GET /api/runs/{id}` | read a validation or deployment run summary | raw provider detail |
@@ -67,6 +71,12 @@ The browser can change only a Salesforce alias that the local Salesforce CLI
 already knows and reports as connected. Choosing an alias clears its prior
 verification snapshot, so the next validation performs the full org-health
 check. Box CCG credentials remain terminal-managed and are never browser input.
+
+Template assembly is also browser-safe by construction: the request carries a
+template ID plus Box/Salesforce selections only. The local service looks up the
+configured scenario, selects its repository, and creates an ignored workspace
+under `.box-dispatch/web-packages/`; its absolute location and raw clone output
+never cross the browser boundary.
 
 ## API progression
 

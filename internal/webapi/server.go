@@ -29,6 +29,8 @@ type ServerOptions struct {
 	SalesforceTargets salesforceTargetStore
 	PlanStore         planStore
 	PlanSaver         planSaver
+	Templates         templateStore
+	PackageAssembler  packageAssembler
 	Runs              *runManager
 	Now               func() time.Time
 }
@@ -58,6 +60,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.PlanSaver == nil {
 		options.PlanSaver = savePlan
+	}
+	if options.Templates == nil {
+		options.Templates = loadPackageTemplates
+	}
+	if options.PackageAssembler == nil {
+		options.PackageAssembler = assemblePackage
 	}
 	if options.Runs == nil {
 		options.Runs = newRunManager()
@@ -218,6 +226,67 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, presentPlan(plan, settings))
+	})
+	mux.HandleFunc("GET /api/templates", func(w http.ResponseWriter, _ *http.Request) {
+		templates, err := options.Templates()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "solution quickstarts are unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, templates)
+	})
+	mux.HandleFunc("POST /api/packages", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input packageAssemblyRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "package request must be valid JSON")
+			return
+		}
+		if err := ensureEndOfJSON(decoder); err != nil {
+			writeError(w, http.StatusBadRequest, "package request must contain one JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		templates, err := options.Templates()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "solution quickstarts are unavailable")
+			return
+		}
+		var selected packageTemplate
+		for _, template := range templates {
+			if template.ID == input.TemplateID {
+				selected = template
+				break
+			}
+		}
+		if selected.ID == "" {
+			writeError(w, http.StatusBadRequest, "choose an available solution quickstart")
+			return
+		}
+		plan, err := options.PackageAssembler(selected, input.Components)
+		if err != nil {
+			// Workspace and git diagnostics can reveal local paths. The CLI keeps
+			// those details; the browser receives an actionable, credential-safe
+			// status instead.
+			writeError(w, http.StatusInternalServerError, "Dispatch could not assemble the selected template. Check the local Dispatch terminal, then try again.")
+			return
+		}
+		if err := options.PlanSaver(plan); err != nil {
+			writeError(w, http.StatusInternalServerError, "Dispatch could not save the assembled deployment plan")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		writeJSON(w, http.StatusCreated, presentPlan(plan, settings))
 	})
 	mux.HandleFunc("GET /api/runs", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, options.Runs.history())

@@ -15,9 +15,11 @@ bun dev
 The browser app proxies `/api` to `http://127.0.0.1:8787`. When no local API is
 running, the initial screen uses credential-free demonstration state.
 
-The web flow validates an already assembled package first. A separate **Apply
-validated changes** action is required before Dispatch calls any provider deploy
-adapter.
+Choose **New deployment** to select a configured quickstart and the supported
+providers it needs. The browser sends only those selections to the loopback Go
+service; it resolves the repository, creates the local workspace, and saves the
+resulting BCL plan. A separate **Apply validated changes** action is still
+required before Dispatch calls any provider deploy adapter.
 
 ## Verify
 

@@ -60,6 +60,13 @@ type SalesforceConnectionOption = {
   selected: boolean
 }
 
+type SolutionTemplate = {
+  id: string
+  name: string
+  sector?: string
+  description?: string
+}
+
 const phases: Phase[] = ['Choose', 'Connect', 'Configure', 'Review', 'Deploy']
 
 const fallbackDeployments: Deployment[] = [
@@ -78,10 +85,21 @@ const fallbackPlan: DeploymentPlan = {
   ],
 }
 
+const fallbackTemplates: SolutionTemplate[] = [
+  { id: 'clm', name: 'Contract Lifecycle Management', sector: 'Legal operations', description: 'Content-centric contract workflows with Box and intelligent agents.' },
+  { id: 'lifesciences', name: 'Life Sciences', sector: 'Regulated content', description: 'Accelerate document-heavy life sciences processes and insight.' },
+  { id: 'citizen-services', name: 'Citizen Services', sector: 'Public sector', description: 'Modernize constituent intake, case content, and service delivery.' },
+  { id: 'new', name: 'Create a New Solution', sector: 'Starter', description: 'Begin with the Box Dispatch reference architecture and shape your own solution.' },
+]
+
 function App() {
 	const [activePhase, setActivePhase] = useState<Phase>('Review')
 	const [deployments, setDeployments] = useState<Deployment[]>(fallbackDeployments)
   const [plan, setPlan] = useState<DeploymentPlan>(fallbackPlan)
+	const [templates, setTemplates] = useState<SolutionTemplate[]>(fallbackTemplates)
+	const [selectedTemplateID, setSelectedTemplateID] = useState('clm')
+	const [selectedComponents, setSelectedComponents] = useState<string[]>(['box', 'salesforce'])
+	const [assembling, setAssembling] = useState(false)
   const [run, setRun] = useState<DispatchRun | null>(null)
 	const [recentRuns, setRecentRuns] = useState<DispatchRun[]>([])
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
@@ -105,14 +123,21 @@ function App() {
 		fetchJSON<Deployment[]>('/api/deployments', controller.signal),
 		fetchJSON<DeploymentPlan>('/api/plan', controller.signal),
 		fetchJSON<DispatchRun[]>('/api/runs', controller.signal),
-	]).then(([deploymentsResult, planResult, runsResult]) => {
+		fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal),
+	]).then(([deploymentsResult, planResult, runsResult, templatesResult]) => {
 		if (deploymentsResult.status === 'fulfilled' && deploymentsResult.value.length > 0) setDeployments(deploymentsResult.value)
 		if (runsResult.status === 'fulfilled') setRecentRuns(runsResult.value)
+		if (templatesResult.status === 'fulfilled' && templatesResult.value.length > 0) {
+			setTemplates(templatesResult.value)
+			setSelectedTemplateID((current) => templatesResult.value.some((template) => template.id === current) ? current : templatesResult.value[0].id)
+		}
 		if (planResult.status === 'fulfilled' && planResult.value.exists) {
 			setPlan(planResult.value)
+			setActivePhase('Review')
 			setNotice('Saved BCL plan loaded. Review its selected providers before deployment.')
 		} else {
-			setNotice('No saved BCL plan is available yet. Start a deployment in Dispatch to create one.')
+			setActivePhase('Choose')
+			setNotice('Choose a supported solution quickstart to begin a new deployment.')
 		}
 	})
     return () => controller.abort()
@@ -195,6 +220,33 @@ function App() {
 		}).catch(() => setNotice('Salesforce org could not be selected. Choose an authenticated org and try again.')).finally(() => setConnectionsLoading(false))
 	}
 
+	const beginNewDeployment = () => {
+		setRun(null)
+		setRunEvents([])
+		setActivePhase('Choose')
+		setNotice('Choose a supported solution quickstart, then Dispatch will assemble its BCL package locally.')
+	}
+
+	const toggleSalesforce = () => {
+		setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
+	}
+
+	const assemblePackage = () => {
+		setAssembling(true)
+		setNotice('Assembling the selected template locally. Dispatch is preparing the BCL package…')
+		void fetch('/api/packages', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ templateId: selectedTemplateID, components: selectedComponents }),
+		}).then(async (response) => {
+			if (!response.ok) throw new Error('Package could not be assembled.')
+			return (await response.json()) as DeploymentPlan
+		}).then((nextPlan) => {
+			setPlan(nextPlan)
+			setActivePhase('Review')
+			setNotice('Package assembled and saved locally as BCL. Review the plan before validation.')
+		}).catch(() => setNotice('Dispatch could not assemble this template. Check the local Dispatch terminal, then try again.')).finally(() => setAssembling(false))
+	}
+
   const savePlan = () => {
 		void fetch('/api/plan', {
 			method: 'PUT',
@@ -220,7 +272,7 @@ function App() {
         <a className="brand" href="#workspace" aria-label="Box Dispatch home"><span className="brand-icon" aria-hidden="true">B/</span><span>Dispatch</span></a>
         <nav>
           <a className="nav-link active" href="#workspace">Deployments</a>
-          <a className="nav-link" href="#new">New deployment</a>
+          <button className="nav-link nav-button" type="button" onClick={beginNewDeployment}>New deployment</button>
           <a className="nav-link" href="#history">History</a>
           <a className="nav-link" href="#settings">Settings</a>
         </nav>
@@ -241,7 +293,7 @@ function App() {
           })}
         </ol>
 
-		{activePhase === 'Deploy' ? <DeployView run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} onConnections={openConnectionDrawer} />}
+		{activePhase === 'Choose' ? <ChooseView templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage} /> : activePhase === 'Deploy' ? <DeployView run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics} /> : <ReviewView plan={plan} notice={notice} onSave={savePlan} onDeploy={beginValidation} onConnections={openConnectionDrawer} />}
 
         <section id="history" className="history" aria-labelledby="history-title">
           <div className="section-heading"><div><h2 id="history-title">Recent deployments</h2></div><a href="#history">View full history</a></div>
@@ -270,6 +322,10 @@ async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
 function ReviewView({ plan, notice, onSave, onDeploy, onConnections }: { plan: DeploymentPlan; notice: string; onSave: () => void; onDeploy: () => void; onConnections: () => void }) {
   const status = plan.components.every((component) => component.ready) ? 'Ready' : 'Needs attention'
   return <section className="review-layout" aria-label="Review deployment plan"><article className="plan-card"><div className="section-heading"><div><h2>Review deployment plan</h2></div><span className={`status ${status === 'Ready' ? 'ready' : 'running'}`}>{status}</span></div><PlanGroup title="Solution" rows={[["Template", plan.template], ["Repository", plan.repository], ["Deployment strategy", "Reuse existing"]]} />{plan.components.map((component) => <PlanGroup key={component.id} title={component.name} rows={[["Selected", "Included in this plan"], ["Connection", component.ready ? 'Verified and ready' : component.configured ? 'Configured — needs verification' : 'Not configured']]} />)}<p className="notice" role="status">{notice}</p><footer className="action-row"><box-button label="Save plan" tone="secondary" onClick={onSave}></box-button><box-button label="Validate configuration" tone="primary" onClick={onDeploy}></box-button></footer></article><ActivityRail events={[]} onConnections={onConnections} /></section>
+}
+
+function ChooseView({ templates, selectedTemplateID, selectedComponents, assembling, notice, onTemplateChange, onToggleSalesforce, onAssemble }: { templates: SolutionTemplate[]; selectedTemplateID: string; selectedComponents: string[]; assembling: boolean; notice: string; onTemplateChange: (templateID: string) => void; onToggleSalesforce: () => void; onAssemble: () => void }) {
+  return <section className="choose-layout" aria-label="Choose deployment"><article className="plan-card choose-card"><div className="section-heading"><div><p className="eyebrow">New deployment</p><h2>Choose a solution quickstart</h2></div><span className="status running">Step 1 of 5</span></div><p className="choice-intro">Dispatch will assemble a local BCL package from your choice. You can validate it before any provider changes occur.</p><div className="template-grid" role="radiogroup" aria-label="Solution quickstarts">{templates.map((template) => <button className={`template-choice ${template.id === selectedTemplateID ? 'selected' : ''}`} type="button" role="radio" aria-checked={template.id === selectedTemplateID} key={template.id} onClick={() => onTemplateChange(template.id)} disabled={assembling}><span className="template-sector">{template.sector || 'Solution'}</span><strong>{template.name}</strong><small>{template.description}</small></button>)}</div><section className="provider-choice"><div><h3>Included platforms</h3><p>Box is required. Add Salesforce only when this solution needs CRM records or customer workflows.</p></div><label className="provider-option required"><input type="checkbox" checked disabled /><span><strong>Box</strong><small>Required content and workflow platform</small></span><em>Required</em></label><label className="provider-option"><input type="checkbox" checked={selectedComponents.includes('salesforce')} onChange={onToggleSalesforce} disabled={assembling} /><span><strong>Salesforce</strong><small>Optional CRM and record workflows</small></span></label></section><p className="notice" role="status">{notice}</p><footer className="action-row"><box-button label={assembling ? 'Assembling…' : 'Assemble and review'} tone="primary" disabled={assembling} onClick={onAssemble}></box-button></footer></article><aside className="activity-card choose-aside"><h2>What happens next</h2><ol className="next-steps"><li><span>1</span><div><strong>Assemble</strong><small>Dispatch clones and prepares the selected template locally.</small></div></li><li><span>2</span><div><strong>Review connections</strong><small>Verify only the providers included in your plan.</small></div></li><li><span>3</span><div><strong>Validate, then apply</strong><small>Changes are never applied without an explicit second action.</small></div></li></ol></aside></section>
 }
 
 function DeployView({ run, events, notice, onApply, onDiagnostics }: { run: DispatchRun | null; events: RunEvent[]; notice: string; onApply: () => void; onDiagnostics: (runID: string) => void }) {

@@ -228,3 +228,57 @@ func TestPlanUpdateRejectsUnsupportedProvider(t *testing.T) {
 		t.Fatalf("response = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestPackageAssemblyUsesConfiguredTemplateAndKeepsWorkspacePrivate(t *testing.T) {
+	var saved config.SolutionPlan
+	var assembledTemplate packageTemplate
+	var assembledComponents []string
+	handler := NewHandlerWithOptions(ServerOptions{
+		Templates: func() ([]packageTemplate, error) {
+			return []packageTemplate{{ID: "clm", Name: "Contract Lifecycle Management", Description: "Contracts", repository: "https://example.test/clm"}}, nil
+		},
+		PackageAssembler: func(template packageTemplate, components []string) (config.SolutionPlan, error) {
+			assembledTemplate = template
+			assembledComponents = append([]string(nil), components...)
+			return config.SolutionPlan{TemplateID: template.ID, Template: template.Name, Repository: template.repository, Components: components, PackagePath: "/private/web-package"}, nil
+		},
+		PlanSaver:       func(plan config.SolutionPlan) error { saved = plan; return nil },
+		ConnectionStore: func() (config.ConnectionSettings, error) { return config.ConnectionSettings{}, nil },
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/packages", strings.NewReader(`{"templateId":"clm","components":["box","salesforce"]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", response.Code, response.Body.String())
+	}
+	if assembledTemplate.ID != "clm" || assembledTemplate.repository != "https://example.test/clm" || strings.Join(assembledComponents, ",") != "box,salesforce" {
+		t.Fatalf("assembly = %#v %#v", assembledTemplate, assembledComponents)
+	}
+	if saved.PackagePath != "/private/web-package" {
+		t.Fatalf("saved package path = %q", saved.PackagePath)
+	}
+	for _, forbidden := range []string{"/private/web-package"} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("response leaked %q: %s", forbidden, response.Body.String())
+		}
+	}
+}
+
+func TestPackageAssemblyRejectsUnknownTemplateAndUnsupportedProviders(t *testing.T) {
+	handler := NewHandlerWithOptions(ServerOptions{
+		Templates: func() ([]packageTemplate, error) {
+			return []packageTemplate{{ID: "clm", Name: "CLM", repository: "https://example.test/clm"}}, nil
+		},
+	})
+	for _, body := range []string{
+		`{"templateId":"unknown","components":["box"]}`,
+		`{"templateId":"clm","components":["box","databricks"]}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/packages", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
+	}
+}
