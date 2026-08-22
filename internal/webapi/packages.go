@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -12,6 +13,35 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 	"github.com/unofficialbox/box-dispatch/internal/workspace"
 )
+
+func setPackageStrategy(plan config.SolutionPlan, strategy string, now time.Time) error {
+	if strings.TrimSpace(plan.PackagePath) == "" {
+		return nil
+	}
+	if _, err := os.Stat(plan.PackagePath); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	manifest, err := solution.Load(plan.PackagePath)
+	if err != nil {
+		return err
+	}
+	settings, err := solution.ReadDeploymentSettings(plan.PackagePath, manifest.DeploymentConfig)
+	if err != nil {
+		return err
+	}
+	settings.Box.GlobalStrategy = strategy
+	if strategy == solution.StrategyCreateNew {
+		settings.Box.RunID = now.UTC().Format("20060102T150405Z")
+		if settings.Box.Naming.Suffix == "" {
+			settings.Box.Naming.Suffix = "{run_id}"
+		}
+	} else {
+		settings.Box.RunID = ""
+	}
+	return solution.WriteDeploymentSettings(plan.PackagePath, manifest.DeploymentConfig, settings)
+}
 
 // packageTemplate is the safe, browser-visible part of a configured solution
 // source. The repository is resolved by the local service, never by a browser
@@ -25,15 +55,20 @@ type packageTemplate struct {
 }
 
 type templateStore func() ([]packageTemplate, error)
-type packageAssembler func(packageTemplate, []string) (config.SolutionPlan, error)
+type packageAssembler func(packageTemplate, []string, string) (config.SolutionPlan, error)
 
 type packageAssemblyRequest struct {
 	TemplateID string   `json:"templateId"`
 	Components []string `json:"components"`
+	Strategy   string   `json:"strategy,omitempty"`
 }
 
 func (r packageAssemblyRequest) normalized() packageAssemblyRequest {
 	r.TemplateID = strings.TrimSpace(r.TemplateID)
+	r.Strategy = strings.ToLower(strings.TrimSpace(r.Strategy))
+	if r.Strategy == "" {
+		r.Strategy = solution.StrategyReuse
+	}
 	for i, component := range r.Components {
 		r.Components[i] = strings.ToLower(strings.TrimSpace(component))
 	}
@@ -41,6 +76,9 @@ func (r packageAssemblyRequest) normalized() packageAssemblyRequest {
 }
 
 func (r packageAssemblyRequest) validate() error {
+	if _, err := solution.NormalizeDeploymentStrategy(r.Strategy); err != nil || r.Strategy == solution.StrategyInherit {
+		return fmt.Errorf("choose reuse existing or create new")
+	}
 	if r.TemplateID == "" {
 		return fmt.Errorf("choose a solution quickstart")
 	}
@@ -123,7 +161,7 @@ func newSolutionTemplate() packageTemplate {
 	return packageTemplate{ID: "new", Name: "Create a New Solution", Sector: "STARTER", Description: "Begin with the Box Dispatch reference architecture and shape your own solution.", repository: "https://github.com/unofficialbox/box-bedrock-template"}
 }
 
-func assemblePackage(template packageTemplate, components []string) (config.SolutionPlan, error) {
+func assemblePackage(template packageTemplate, components []string, strategy string) (config.SolutionPlan, error) {
 	if strings.TrimSpace(template.repository) == "" {
 		return config.SolutionPlan{}, fmt.Errorf("the selected quickstart has no configured source repository")
 	}
@@ -131,12 +169,12 @@ func assemblePackage(template packageTemplate, components []string) (config.Solu
 	destination := filepath.Join(config.Paths().Root, ".box-dispatch", "web-packages", template.ID+"-"+stamp)
 	if _, err := workspace.Build(workspace.PackageRequest{
 		Repository: template.repository, Destination: destination, TemplateID: template.ID,
-		Components: components, BoxStrategy: solution.StrategyReuse,
+		Components: components, BoxStrategy: strategy,
 	}); err != nil {
 		return config.SolutionPlan{}, err
 	}
 	return config.SolutionPlan{
 		TemplateID: template.ID, Template: template.Name, Repository: template.repository,
-		Components: append([]string(nil), components...), PackagePath: destination,
+		Components: append([]string(nil), components...), Strategy: strategy, PackagePath: destination,
 	}, nil
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type deploymentStore func() ([]audit.DeploymentRecord, error)
@@ -133,6 +134,32 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, presentSalesforceOptions(settings, targets))
 	})
+	mux.HandleFunc("PUT /api/connections/box", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input boxConnectionInput
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "Box connection must be one valid JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings = saveBoxCCGSelection(settings, input)
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not save the Box connection")
+			return
+		}
+		writeJSON(w, http.StatusOK, connectionSummary{Name: "Box", Configured: true, AuthType: "client credentials", Selection: "CCG", Status: "Needs verification"})
+	})
 	mux.HandleFunc("PUT /api/connections/salesforce", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var input salesforceConnectionSelection
@@ -217,9 +244,13 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		plan := config.SolutionPlan{
 			Components: input.Components, TemplateID: input.TemplateID,
-			Template: input.Template, Repository: input.Repository,
+			Template: input.Template, Repository: input.Repository, Strategy: input.Strategy,
 			// PackagePath is intentionally not browser-addressable in this slice.
 			PackagePath: existing.PackagePath,
+		}
+		if err := setPackageStrategy(plan, input.Strategy, options.Now()); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update the package deployment strategy")
+			return
 		}
 		if err := options.PlanSaver(plan); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not save the plan")
@@ -269,7 +300,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, "choose an available solution quickstart")
 			return
 		}
-		plan, err := options.PackageAssembler(selected, input.Components)
+		plan, err := options.PackageAssembler(selected, input.Components, input.Strategy)
 		if err != nil {
 			// Workspace and git diagnostics can reveal local paths. The CLI keeps
 			// those details; the browser receives an actionable, credential-safe
@@ -387,6 +418,7 @@ type planResponse struct {
 	TemplateID string          `json:"templateId,omitempty"`
 	Template   string          `json:"template,omitempty"`
 	Repository string          `json:"repository,omitempty"`
+	Strategy   string          `json:"strategy"`
 	Components []planComponent `json:"components"`
 }
 
@@ -403,9 +435,13 @@ type planUpdate struct {
 	Template   string   `json:"template"`
 	Repository string   `json:"repository"`
 	Components []string `json:"components"`
+	Strategy   string   `json:"strategy"`
 }
 
 func (p planUpdate) validate() error {
+	if p.Strategy != solution.StrategyReuse && p.Strategy != solution.StrategyCreateNew {
+		return fmt.Errorf("choose reuse existing or create new")
+	}
 	if p.TemplateID == "" || p.Template == "" || p.Repository == "" {
 		return fmt.Errorf("template, template ID, and repository are required")
 	}
@@ -434,6 +470,10 @@ func (p planUpdate) normalized() planUpdate {
 	p.TemplateID = strings.TrimSpace(p.TemplateID)
 	p.Template = strings.TrimSpace(p.Template)
 	p.Repository = strings.TrimSpace(p.Repository)
+	p.Strategy = strings.ToLower(strings.TrimSpace(p.Strategy))
+	if p.Strategy == "" {
+		p.Strategy = solution.StrategyReuse
+	}
 	for index, component := range p.Components {
 		p.Components[index] = strings.ToLower(strings.TrimSpace(component))
 	}
@@ -443,8 +483,11 @@ func (p planUpdate) normalized() planUpdate {
 func presentPlan(plan config.SolutionPlan, settings config.ConnectionSettings) planResponse {
 	response := planResponse{
 		Exists: plan.TemplateID != "", TemplateID: plan.TemplateID,
-		Template: plan.Template, Repository: plan.Repository,
+		Template: plan.Template, Repository: plan.Repository, Strategy: plan.Strategy,
 		Components: make([]planComponent, 0, len(plan.Components)),
+	}
+	if response.Strategy == "" {
+		response.Strategy = solution.StrategyReuse
 	}
 	connections := connectionSummaries(settings)
 	byName := make(map[string]connectionSummary, len(connections))

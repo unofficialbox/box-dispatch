@@ -46,6 +46,7 @@ save a non-secret BCL plan draft, but it is not an alternate deployment client:
 | `GET /api/connections` | sanitized configured and verified connection state | tokens, CCG secret, client ID, provider identity, host names |
 | `GET /api/connections/salesforce/options` | currently authenticated, aliased Salesforce orgs that are healthy enough to select | usernames, org IDs, instance URLs, credentials |
 | `PUT /api/connections/salesforce` | select one authenticated Salesforce alias and require it to be revalidated | arbitrary targets, raw CLI output, credentials |
+| `PUT /api/connections/box` | save a Box CCG connection from the web app and require it to be revalidated | CCG secret and all raw credential values |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |

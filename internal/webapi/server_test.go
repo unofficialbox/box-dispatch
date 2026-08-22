@@ -112,6 +112,25 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 	}
 }
 
+func TestBoxConnectionStoresCCGWithoutReturningSecrets(t *testing.T) {
+	var settings config.ConnectionSettings
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/connections/box", strings.NewReader(`{"clientId":"client-id","clientSecret":"very-secret","subjectType":"enterprise","subjectId":"12345"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	if settings.BoxCCGClientID != "client-id" || settings.BoxCCGClientSecret != "very-secret" || settings.BoxCCGSubjectType != "enterprise" || settings.BoxCCGSubjectID != "12345" {
+		t.Fatalf("settings = %#v", settings)
+	}
+	if strings.Contains(response.Body.String(), "very-secret") || strings.Contains(response.Body.String(), "client-id") || strings.Contains(response.Body.String(), "12345") {
+		t.Fatalf("secret material leaked: %s", response.Body.String())
+	}
+}
+
 func TestSalesforceConnectionSelectionOnlyAcceptsAuthenticatedAlias(t *testing.T) {
 	settings := config.ConnectionSettings{
 		SalesforceAlias: "old-org", SalesforceOrgID: "00Dold",
@@ -237,10 +256,10 @@ func TestPackageAssemblyUsesConfiguredTemplateAndKeepsWorkspacePrivate(t *testin
 		Templates: func() ([]packageTemplate, error) {
 			return []packageTemplate{{ID: "clm", Name: "Contract Lifecycle Management", Description: "Contracts", repository: "https://example.test/clm"}}, nil
 		},
-		PackageAssembler: func(template packageTemplate, components []string) (config.SolutionPlan, error) {
+		PackageAssembler: func(template packageTemplate, components []string, strategy string) (config.SolutionPlan, error) {
 			assembledTemplate = template
 			assembledComponents = append([]string(nil), components...)
-			return config.SolutionPlan{TemplateID: template.ID, Template: template.Name, Repository: template.repository, Components: components, PackagePath: "/private/web-package"}, nil
+			return config.SolutionPlan{TemplateID: template.ID, Template: template.Name, Repository: template.repository, Components: components, Strategy: strategy, PackagePath: "/private/web-package"}, nil
 		},
 		PlanSaver:       func(plan config.SolutionPlan) error { saved = plan; return nil },
 		ConnectionStore: func() (config.ConnectionSettings, error) { return config.ConnectionSettings{}, nil },
