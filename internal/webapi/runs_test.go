@@ -105,6 +105,36 @@ func TestDeploymentRequiresSuccessfulValidation(t *testing.T) {
 	}
 }
 
+func TestValidationFailsWhenProviderReturnsFailedItem(t *testing.T) {
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, string)) ([]lifecycle.Item, error) {
+		return []lifecycle.Item{{
+			Provider: "salesforce", Status: lifecycle.StatusFailed,
+			Detail: "Unable to read Salesforce metadata: ERROR_HTTP_420",
+		}}, nil
+	}
+	runs := newRunManagerWithExecutors(validate, nil, time.Now)
+	run, err := runs.startValidation(config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"salesforce"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, runs, run.ID)
+
+	response, ok := runs.response(run.ID)
+	if !ok || response.Status != runFailed {
+		t.Fatalf("response = %#v, found=%t", response, ok)
+	}
+	if len(response.Providers) != 1 || response.Providers[0].Status != string(lifecycle.StatusFailed) {
+		t.Fatalf("providers = %#v", response.Providers)
+	}
+	diagnostic, ok := runs.diagnostics(run.ID)
+	if !ok || !strings.Contains(diagnostic.Summary, "Salesforce could not be reached") {
+		t.Fatalf("diagnostic = %#v, found=%t", diagnostic, ok)
+	}
+	if _, err := runs.startDeployment(run.ID); err == nil || !strings.Contains(err.Error(), "successful validation") {
+		t.Fatalf("deploy error = %v", err)
+	}
+}
+
 func TestRunHistorySurvivesRestartAndInterruptedRunIsMarkedFailed(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC) }
 	store := &testRunStore{runs: []persistedRun{{

@@ -178,6 +178,9 @@ func (m *runManager) execute(id string, executor runExecutor) {
 		}
 		m.mu.Unlock()
 	})
+	if err == nil {
+		err = failedRunResult(result)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -198,6 +201,24 @@ func (m *runManager) execute(id string, executor runExecutor) {
 	run.status = runCompleted
 	m.appendEventLocked(run, "status", "", "Run completed", runCompleted)
 	m.saveLocked()
+}
+
+func failedRunResult(items []lifecycle.Item) error {
+	failures := make([]string, 0)
+	for _, item := range items {
+		if item.Status != lifecycle.StatusFailed {
+			continue
+		}
+		detail := strings.TrimSpace(item.Detail)
+		if detail == "" {
+			detail = "provider returned a failed result"
+		}
+		failures = append(failures, item.Provider+": "+detail)
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("provider validation failed: %s", strings.Join(failures, "; "))
 }
 
 func (m *runManager) response(id string) (runResponse, bool) {
