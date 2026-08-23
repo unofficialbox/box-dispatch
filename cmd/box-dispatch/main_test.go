@@ -47,7 +47,7 @@ func TestRootHelpGroupsCommonAndAdvancedCommands(t *testing.T) {
 			t.Errorf("common help omitted %q:\n%s", command, common)
 		}
 	}
-	for _, command := range []string{"init", "resolve", "validate", "present", "serve"} {
+	for _, command := range []string{"init", "resolve", "validate", "present", "serve", "terminal"} {
 		commandRow := "\n  " + command + " "
 		if strings.Contains(common, commandRow) {
 			t.Errorf("advanced command %q leaked into common help:\n%s", command, common)
@@ -106,16 +106,17 @@ func TestDeployIsCanonicalAndBootstrapRemainsAlias(t *testing.T) {
 	}
 }
 
-func TestConnectivityOfflineFlagIsConsistent(t *testing.T) {
+func TestConnectivityFlagsBelongToExplicitCheckCommand(t *testing.T) {
 	root := newRootCommand()
 	check, _, err := root.Find([]string{"check"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootOffline := root.Flags().Lookup("offline")
-	checkOffline := check.Flags().Lookup("offline")
-	if rootOffline == nil || checkOffline == nil || rootOffline.Usage != checkOffline.Usage {
-		t.Fatalf("offline flag usage differs: root=%#v check=%#v", rootOffline, checkOffline)
+	if root.Flags().Lookup("offline") != nil {
+		t.Fatal("root command should reserve no-subcommand launches for the web application")
+	}
+	if check.Flags().Lookup("offline") == nil {
+		t.Fatal("check command omitted --offline")
 	}
 }
 

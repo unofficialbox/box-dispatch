@@ -5,15 +5,24 @@ the published `@unofficialbox/box-open-elements` Web Components.
 
 ## Run locally
 
+Normal use requires only the compiled executable:
+
+```bash
+box-dispatch
+```
+
+It starts the local Go service, serves the bundled browser interface, and opens the app. Vite
+is only needed for frontend hot-reload development:
+
 ```bash
 bun install
-# In a second terminal, from the repository root:
-go run ./cmd/box-dispatch serve
+# From the repository root, keep the complete app service running without opening another tab:
+go run ./cmd/box-dispatch serve --no-open
 bun dev
 ```
 
-The browser app proxies `/api` to `http://127.0.0.1:8787`. When no local API is
-running, the initial screen uses credential-free demonstration state.
+The Vite development server proxies `/api` to `http://127.0.0.1:8787`. Production builds are
+written to `internal/webui/dist` and embedded in the Go executable.
 
 Choose **New deployment** to select a configured quickstart and the supported
 providers it needs. The browser sends only those selections to the loopback Go

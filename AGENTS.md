@@ -6,13 +6,15 @@ Guidance for AI coding agents (Codex, Cursor, Claude Code, and any tool that rea
 
 ## What this project is
 
-`box-dispatch` is a Go CLI whose default mode is a full-screen **Bubble Tea / lipgloss / huh
-"solution launch shell"** that packages and deploys Box + partner (Salesforce, Databricks,
-AWS Bedrock AgentCore) solution stacks. Module `github.com/unofficialbox/box-dispatch`,
-`go 1.26`.
+`box-dispatch` is a Go application whose default interactive mode serves and opens the React
+browser workspace while the same process owns the loopback Go API. The browser experience
+packages and deploys Box + partner solution stacks. Module
+`github.com/unofficialbox/box-dispatch`, `go 1.26`.
 
-Run with **no subcommand in a real TTY** → the interactive wizard. Scripted or `--json` →
-a plain connectivity report (`runConnectivityCheck`).
+Run with **no subcommand** → the complete browser application. The executable serves the
+embedded interface and local API together, then opens the browser. Use `box-dispatch check`
+for connectivity reports. The previous full-screen Bubble Tea interface remains available
+through `box-dispatch terminal`.
 
 ## Verification gate — run before every commit/push/merge
 
@@ -38,23 +40,23 @@ Rules:
   green when it isn't.
 - A test that wants network or credentials is a bug in the test, not a reason to skip the gate.
 
-## Building and running the shell
+## Building and running Dispatch
 
 ```bash
 go build -o box-dispatch ./cmd/box-dispatch   # binary is gitignored (/box-dispatch)
-./box-dispatch                                # full-screen shell (needs a real terminal)
+./box-dispatch                                # web UI + local API; opens the browser
 go run ./cmd/box-dispatch                     # same, without building
+./box-dispatch terminal                       # legacy full-screen terminal interface
 ```
 
-### The TTY gate (important for agents)
+### Launch behavior (important for agents)
 
-`cmd/box-dispatch/main.go` launches the shell only when **stdout is a TTY** (`isTTY()`,
-`term.IsTerminal`) **and** not `--json`. Consequences:
+`cmd/box-dispatch/main.go` always launches the complete browser application when no subcommand
+is supplied. Consequences:
 
-- **You cannot drive the alt-screen TUI through piped/non-interactive shells** — it won't even
-  enter the shell, and Bubble Tea's alt-screen can't be scraped from a pipe. Verify shell
-  changes with the tests instead, or ask the human to run `./box-dispatch`.
-- Machine-readable check without the UI: `go run ./cmd/box-dispatch check --json`
+- `go run ./cmd/box-dispatch --no-open` starts the embedded UI and local API without opening a browser.
+- Run `./box-dispatch terminal` to exercise the legacy alt-screen TUI.
+- Machine-readable connectivity check: `go run ./cmd/box-dispatch check --json`
   (add `--offline` to skip live provider calls).
 - Shell tests: `go test ./cmd/box-dispatch/...` (`shell_test.go`).
 
@@ -69,7 +71,7 @@ The checker looks for: a Box CCG app saved by Dispatch, or Box `BOX_CLIENT_ID`,
 
 ## Repository map
 
-- `cmd/box-dispatch/main.go` — cobra root; `runLaunchShell()` (alt-screen); the TTY gate.
+- `cmd/box-dispatch/main.go` — cobra root; default browser launch; `runLaunchShell()` (alt-screen).
 - `cmd/box-dispatch/shell.go` — the shell model: screen enum, `Update`/`View`, welcome menu,
   package/deploy/history flows. `newDispatchShell()` ~L426; `View()` ~L2053.
 - `internal/workspace/package.go` — template clone + component pruning. The clone runs

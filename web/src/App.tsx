@@ -41,6 +41,7 @@ function App() {
   const [scratchJob, setScratchJob] = useState<ScratchOrgJob | null>(null)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [boxConnectionLoading, setBoxConnectionLoading] = useState(false)
+  const [boxConnectionError, setBoxConnectionError] = useState('')
   const [notice, setNotice] = useState('Loading the saved deployment plan…')
   const activeRunID = run && (run.status === 'queued' || run.status === 'running') ? run.id : null
 
@@ -119,12 +120,26 @@ function App() {
       return await response.json()
     }).then((selection: ConnectionSummary) => { setConnections((current) => [...current.filter((connection) => connection.name !== 'Salesforce'), selection]); setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'salesforce' ? { ...component, configured: true, verified: false, ready: false } : component) })); setConnectionDrawerOpen(false); setNotice('Salesforce org saved. Validate configuration to verify the new connection.') }).catch(() => setNotice('Salesforce org could not be selected. Choose an authenticated org and try again.')).finally(() => setConnectionsLoading(false))
   }
+  const openBoxConnection = () => {
+    setBoxConnectionError('')
+    setBoxConnectionDrawerOpen(true)
+  }
+  const closeBoxConnection = () => {
+    setBoxConnectionError('')
+    setBoxConnectionDrawerOpen(false)
+  }
   const saveBoxConnection = (input: BoxConnectionInput) => {
+    setBoxConnectionError('')
     setBoxConnectionLoading(true)
     void fetch('/api/connections/box', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }).then(async (response) => {
-      if (!response.ok) throw new Error('Box connection could not be saved.')
+      if (!response.ok) throw new Error(await responseError(response, 'Box connection could not be saved.'))
       return await response.json() as ConnectionSummary
-    }).then((selection) => { setConnections((current) => [...current.filter((connection) => connection.name !== 'Box'), selection]); setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'box' ? { ...component, configured: true, verified: false, ready: false } : component) })); setBoxConnectionDrawerOpen(false); setNotice('Box CCG saved. Validate configuration to verify the connection.') }).catch(() => setNotice('Box connection could not be saved. Check the CCG details and try again.')).finally(() => setBoxConnectionLoading(false))
+    }).then((selection) => { setConnections((current) => [...current.filter((connection) => connection.name !== 'Box'), selection]); setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'box' ? { ...component, configured: true, verified: false, ready: false } : component) })); closeBoxConnection(); setNotice('Box CCG saved. Validate configuration to verify the connection.') }).catch((error: unknown) => {
+      const message = error instanceof TypeError
+        ? 'Dispatch’s local service is unavailable. Reopen Dispatch or wait for it to restart, then try again. Your credentials were not saved.'
+        : error instanceof Error ? error.message : 'Box connection could not be saved. Check the CCG details and try again.'
+      setBoxConnectionError(message)
+    }).finally(() => setBoxConnectionLoading(false))
   }
   const refreshSalesforceConnection = async () => {
     const [connectionResponse, optionsResponse] = await Promise.all([fetch('/api/connections'), fetch('/api/connections/salesforce/options')])
@@ -230,7 +245,7 @@ function App() {
   const continueToReview = () => savePlan(() => setActivePhase('Review'))
   const setWorkflowPhase = (phase: Phase) => { setScreen('workflow'); setActivePhase(phase) }
 
-  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => setScreen('overview')} onNewDeployment={beginNewDeployment}/><main id="workspace" className="workspace">{screen === 'overview' ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={() => setWorkflowPhase(activePhase)} onBoxConnection={() => setBoxConnectionDrawerOpen(true)} onSalesforceConnection={openSalesforceConnection}/> : <><DeploymentHeader plan={plan} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={() => setBoxConnectionDrawerOpen(true)} onSalesforceConnection={openSalesforceConnection} onBack={() => setActivePhase('Choose')} onNext={() => setActivePhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setActivePhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics}/> : <ReviewPage plan={plan} notice={notice} onDeploy={beginValidation} onEditConnections={() => setActivePhase('Connect')} onBack={() => setActivePhase('Configure')}/>}</>}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer options={salesforceOptions} selectedAlias={selectedSalesforceAlias} loading={connectionsLoading} scratchJob={scratchJob} onChange={setSelectedSalesforceAlias} onSave={selectSalesforceConnection} onSaveREST={saveSalesforceREST} onCheck={checkSalesforceAvailability} onCreateScratch={createScratchOrg} onClose={() => setConnectionDrawerOpen(false)}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer loading={boxConnectionLoading} onSave={saveBoxConnection} onClose={() => setBoxConnectionDrawerOpen(false)}/>}</div>
+  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => setScreen('overview')} onNewDeployment={beginNewDeployment}/><main id="workspace" className="workspace">{screen === 'overview' ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={() => setWorkflowPhase(activePhase)} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection}/> : <><DeploymentHeader plan={plan} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onBack={() => setActivePhase('Choose')} onNext={() => setActivePhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setActivePhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={applyDeployment} onDiagnostics={openDiagnostics}/> : <ReviewPage plan={plan} notice={notice} onDeploy={beginValidation} onEditConnections={() => setActivePhase('Connect')} onBack={() => setActivePhase('Configure')}/>}</>}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer options={salesforceOptions} selectedAlias={selectedSalesforceAlias} loading={connectionsLoading} scratchJob={scratchJob} onChange={setSelectedSalesforceAlias} onSave={selectSalesforceConnection} onSaveREST={saveSalesforceREST} onCheck={checkSalesforceAvailability} onCreateScratch={createScratchOrg} onClose={() => setConnectionDrawerOpen(false)}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer loading={boxConnectionLoading} error={boxConnectionError} onSave={saveBoxConnection} onClose={closeBoxConnection}/>}</div>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {

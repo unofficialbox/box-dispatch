@@ -9,7 +9,10 @@ assembly, validation, deployment, and audited teardown.
 
 ```mermaid
 flowchart LR
-    Browser["React + Vite web app"] -->|"local HTTP + SSE"| API["Go API facade"]
+    Executable["box-dispatch executable"] --> UI["Embedded React web app"]
+    Executable --> API["Go API facade"]
+    Browser["Browser"] -->|"local HTTP + SSE"| UI
+    UI --> API
     API --> Engine["Dispatch engine and lifecycle"]
     Engine --> Box["Box public APIs"]
     Engine --> SalesforceREST["Salesforce REST API"]
@@ -27,18 +30,19 @@ flowchart LR
   resulting BCL plan before the browser enters review, validation, and deployment.
   It also exposes an activity rail and audit history, falling back to non-sensitive
   demonstration state while the local API facade is unavailable.
-- The Vite dev server proxies `/api` to `127.0.0.1:8787`; no token or client secret is
-  available to browser code.
+- The normal executable serves the compiled React application and `/api` from one loopback
+  process, then opens the browser. Vite proxies `/api` to `127.0.0.1:8787` only during
+  frontend development; no token or client secret is available to browser code.
 
 ## Current local API
 
-Run the local API on the loopback interface:
+Run the complete browser application and local API on the loopback interface:
 
 ```bash
-go run ./cmd/box-dispatch serve
+go run ./cmd/box-dispatch
 ```
 
-It is intentionally bound to `127.0.0.1:8787`. The API owns local state,
+It is intentionally bound to `127.0.0.1:8787` and opens the app in the default browser. The API owns local state,
 credentials, package assembly, validation, and deployment; the browser is a
 credential-free presentation client:
 

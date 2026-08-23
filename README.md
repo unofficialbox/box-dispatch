@@ -10,17 +10,20 @@ This repo starts with a fast setup/check experience and expands toward scenario 
 
 ## Launch behavior
 
-Running `box-dispatch` with no subcommand starts the full-screen solution launch shell when
-stdout is an interactive terminal:
+Running `box-dispatch` with no subcommand starts the local Go service, serves the bundled
+browser workspace, and opens it in the default browser:
 
 ```bash
 box-dispatch
 ```
 
-The shell packages, validates, deploys, audits, and resets solution stacks. When stdout is
-redirected or piped, the same no-subcommand invocation prints the plain connectivity report
-instead of starting the full-screen UI. Passing `--json` also selects machine-readable
-connectivity output.
+This single process owns the browser UI, API, credentials, validation, deployment, and audit
+state. No separate Vite or API process is required. The executable keeps running while the
+browser app is open.
+
+Use `box-dispatch terminal` when the legacy full-screen terminal interface is specifically
+needed. `box-dispatch serve --no-open` serves the complete browser application without opening
+a browser. Use `box-dispatch check --json` for machine-readable connectivity automation.
 
 Use the explicit `check` command when connectivity validation is the intended operation:
 

@@ -80,7 +80,7 @@ export function SalesforceConnectionDrawer({ options, selectedAlias, loading, sc
   </box-drawer>
 }
 
-export function BoxConnectionDrawer({ loading, onSave, onClose }: { loading: boolean; onSave: (input: BoxConnectionInput) => void; onClose: () => void }) {
+export function BoxConnectionDrawer({ loading, error, onSave, onClose }: { loading: boolean; error: string; onSave: (input: BoxConnectionInput) => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
   const [input, setInput] = useState<BoxConnectionInput>({ clientId: '', clientSecret: '', subjectType: 'user', subjectId: '' })
   const set = (field: keyof BoxConnectionInput) => (value: string) => setInput((current) => ({ ...current, [field]: value }))
@@ -89,8 +89,9 @@ export function BoxConnectionDrawer({ loading, onSave, onClose }: { loading: boo
   const subjectTypeRef = useValueChanged(set('subjectType'))
   const subjectIDRef = useValueChanged(set('subjectId'))
   const canSave = input.clientId.trim() !== '' && input.clientSecret.trim() !== '' && input.subjectId.trim() !== ''
-  return <box-drawer ref={drawerRef} open heading="Connect Box" description="Set up the Client Credentials Grant connection used by Dispatch. Secrets go only to the local Dispatch API and are never returned to the browser." position="right" size="large" busy={loading}>
+  return <box-drawer ref={drawerRef} open heading="Connect Box" description="Set up the Client Credentials Grant connection used by Dispatch. Secrets go only to the local Dispatch service and are never returned to the browser." position="right" size="large" busy={loading}>
     <section className="drawer-content box-connection-form">
+      {error && <div className="drawer-inline-error" role="alert"><strong>Connection not saved</strong><p>{error}</p></div>}
       <box-text-field ref={clientIDRef} label="Client ID" value={input.clientId} required autocomplete="off"></box-text-field>
       <box-text-field ref={clientSecretRef} label="Client secret" value={input.clientSecret} type="password" required autocomplete="off" reveal></box-text-field>
       <box-select ref={subjectTypeRef} label="Subject type" value={input.subjectType} options={[{ label: 'User', value: 'user' }, { label: 'Enterprise', value: 'enterprise' }]} required></box-select>
