@@ -244,6 +244,9 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .strategy-picker span { color: #60759a; font-size: 14px; line-height: 1.4; }
 .box-connection-form { display: grid; gap: 16px; }
 .box-connection-form box-text-field, .box-connection-form box-select, .drawer-content > box-select { display: block; }
+.drawer-inline-error { padding: 14px 16px; border: 1px solid #f0b8b1; border-left: 4px solid #c33a2c; border-radius: 8px; background: #fff3f1; color: #7d281f; }
+.drawer-inline-error strong { display: block; color: #7d281f; font-size: 14px; }
+.drawer-inline-error p { margin: 5px 0 0; color: #8a372d; font-size: 13px; line-height: 1.45; }
 @media (max-width: 720px) { .timeline-item { grid-template-columns: 0 28px minmax(0, 1fr); gap: 12px; } .timeline-item > time { display: none; } .strategy-picker { grid-template-columns: 1fr; } }
 
 /* Stage 2 uses a selectable master/detail pattern. */

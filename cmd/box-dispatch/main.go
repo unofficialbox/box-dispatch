@@ -32,17 +32,11 @@ func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "box-dispatch",
 		Short: "Box Dispatch - solution shipping accelerators for Box and partners",
-		Long:  "Run without a subcommand for the interactive launch experience.",
+		Long:  "Run without a subcommand to start the complete Dispatch web application and open it in your browser.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			scenario, _ := cmd.Flags().GetString("scenario")
-			platform, _ := cmd.Flags().GetString("platform")
-			offline, _ := cmd.Flags().GetBool("offline")
-			// The full-screen shell needs a terminal; anything scripted or
-			// JSON-bound falls back to the plain connectivity report.
-			if isTTY() && terminalSupportsFullScreen() && !asJSON(cmd) {
-				return runLaunchShell()
-			}
-			return runConnectivityCheck(cmd, scenario, platform, offline, false)
+			port, _ := cmd.Flags().GetInt("port")
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			return runWebApplication(cmd, port, !noOpen)
 		},
 		SilenceUsage: true,
 	}
@@ -53,7 +47,7 @@ func newRootCommand() *cobra.Command {
 		noColor, _ := cmd.Flags().GetBool("no-color")
 		configureTerminalPresentation(noColor)
 	}
-	addConnectivityFlags(root)
+	addWebApplicationFlags(root)
 
 	root.AddGroup(
 		&cobra.Group{ID: commonCommandGroup, Title: "Common Commands:"},
@@ -81,6 +75,7 @@ func newRootCommand() *cobra.Command {
 		makeSmokeCommand(),
 		makePublishCheckCommand(),
 		makeServeCommand(),
+		makeTerminalCommand(),
 	}
 	for _, cmd := range commonCommands {
 		cmd.GroupID = commonCommandGroup
