@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
@@ -29,6 +30,7 @@ type ServerOptions struct {
 	DeploymentStore   deploymentStore
 	ConnectionStore   connectionStore
 	ConnectionSaver   connectionSaver
+	BoxCheck          boxConnectionCheck
 	SalesforceTargets salesforceTargetStore
 	SalesforceCheck   salesforceCheck
 	SalesforceCreate  salesforceScratchCreate
@@ -56,6 +58,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.ConnectionSaver == nil {
 		options.ConnectionSaver = savePersistedConnections
+	}
+	if options.BoxCheck == nil {
+		options.BoxCheck = verifyBoxConnection
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -264,11 +269,57 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		settings = saveBoxCCGSelection(settings, input)
-		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not save the Box connection")
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		verification, err := options.BoxCheck(ctx, settings)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, connectionSummary{Name: "Box", Configured: true, AuthType: "client credentials", Selection: "CCG", Status: "Needs verification"})
+		verification.VerifiedAt = options.Now().UTC().Format(time.RFC3339)
+		if verification.Selection == "" {
+			verification.Selection = boxconn.DispatchCCGName
+		}
+		if settings.VerifiedConnections == nil {
+			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
+		}
+		settings.VerifiedConnections["box"] = verification
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "Box accepted the connection, but Dispatch could not save it")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
+	})
+	mux.HandleFunc("POST /api/connections/box/check", func(w http.ResponseWriter, r *http.Request) {
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		if !settings.HasBoxCCG() {
+			writeError(w, http.StatusBadRequest, "connect a Box CCG app before checking availability")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		verification, err := options.BoxCheck(ctx, settings)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		verification.VerifiedAt = options.Now().UTC().Format(time.RFC3339)
+		if verification.Selection == "" {
+			verification.Selection = boxconn.DispatchCCGName
+		}
+		if settings.VerifiedConnections == nil {
+			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
+		}
+		settings.VerifiedConnections["box"] = verification
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "Box is available, but Dispatch could not save the check")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
 	})
 	mux.HandleFunc("PUT /api/connections/salesforce", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -511,13 +562,17 @@ type providerDetail struct {
 }
 
 type connectionSummary struct {
-	Name       string `json:"name"`
-	Configured bool   `json:"configured"`
-	Verified   bool   `json:"verified"`
-	AuthType   string `json:"authType,omitempty"`
-	Selection  string `json:"selection,omitempty"`
-	Status     string `json:"status,omitempty"`
-	ExpiresAt  string `json:"expiresAt,omitempty"`
+	Name          string `json:"name"`
+	Configured    bool   `json:"configured"`
+	Verified      bool   `json:"verified"`
+	AuthType      string `json:"authType,omitempty"`
+	Selection     string `json:"selection,omitempty"`
+	Status        string `json:"status,omitempty"`
+	ExpiresAt     string `json:"expiresAt,omitempty"`
+	Alias         string `json:"alias,omitempty"`
+	SubjectType   string `json:"subjectType,omitempty"`
+	ClientIDHint  string `json:"clientIdHint,omitempty"`
+	SubjectIDHint string `json:"subjectIdHint,omitempty"`
 }
 
 type planStore func() (config.SolutionPlan, error)
@@ -682,12 +737,11 @@ func connectionSummaries(settings config.ConnectionSettings) []connectionSummary
 		boxConfigured = true
 		boxAuthType = "OAuth refresh token"
 	}
+	boxSummary := presentBoxConnection(settings, boxVerification)
+	boxSummary.Configured = boxConfigured
+	boxSummary.AuthType = boxAuthType
 	connections := []connectionSummary{
-		{
-			Name: "Box", Configured: boxConfigured, Verified: boxVerification.VerifiedAt != "",
-			AuthType: boxAuthType, Selection: safeSelection(boxVerification.Selection),
-			Status: boxVerification.AuthType,
-		},
+		boxSummary,
 		{
 			Name: "Salesforce", Configured: settings.SalesforceAlias != "" || settings.HasSalesforceREST() || settings.HasSalesforceDevHub(), Verified: salesforceVerification.VerifiedAt != "",
 			AuthType: func() string {
@@ -713,6 +767,38 @@ func connectionSummaries(settings config.ConnectionSettings) []connectionSummary
 		})
 	}
 	return connections
+}
+
+func presentBoxConnection(settings config.ConnectionSettings, verification config.VerifiedConnection) connectionSummary {
+	alias := strings.TrimSpace(settings.BoxCCGAlias)
+	if alias == "" && settings.HasBoxCCG() {
+		alias = "Box CCG"
+	}
+	selection := alias
+	if selection == "" {
+		selection = safeSelection(verification.Selection)
+	}
+	status := verification.AuthType
+	if status == "" && settings.HasBoxCCG() {
+		status = "Needs verification"
+	}
+	return connectionSummary{
+		Name: "Box", Configured: settings.HasBoxCCG(), Verified: verification.VerifiedAt != "",
+		AuthType: "client credentials", Selection: selection, Status: status, Alias: alias,
+		SubjectType: settings.BoxCCGSubjectType, ClientIDHint: identifierHint(settings.BoxCCGClientID),
+		SubjectIDHint: identifierHint(settings.BoxCCGSubjectID),
+	}
+}
+
+func identifierHint(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return "Configured"
+	}
+	return "Ending in " + value[len(value)-4:]
 }
 
 func hasOAuthEnvironment() bool {

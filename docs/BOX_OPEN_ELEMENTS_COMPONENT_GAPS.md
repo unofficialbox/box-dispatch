@@ -82,6 +82,7 @@ state to a low-level element.
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
 | P1 | Foundations | TypeScript custom-element declarations | JSX tag maps and typed event maps for React and TypeScript consumers. | Maintain the narrow local `boe.d.ts` boundary and native event listeners. Remove redundant declarations after adoption. |
+| P1 | Components | `box-drawer` action integration | Preserve directly actionable footer and body controls when the drawer portals its content outside a framework's delegated event root. A typed `action` event or documented imperative action bridge would make React integrations reliable. | Keep the drawer, fields, and selects from Box Open Elements, with a narrow native-button listener only for drawer actions. Remove it when the published drawer/button contract supports portaled framework actions. |
 | P1 | Patterns | Horizontal workflow navigation | A clickable horizontal wizard that combines eligibility gating with complete, current, pending, blocked, and failed states. | Keep the small local workflow header; neither the vertical `box-progress-steps` nor read-only `box-stage-path` matches the approved workflow. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
