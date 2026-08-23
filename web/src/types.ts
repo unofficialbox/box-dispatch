@@ -27,7 +27,7 @@ export type DeploymentPlan = {
   components: PlanComponent[]
 }
 
-export type BoxConnectionInput = { clientId: string; clientSecret: string; subjectType: 'user' | 'enterprise'; subjectId: string }
+export type BoxConnectionInput = { alias: string; clientId: string; clientSecret: string; subjectType: 'user' | 'enterprise'; subjectId: string }
 
 export type DispatchRun = {
   id: string
@@ -93,6 +93,10 @@ export type ConnectionSummary = {
   selection?: string
   status?: string
   expiresAt?: string
+  alias?: string
+  subjectType?: string
+  clientIdHint?: string
+  subjectIdHint?: string
 }
 
 export type SolutionTemplate = {

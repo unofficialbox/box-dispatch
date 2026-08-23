@@ -3,6 +3,7 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
@@ -177,7 +179,7 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 		ConnectionStore: func() (config.ConnectionSettings, error) {
 			return config.ConnectionSettings{
 				SalesforceAlias: "scratch-org", SalesforceOrgStatus: "Active", SalesforceExpirationDate: "2026-09-20",
-				BoxCCGClientID: "client-id", BoxCCGClientSecret: "private-secret", BoxCCGSubjectType: "enterprise", BoxCCGSubjectID: "123",
+				BoxCCGAlias: "Legal Box", BoxCCGClientID: "client-id", BoxCCGClientSecret: "private-secret", BoxCCGSubjectType: "enterprise", BoxCCGSubjectID: "123",
 				VerifiedConnections: map[string]config.VerifiedConnection{"box": {VerifiedAt: "2026-08-21", Selection: "ccg", Identity: "operator@example.com"}},
 			}, nil
 		},
@@ -195,27 +197,81 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 			t.Fatalf("response leaked %q: %s", forbidden, body)
 		}
 	}
-	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") {
+	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") || !strings.Contains(body, "Legal Box") || !strings.Contains(body, "Ending in t-id") {
 		t.Fatalf("response omitted safe connection state: %s", body)
 	}
 }
 
 func TestBoxConnectionStoresCCGWithoutReturningSecrets(t *testing.T) {
 	var settings config.ConnectionSettings
+	checked := false
 	handler := NewHandlerWithOptions(ServerOptions{
 		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
 		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		BoxCheck: func(_ context.Context, candidate config.ConnectionSettings) (config.VerifiedConnection, error) {
+			checked = true
+			if candidate.BoxCCGClientID != "client-id" || candidate.BoxCCGSubjectID != "12345" {
+				t.Fatalf("candidate = %#v", candidate)
+			}
+			return config.VerifiedConnection{Selection: boxconn.DispatchCCGName, Identity: "box-user@example.com", Account: "12345", Enterprise: "98765", AuthType: "CCG"}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC) },
 	})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/connections/box", strings.NewReader(`{"clientId":"client-id","clientSecret":"very-secret","subjectType":"enterprise","subjectId":"12345"}`)))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/connections/box", strings.NewReader(`{"alias":"Legal Box","clientId":"client-id","clientSecret":"very-secret","subjectType":"enterprise","subjectId":"12345"}`)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
-	if settings.BoxCCGClientID != "client-id" || settings.BoxCCGClientSecret != "very-secret" || settings.BoxCCGSubjectType != "enterprise" || settings.BoxCCGSubjectID != "12345" {
+	if !checked || settings.BoxCCGAlias != "Legal Box" || settings.BoxCCGClientID != "client-id" || settings.BoxCCGClientSecret != "very-secret" || settings.BoxCCGSubjectType != "enterprise" || settings.BoxCCGSubjectID != "12345" {
 		t.Fatalf("settings = %#v", settings)
+	}
+	if settings.VerifiedConnections["box"].VerifiedAt == "" || settings.VerifiedConnections["box"].Selection != boxconn.DispatchCCGName {
+		t.Fatalf("verification was not saved: %#v", settings.VerifiedConnections)
 	}
 	if strings.Contains(response.Body.String(), "very-secret") || strings.Contains(response.Body.String(), "client-id") || strings.Contains(response.Body.String(), "12345") {
 		t.Fatalf("secret material leaked: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "Legal Box") || !strings.Contains(response.Body.String(), "Ending in t-id") || !strings.Contains(response.Body.String(), "Ending in 2345") || !strings.Contains(response.Body.String(), `"verified":true`) {
+		t.Fatalf("safe connection details missing: %s", response.Body.String())
+	}
+}
+
+func TestSavedBoxConnectionCanBeVerified(t *testing.T) {
+	settings := config.ConnectionSettings{BoxCCGAlias: "Legal Box", BoxCCGClientID: "client-id", BoxCCGClientSecret: "secret", BoxCCGSubjectType: "user", BoxCCGSubjectID: "12345"}
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		BoxCheck: func(_ context.Context, _ config.ConnectionSettings) (config.VerifiedConnection, error) {
+			return config.VerifiedConnection{Selection: boxconn.DispatchCCGName, Identity: "box-user@example.com", Account: "12345", Enterprise: "98765", AuthType: "CCG"}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 22, 20, 5, 0, 0, time.UTC) },
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/connections/box/check", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"verified":true`) {
+		t.Fatalf("response = %d: %s", response.Code, response.Body.String())
+	}
+	if settings.VerifiedConnections["box"].VerifiedAt == "" {
+		t.Fatalf("verification was not persisted: %#v", settings.VerifiedConnections)
+	}
+}
+
+func TestBoxConnectionIsNotSavedWhenVerificationFails(t *testing.T) {
+	settings := config.ConnectionSettings{}
+	saved := false
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; saved = true; return nil },
+		BoxCheck: func(_ context.Context, _ config.ConnectionSettings) (config.VerifiedConnection, error) {
+			return config.VerifiedConnection{}, errors.New("Box rejected these credentials")
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/connections/box", strings.NewReader(`{"alias":"Legal Box","clientId":"client-id","clientSecret":"wrong-secret","subjectType":"user","subjectId":"12345"}`)))
+	if response.Code != http.StatusUnprocessableEntity || saved {
+		t.Fatalf("response = %d, saved = %t: %s", response.Code, saved, response.Body.String())
 	}
 }
 

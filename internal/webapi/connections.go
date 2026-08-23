@@ -1,7 +1,10 @@
 package webapi
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +17,9 @@ import (
 
 type connectionSaver func(config.ConnectionSettings) error
 type salesforceTargetStore func() ([]salesforceorg.Target, error)
+type boxConnectionCheck func(context.Context, config.ConnectionSettings) (config.VerifiedConnection, error)
+
+var boxCurrentUserURL = "https://api.box.com/2.0/users/me?fields=id,login,name,enterprise"
 
 type salesforceConnectionOption struct {
 	Alias     string `json:"alias"`
@@ -30,6 +36,7 @@ type salesforceConnectionSelection struct {
 // boxConnectionInput mirrors the supported Dispatch CCG setup without ever
 // returning secret material to the browser.
 type boxConnectionInput struct {
+	Alias        string `json:"alias"`
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 	SubjectType  string `json:"subjectType"`
@@ -37,12 +44,16 @@ type boxConnectionInput struct {
 }
 
 func (b boxConnectionInput) normalized() boxConnectionInput {
+	b.Alias = strings.TrimSpace(b.Alias)
 	b.ClientID = strings.TrimSpace(b.ClientID)
 	b.ClientSecret = strings.TrimSpace(b.ClientSecret)
 	b.SubjectType = strings.ToLower(strings.TrimSpace(b.SubjectType))
 	b.SubjectID = strings.TrimSpace(b.SubjectID)
 	if b.SubjectType == "" {
 		b.SubjectType = "user"
+	}
+	if b.Alias == "" {
+		b.Alias = "Box CCG"
 	}
 	return b
 }
@@ -58,15 +69,60 @@ func (b boxConnectionInput) validate() error {
 }
 
 func saveBoxCCGSelection(settings config.ConnectionSettings, input boxConnectionInput) config.ConnectionSettings {
+	settings.BoxCCGAlias = input.Alias
 	settings.BoxCCGClientID = input.ClientID
 	settings.BoxCCGClientSecret = input.ClientSecret
 	settings.BoxCCGSubjectType = input.SubjectType
 	settings.BoxCCGSubjectID = input.SubjectID
 	settings.BoxDefaultConnection = boxconn.DispatchCCGName
-	if settings.VerifiedConnections != nil {
-		delete(settings.VerifiedConnections, "box")
+	verified := make(map[string]config.VerifiedConnection, len(settings.VerifiedConnections))
+	for provider, connection := range settings.VerifiedConnections {
+		if provider != "box" {
+			verified[provider] = connection
+		}
 	}
+	settings.VerifiedConnections = verified
 	return settings
+}
+
+func verifyBoxConnection(ctx context.Context, settings config.ConnectionSettings) (config.VerifiedConnection, error) {
+	token, err := boxconn.CCGTokenFromSettings(ctx, settings)
+	if err != nil {
+		return config.VerifiedConnection{}, fmt.Errorf("Box rejected the Client Credentials Grant settings: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, boxCurrentUserURL, nil)
+	if err != nil {
+		return config.VerifiedConnection{}, fmt.Errorf("prepare Box identity check: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return config.VerifiedConnection{}, fmt.Errorf("Box could not be reached: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return config.VerifiedConnection{}, fmt.Errorf("Box identity check returned %s", response.Status)
+	}
+	var user struct {
+		ID         string `json:"id"`
+		Login      string `json:"login"`
+		Enterprise struct {
+			ID string `json:"id"`
+		} `json:"enterprise"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&user); err != nil {
+		return config.VerifiedConnection{}, fmt.Errorf("read Box identity: %w", err)
+	}
+	if strings.TrimSpace(user.ID) == "" {
+		return config.VerifiedConnection{}, fmt.Errorf("Box identity check returned no acting user")
+	}
+	return config.VerifiedConnection{
+		Selection:  boxconn.DispatchCCGName,
+		Identity:   user.Login,
+		Account:    user.ID,
+		Enterprise: user.Enterprise.ID,
+		AuthType:   string(boxconn.AuthCCG),
+	}, nil
 }
 
 func loadPersistedConnections() (config.ConnectionSettings, error) {

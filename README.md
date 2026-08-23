@@ -186,6 +186,12 @@ Salesforce REST for org and permission operations, Tooling API for managed-packa
 installation, and Metadata API for source inventory and deployment. The browser receives safe
 per-component progress and sanitized provider diagnostics; it does not require Salesforce CLI.
 
+The Box connection drawer follows the same local-service boundary. Saving new Client Credentials
+Grant settings first mints a token and checks the acting Box user; only credentials accepted by Box
+are persisted as active. A previously saved, unverified connection can be rechecked directly from
+the drawer. The browser receives only the alias, verification state, authentication type, and
+masked identifiers.
+
 The terminal flow discovers authenticated Dev Hubs and passes the selected alias explicitly to
 Salesforce CLI, so a CLI-wide default is not required. The browser flow instead uses the Dev Hub
 REST credential saved in the owner-only `.dispatch/connection-settings.bcl` store. Creation is

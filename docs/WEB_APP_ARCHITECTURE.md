@@ -56,7 +56,8 @@ credential-free presentation client:
 | `POST /api/connections/salesforce/check` | verify that the selected Salesforce org is reachable with `/services/oauth2/userinfo` | access tokens and raw provider output |
 | `POST /api/salesforce/scratch-orgs` | ask the configured Dev Hub to create a 30-day Developer scratch org | Dev Hub credentials and scratch-org access tokens |
 | `GET /api/salesforce/scratch-orgs/{id}` | poll sanitized provisioning status until the new org is active or failed | authorization codes, tokens, and raw provider responses |
-| `PUT /api/connections/box` | save a Box CCG connection from the web app and require it to be revalidated | CCG secret and all raw credential values |
+| `PUT /api/connections/box` | verify a new Box CCG connection against the acting-user API, then save it as active | CCG secret and all raw credential values |
+| `POST /api/connections/box/check` | recheck an existing saved Box CCG connection and refresh its verification snapshot | CCG secret, access token, and provider identity |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |

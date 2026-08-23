@@ -37,6 +37,7 @@ type ConnectionSettings struct {
 	BoxCCGClientSecret string `json:"boxCcgClientSecret,omitempty"`
 	BoxCCGSubjectType  string `json:"boxCcgSubjectType,omitempty"` // "user" or "enterprise"
 	BoxCCGSubjectID    string `json:"boxCcgSubjectId,omitempty"`
+	BoxCCGAlias        string `json:"boxCcgAlias,omitempty"`
 
 	// BoxDefaultConnection records the selected CCG app. Older installations may
 	// contain a Box CLI environment name; Dispatch surfaces a migration message

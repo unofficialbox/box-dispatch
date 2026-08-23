@@ -78,12 +78,6 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
   const completedThisWeek = deployments.filter((deployment) => isCurrentWeek(deployment.completedAt)).length
   const latest = deployments[0]
   const allReady = selectedSystems > 0 && verifiedSystems === selectedSystems
-  const firstUnready = plan.components.find((component) => !connectionFor(component.name, connections)?.verified)
-  const hasSelectedSystems = selectedSystems > 0
-  const openRecommendedConnection = firstUnready?.id === 'box' ? onBoxConnection : firstUnready?.id === 'salesforce' ? onSalesforceConnection : hasSelectedSystems ? onContinue : onNewDeployment
-  const recommendedTitle = !hasSelectedSystems ? 'Choose a solution' : allReady ? 'Review the deployment plan' : `Connect ${firstUnready?.name ?? 'a selected system'}`
-  const recommendedMessage = !hasSelectedSystems ? 'Select a supported solution and the systems it needs before creating provider connections.' : allReady ? 'Check the selected components and deployment strategy before validation.' : 'Add or update this provider connection without leaving the web workspace.'
-  const recommendedLabel = !hasSelectedSystems ? 'Choose solution' : allReady ? 'Continue deployment' : `Connect ${firstUnready?.name ?? 'system'}`
   return <section className="overview-page" aria-label="Overview">
     <header className="overview-heading"><div><p className="overview-eyebrow">Dispatch workspace</p><h1>Overview</h1><p>{allReady ? 'All selected systems are ready. Review the saved plan or start a new deployment.' : 'Review current work, provider readiness, and recent local deployment records.'}</p></div><box-button label="New deployment" tone="primary" onClick={onNewDeployment}></box-button></header>
     <section className="overview-metrics" aria-label="Deployment summary">
@@ -94,7 +88,7 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
     </section>
     <section className="overview-dashboard">
       <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} onContinue={onContinue}/><DeploymentHistory deployments={deployments}/></div>
-      <aside className="overview-secondary"><ConnectionHealth plan={plan} connections={connections} onBoxConnection={onBoxConnection} onSalesforceConnection={onSalesforceConnection}/><box-card className="overview-next"><section><p className="overview-eyebrow">Recommended next action</p><h2>{recommendedTitle}</h2><p>{recommendedMessage}</p><box-button label={recommendedLabel} tone="secondary" onClick={allReady ? onContinue : openRecommendedConnection}></box-button></section></box-card></aside>
+      <aside className="overview-secondary"><ConnectionHealth plan={plan} connections={connections} onBoxConnection={onBoxConnection} onSalesforceConnection={onSalesforceConnection}/></aside>
     </section>
   </section>
 }
