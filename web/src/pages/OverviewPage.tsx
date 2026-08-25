@@ -1,4 +1,4 @@
-import type { ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun } from '../types'
+import { readinessLabel, type ConnectionSummary, type DeploymentPlan, type DeploymentSummary, type DispatchRun } from '../types'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 
 type OverviewPageProps = {
@@ -15,12 +15,13 @@ type OverviewPageProps = {
 const displayStrategy = (strategy: string) => strategy === 'create_new' ? 'Create new' : 'Reuse existing'
 
 const readableProvider = (name: string) => name || 'Provider'
+const dateFormatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 const formatDate = (value?: string) => {
   if (!value) return 'Not recorded'
   const date = new Date(value)
   if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
+  return dateFormatter.format(date)
 }
 
 const isCurrentWeek = (value: string) => {
@@ -35,11 +36,12 @@ const isCurrentWeek = (value: string) => {
 const connectionFor = (name: string, connections: ConnectionSummary[]) => connections.find((connection) => connection.name.toLowerCase() === name.toLowerCase())
 
 function ConnectionHealth({ plan, connections, onBoxConnection, onSalesforceConnection }: Pick<OverviewPageProps, 'plan' | 'connections' | 'onBoxConnection' | 'onSalesforceConnection'>) {
-  return <box-card className="overview-connection-health"><section><header><div><p className="overview-eyebrow">Local provider status</p><h2>Connection health</h2></div><box-badge label={`${plan.components.filter((component) => connectionFor(component.name, connections)?.verified).length} verified`} tone="success"></box-badge></header><ul>{plan.components.map((component) => {
+  const readyCount = plan.components.filter((component) => connectionFor(component.name, connections)?.verified).length
+  return <box-card className="overview-connection-health"><section><header><div><p className="overview-eyebrow">Local provider status</p><h2>Connections</h2></div><box-badge label={`${readyCount} ready`} tone="success"></box-badge></header><ul>{plan.components.map((component) => {
     const connection = connectionFor(component.name, connections)
     const ready = Boolean(connection?.verified)
     const onConnection = component.id === 'box' ? onBoxConnection : component.id === 'salesforce' ? onSalesforceConnection : undefined
-    return <li key={component.id}><span className={`provider-mark ${component.id}`} aria-hidden="true">{component.id === 'box' ? 'B' : component.id === 'salesforce' ? 'SF' : component.name.slice(0, 2).toUpperCase()}</span><div><strong>{component.name}</strong><small>{connection?.selection || connection?.authType || (ready ? 'Local connection verified' : 'Connection needs verification')}</small></div><div className="health-actions"><span className={`health-state ${ready ? 'healthy' : 'attention'}`}>{ready ? 'Healthy' : 'Needs attention'}</span>{onConnection ? <box-button label={ready ? 'Manage' : 'Connect'} tone={ready ? 'secondary' : 'primary'} onClick={onConnection}></box-button> : null}</div></li>
+    return <li key={component.id}><span className={`provider-mark ${component.id}`} aria-hidden="true">{component.id === 'box' ? 'B' : component.id === 'salesforce' ? 'SF' : component.name.slice(0, 2).toUpperCase()}</span><div><strong>{component.name}</strong><small>{connection?.selection || connection?.authType || readinessLabel(ready)}</small></div><div className="health-actions"><span className={`health-state ${ready ? 'healthy' : 'attention'}`}>{readinessLabel(ready)}</span>{onConnection ? <box-button label={ready ? 'Manage' : 'Connect'} tone={ready ? 'secondary' : 'primary'} onClick={onConnection}></box-button> : null}</div></li>
   })}</ul></section></box-card>
 }
 
@@ -49,7 +51,8 @@ function CurrentDeployment({ plan, connections, run, onContinue }: Pick<Overview
   const status = running ? `${action} in progress` : plan.exists ? 'Saved deployment' : 'No deployment selected'
   const configured = plan.components.filter((component) => component.ready).length
   const verified = plan.components.filter((component) => connectionFor(component.name, connections)?.verified).length
-  return <box-card className="overview-current"><section><header><div><p className="overview-eyebrow">{status}</p><h2>{plan.template || 'Choose a solution'}</h2></div>{running ? <box-badge label="Live" tone="info"></box-badge> : null}</header><p className="overview-summary">{plan.exists ? `${displayStrategy(plan.strategy)} · ${configured} of ${plan.components.length} selected system${plan.components.length === 1 ? '' : 's'} ready` : 'Start with a supported solution, then select the systems it needs.'}</p><div className="overview-provider-track" aria-label="Selected providers">{plan.components.map((component) => <span key={component.id}><i className={`provider-dot ${component.ready ? 'ready' : ''}`} aria-hidden="true"></i>{component.name}</span>)}</div>{plan.components.length > 0 ? <box-progress-bar label="Connection readiness" value={verified} max={plan.components.length}></box-progress-bar> : null}{plan.exists && !running ? <box-button label="Continue deployment" tone="primary" onClick={onContinue}></box-button> : null}</section></box-card>
+  const allReady = plan.components.length > 0 && verified === plan.components.length
+  return <box-card className="overview-current"><section><header><div><p className="overview-eyebrow">{status}</p><h2>{plan.template || 'Choose a solution'}</h2></div>{running ? <box-badge label="Live" tone="info"></box-badge> : null}</header><p className="overview-summary">{plan.exists ? `${displayStrategy(plan.strategy)} · ${configured} of ${plan.components.length} selected system${plan.components.length === 1 ? '' : 's'} ready` : 'Start with a supported solution, then select the systems it needs.'}</p><div className="overview-provider-track" aria-label="Selected providers">{plan.components.map((component) => <span key={component.id}><i className={`provider-dot ${component.ready ? 'ready' : ''}`} aria-hidden="true"></i>{component.name}</span>)}</div>{plan.components.length > 0 ? <box-progress-bar label="Connection readiness" value={verified} max={plan.components.length}></box-progress-bar> : null}{plan.exists && !running ? <box-button label={allReady ? 'Continue deployment' : 'Connect systems'} tone="primary" onClick={onContinue}></box-button> : null}</section></box-card>
 }
 
 function DeploymentHistory({ deployments }: Pick<OverviewPageProps, 'deployments'>) {
@@ -79,16 +82,20 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
   const latest = deployments[0]
   const allReady = selectedSystems > 0 && verifiedSystems === selectedSystems
   return <section className="overview-page" aria-label="Overview">
-    <header className="overview-heading"><div><p className="overview-eyebrow">Dispatch workspace</p><h1>Overview</h1><p>{allReady ? 'All selected systems are ready. Review the saved plan or start a new deployment.' : 'Review current work, provider readiness, and recent local deployment records.'}</p></div><box-button label="New deployment" tone="primary" onClick={onNewDeployment}></box-button></header>
+    <header className="overview-heading"><div><h1>Overview</h1><p>{allReady ? 'Your deployment plan and connections are ready.' : 'Connect the remaining systems to continue your saved plan.'}</p></div><box-button label="New deployment" tone="primary" onClick={onNewDeployment}></box-button></header>
     <section className="overview-metrics" aria-label="Deployment summary">
-      <box-metric-card className="overview-metric" heading="Saved plan" value={plan.exists ? plan.template : 'None'} message={plan.exists ? `${displayStrategy(plan.strategy)} strategy` : 'Choose a solution to begin'}></box-metric-card>
-      <box-metric-card className="overview-metric" heading="Connection readiness" value={`${verifiedSystems} of ${selectedSystems} verified`} message={allReady ? 'Every selected system is ready' : 'Connect or verify the remaining systems'} status={allReady ? 'Ready' : 'Action needed'}></box-metric-card>
-      <box-metric-card className="overview-metric" heading="Completed this week" value={String(completedThisWeek)} message="From local deployment audit records"></box-metric-card>
-      <box-metric-card className="overview-metric" heading="Latest deployment" value={latest ? latest.name || latest.id : 'None'} message={latest ? formatDate(latest.completedAt) : 'No completed run recorded'}></box-metric-card>
+      <Metric label="Saved plan" value={plan.exists ? '1 active' : 'None'} detail={plan.exists ? displayStrategy(plan.strategy) : 'Choose a solution'}/>
+      <Metric label="Connections" value={`${verifiedSystems} of ${selectedSystems}`} detail={allReady ? 'Ready' : 'Need attention'} tone={allReady ? 'success' : 'neutral'}/>
+      <Metric label="Completed this week" value={String(completedThisWeek)} detail="Deployment records"/>
+      <Metric label="Latest deployment" value={latest ? 'Complete' : 'None'} detail={latest ? formatDate(latest.completedAt) : 'No completed run'}/>
     </section>
     <section className="overview-dashboard">
       <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} onContinue={onContinue}/><DeploymentHistory deployments={deployments}/></div>
       <aside className="overview-secondary"><ConnectionHealth plan={plan} connections={connections} onBoxConnection={onBoxConnection} onSalesforceConnection={onSalesforceConnection}/></aside>
     </section>
   </section>
+}
+
+function Metric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'success' }) {
+  return <div className={`overview-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
-import type { ConnectionSummary, DeploymentPlan } from '../types'
+import { readinessLabel, type ConnectionSummary, type DeploymentPlan } from '../types'
 
 type ProviderID = 'box' | 'salesforce'
 
@@ -28,16 +28,16 @@ export function ConfigurePage({ plan, connections, notice, componentSelections, 
   const selectedComponents = componentSelections[selectedProviderID] ?? []
   const selectedTitle = selectedProviderID === 'box' ? 'Box content' : 'Salesforce metadata'
   return <section className="configure-stage" aria-label="Configure deployment">
-    <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose a deployment strategy, then select the individual supported components to include.</p></div></header>
+    <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose how Dispatch should apply the selected provider components.</p></div></header>
     <box-split-view className="configure-workspace" label="Deployment configuration and selected provider details" ratio={0.66}>
       <div slot="primary">
         <section className="strategy-section" aria-labelledby="strategy-title"><h3 id="strategy-title">Deployment strategy</h3><div className="strategy-picker" role="radiogroup" aria-label="Deployment strategy"><button type="button" role="radio" aria-checked={plan.strategy === 'reuse'} className={plan.strategy === 'reuse' ? 'selected' : ''} onClick={() => onStrategyChange('reuse')}><strong>Reuse existing</strong><span>Keep matching configuration and apply only what is missing.</span></button><button type="button" role="radio" aria-checked={plan.strategy === 'create_new'} className={plan.strategy === 'create_new' ? 'selected' : ''} onClick={() => onStrategyChange('create_new')}><strong>Create new</strong><span>Create a new named configuration set for this deployment.</span></button></div></section>
         <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/><ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback={salesforceIncluded ? 'Selected for this deployment' : 'Not included in this deployment'} connection={connections.find((connection) => connection.name === 'Salesforce')} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/></div>
         <ComponentScope provider={selectedProviderID} title={selectedTitle} included={selectedProviderID === 'box' || salesforceIncluded} selectedComponents={selectedComponents} onToggle={onToggleComponent}/>
       </div>
-      <DetailsRail title={`${selectedTitle} details`} description="The connection and component scope selected for this deployment."><span className={`detail-provider-mark ${selectedProviderID}`}>{selectedProviderID === 'box' ? 'B' : 'SF'}</span><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', selectedConnection?.verified ? 'Verified' : selectedConnection?.configured ? 'Ready to verify' : 'Not connected'], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
+      <DetailsRail title={`${selectedTitle} details`}><span className={`detail-provider-mark ${selectedProviderID}`}>{selectedProviderID === 'box' ? 'B' : 'SF'}</span><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', readinessLabel(Boolean(selectedConnection?.verified))], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
     </box-split-view>
-    <footer className="configuration-footer"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label="Back" tone="secondary" onClick={onBack}></box-button><box-button label="Next" tone="primary" onClick={onNext}></box-button></div></footer>
+    <footer className="configuration-footer"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label="Back" tone="secondary" onClick={onBack}></box-button><box-button label="Review plan" tone="primary" onClick={onNext}></box-button></div></footer>
   </section>
 }
 
@@ -73,6 +73,6 @@ function ComponentToggle({ provider, component, checked, disabled, onToggle }: {
 function ConnectionDetails({ connection, fallback }: { connection?: ConnectionSummary; fallback: string }) {
   if (!connection) return <small>{fallback}</small>
   if (!connection.configured) return <small><b>Connection</b> · Not configured</small>
-  const parts = [connection.selection, connection.authType, connection.status, connection.verified ? 'Verified' : 'Needs verification', connection.expiresAt ? `Expires ${connection.expiresAt}` : ''].filter(Boolean)
+  const parts = [connection.selection, connection.authType, readinessLabel(connection.verified), connection.expiresAt ? `Expires ${connection.expiresAt}` : ''].filter(Boolean)
   return <small><b>Connection</b> · {parts.join(' · ')}</small>
 }

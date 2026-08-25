@@ -27,7 +27,11 @@ export type DeploymentPlan = {
   components: PlanComponent[]
 }
 
-export type BoxConnectionInput = { alias: string; clientId: string; clientSecret: string; subjectType: 'user' | 'enterprise'; subjectId: string }
+export type Readiness = 'Ready' | 'Not ready'
+
+export function readinessLabel(ready: boolean): Readiness {
+  return ready ? 'Ready' : 'Not ready'
+}
 
 export type DispatchRun = {
   id: string
@@ -59,11 +63,15 @@ export type RunEvent = {
 }
 
 export type SalesforceConnectionOption = {
+  id?: string
   alias: string
   kind: string
   status: string
   expiresAt?: string
   selected: boolean
+  devHub?: boolean
+  username?: string
+  orgId?: string
 }
 
 export type SalesforceRESTInput = {
@@ -85,6 +93,26 @@ export type ScratchOrgJob = {
   expirationDate?: string
 }
 
+export type BoxConnectionOption = {
+  id?: string
+  alias: string
+  status: string
+  selected: boolean
+  identity?: string
+  subjectType?: string
+  clientIdHint?: string
+  subjectIdHint?: string
+}
+
+export type BoxOAuthJob = {
+  id: string
+  status: 'pending' | 'active' | 'failed'
+  message: string
+  alias?: string
+  identity?: string
+  account?: string
+}
+
 export type ConnectionSummary = {
   name: string
   configured: boolean
@@ -97,6 +125,28 @@ export type ConnectionSummary = {
   subjectType?: string
   clientIdHint?: string
   subjectIdHint?: string
+  restConfigured?: boolean
+  devHubConfigured?: boolean
+  oauthConfigured?: boolean
+  orgs?: SalesforceConnectionOption[]
+  connections?: BoxConnectionOption[]
+}
+
+export type SalesforceOAuthStart = {
+  id: string
+  authorizeUrl: string
+  loginHost: string
+  role: 'org' | 'devhub'
+}
+
+export type SalesforceOAuthJob = {
+  id: string
+  status: 'pending' | 'active' | 'failed'
+  message: string
+  alias?: string
+  username?: string
+  orgId?: string
+  role?: 'org' | 'devhub'
 }
 
 export type SolutionTemplate = {

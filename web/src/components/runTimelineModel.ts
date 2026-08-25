@@ -24,13 +24,21 @@ export function presentProviderProgress(components: DeploymentPlan['components']
     const componentEvents = events.filter((event) => event.provider === component.id)
     const updates = componentEvents.filter((event) => event.type === 'activity')
     const componentProgress = presentComponents(updates)
-    if (result) return { id: component.id, name: component.name, state: result.status === 'failed' ? 'failed' : 'complete', updates, components: componentProgress }
-    if (run?.status === 'failed' && currentProvider === component.id) return { id: component.id, name: component.name, state: 'failed', updates, components: componentProgress }
+    if (result) {
+      const failed = result.status === 'failed'
+      return { id: component.id, name: component.name, state: failed ? 'failed' : 'complete', updates, components: finishInterruptedComponents(componentProgress, failed) }
+    }
+    if (run?.status === 'failed' && currentProvider === component.id) return { id: component.id, name: component.name, state: 'failed', updates, components: finishInterruptedComponents(componentProgress, true) }
     if (providerFinished(updates.at(-1)?.message)) return { id: component.id, name: component.name, state: 'complete', updates, components: componentProgress }
     if (run?.status === 'completed' && updates.length > 0) return { id: component.id, name: component.name, state: 'complete', updates, components: componentProgress }
     if (currentProvider === component.id) return { id: component.id, name: component.name, state: 'active', updates, components: componentProgress }
     return { id: component.id, name: component.name, state: 'pending', updates, components: componentProgress }
   })
+}
+
+function finishInterruptedComponents(components: ComponentProgress[], failed: boolean) {
+  if (!failed) return components
+  return components.map((component) => component.state === 'running' ? { ...component, state: 'failed' as const, message: 'Validation stopped before this check completed' } : component)
 }
 
 function presentComponents(events: RunEvent[]): ComponentProgress[] {

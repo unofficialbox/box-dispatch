@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { BoxConnectionInput, ConnectionSummary, RunDiagnostic, SalesforceConnectionOption, SalesforceRESTInput, ScratchOrgJob } from '../types'
+import type { ConnectionSummary, RunDiagnostic, SalesforceOAuthJob, ScratchOrgJob, BoxOAuthJob } from '../types'
 
 type ValueElement = HTMLElement & { value: string }
 
@@ -27,6 +27,23 @@ function useValueChanged(onChange: (value: string) => void) {
     return () => field.removeEventListener('value-changed', handleValueChanged)
   }, [onChange])
   return ref
+}
+
+function RemoveConnectionButton({ label, disabled = false, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
+  const ref = useRef<HTMLElement>(null)
+  const handlerRef = useRef(onPress)
+  useEffect(() => { handlerRef.current = onPress }, [onPress])
+  useEffect(() => {
+    const button = ref.current
+    if (!button) return
+    const handleClick = (event: Event) => {
+      event.preventDefault()
+      if (!disabled) handlerRef.current()
+    }
+    button.addEventListener('click', handleClick)
+    return () => button.removeEventListener('click', handleClick)
+  }, [disabled])
+  return <box-icon-button ref={ref} className="connection-remove" icon="cart-1" label={label} disabled={disabled}></box-icon-button>
 }
 
 function DrawerButton({ label, tone = 'secondary', disabled = false, onPress }: { label: string; tone?: 'primary' | 'secondary' | 'danger'; disabled?: boolean; onPress: () => void }) {
@@ -61,7 +78,6 @@ export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiag
         <ol>{diagnostic.nextSteps.map((step) => <li key={step}>{step}</li>)}</ol>
         {diagnostic.technicalDetail && <details className="diagnostic-detail">
           <summary>Technical details</summary>
-          <p>This provider response has been sanitized so it is safe to inspect in the browser.</p>
           <pre>{diagnostic.technicalDetail}</pre>
         </details>}
       </>}
@@ -69,75 +85,81 @@ export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiag
   </box-drawer>
 }
 
-export function SalesforceConnectionDrawer({ options, selectedAlias, loading, scratchJob, onChange, onSave, onSaveREST, onCheck, onCreateScratch, onClose }: { options: SalesforceConnectionOption[]; selectedAlias: string; loading: boolean; scratchJob: ScratchOrgJob | null; onChange: (alias: string) => void; onSave: () => Promise<boolean>; onSaveREST: (input: SalesforceRESTInput) => void; onCheck: () => void; onCreateScratch: (alias: string) => void; onClose: () => void }) {
+export function SalesforceConnectionDrawer({ connection, loading, error, oauthJob, scratchJob, onLogin, onSelect, onRemove, onCheck, onCreateScratch, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: SalesforceOAuthJob | null; scratchJob: ScratchOrgJob | null; onLogin: (loginHost: 'production' | 'sandbox', role: 'org' | 'devhub') => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onCheck: () => Promise<boolean>; onCreateScratch: (alias: string) => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
   const closeDrawer = () => (drawerRef.current as DrawerElement | null)?.close()
-  const selectRef = useValueChanged(onChange)
-  const selectOptions = options.map((option) => ({ label: `${option.alias} · ${option.kind}${option.expiresAt ? ` · expires ${option.expiresAt}` : ''}`, value: option.alias }))
-  const [input, setInput] = useState<SalesforceRESTInput>({ instanceUrl: '', accessToken: '', devHubUrl: '', devHubAccessToken: '', clientId: '', clientSecret: '' })
+  const [loginHost, setLoginHost] = useState<'production' | 'sandbox'>('production')
   const [alias, setAlias] = useState('')
-  const set = (field: keyof SalesforceRESTInput) => (value: string) => setInput((current) => ({ ...current, [field]: value }))
-  const instanceURLRef = useValueChanged(set('instanceUrl'))
-  const accessTokenRef = useValueChanged(set('accessToken'))
-  const devHubURLRef = useValueChanged(set('devHubUrl'))
-  const devHubTokenRef = useValueChanged(set('devHubAccessToken'))
-  const clientIDRef = useValueChanged(set('clientId'))
-  const clientSecretRef = useValueChanged(set('clientSecret'))
+  const loginHostRef = useValueChanged((value) => setLoginHost(value === 'sandbox' ? 'sandbox' : 'production'))
   const aliasRef = useValueChanged(setAlias)
-  const hasTarget = input.instanceUrl.trim() !== '' && input.accessToken.trim() !== ''
-  const hasDevHub = input.devHubUrl.trim() !== '' && input.devHubAccessToken.trim() !== '' && input.clientId.trim() !== ''
-  const canSaveREST = hasTarget || hasDevHub
+  const orgs = connection?.orgs ?? []
+  const selected = orgs.find((org) => org.selected) ?? orgs[0]
+  const orgSelectRef = useValueChanged((value) => { if (value && value !== selected?.id) void onSelect(value) })
+  const loggingIn = oauthJob?.status === 'pending'
   const creating = scratchJob?.status === 'queued' || scratchJob?.status === 'creating'
-  const selectedOption = options.find((option) => option.alias === selectedAlias)
-  const applySelectedOrg = async () => {
-    if (await onSave()) closeDrawer()
-  }
-  return <box-drawer ref={drawerRef} open heading="Salesforce environments" description="Check the selected org or create a replacement scratch org. Salesforce credentials stay in the local Go service." position="right" size="large" busy={loading}>
+  const canCheck = Boolean(connection?.restConfigured)
+  const canCreateScratch = Boolean(connection?.devHubConfigured)
+  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Connect Salesforce" position="right" size="large" busy={loading}>
     <section className="drawer-content salesforce-environments">
-      <section className="drawer-section"><div className="drawer-section-heading"><div><h3>Selected org</h3><p>{selectedAlias || 'No Salesforce org selected'}</p></div><DrawerButton label={loading ? 'Checking…' : 'Check availability'} disabled={loading || !selectedAlias} onPress={onCheck}/></div>
-        <box-select ref={selectRef} label="Available connection" value={selectedAlias} options={selectOptions} disabled={loading} loading={loading} emptyText="No saved Salesforce environments"></box-select>
-        {selectedOption && !selectedOption.selected && (
-          <DrawerButton label="Use selected org" disabled={loading || !selectedAlias} onPress={() => { void applySelectedOrg() }}/>
-        )}
+      {error && <div className="drawer-inline-error" role="alert"><strong>Salesforce connection needs attention</strong><p>{error}</p></div>}
+      {orgs.length > 0 && <section className="saved-connection-summary" aria-label="Connected Salesforce orgs">
+        <h3>Connected orgs</h3>
+        <div className="saved-connection-picker">
+          <box-select ref={orgSelectRef} label="Salesforce org" value={selected?.id ?? ''} options={orgs.map((org) => ({ label: org.devHub ? `${org.alias || org.username || 'Salesforce org'} (Dev Hub)` : org.alias || org.username || 'Salesforce org', value: org.id ?? '' }))}></box-select>
+          <RemoveConnectionButton label="Remove Salesforce org" disabled={loading || !selected?.id} onPress={() => { if (selected?.id) void onRemove(selected.id) }}/>
+        </div>
+        {selected && <p>Connected as {selected.username || selected.alias || 'the selected Salesforce user'}.</p>}
+        <div className="saved-connection-actions"><DrawerButton label={loading ? 'Checking…' : 'Check availability'} tone="primary" disabled={loading || !canCheck} onPress={() => { void onCheck() }}/></div>
+      </section>}
+      <section className="drawer-section">
+        <h3>Log in with Salesforce</h3>
+        <box-select ref={loginHostRef} label="Salesforce environment" value={loginHost} options={[{ label: 'Production', value: 'production' }, { label: 'Sandbox', value: 'sandbox' }]} required></box-select>
+        <div className="drawer-button-row">
+          <DrawerButton label={loggingIn && oauthJob?.role !== 'devhub' ? 'Waiting for Salesforce…' : orgs.length > 0 ? 'Add another Salesforce org' : 'Log in with Salesforce'} tone="primary" disabled={loading || loggingIn} onPress={() => { void onLogin(loginHost, 'org') }}/>
+          <DrawerButton label={loggingIn && oauthJob?.role === 'devhub' ? 'Waiting for Salesforce…' : 'Log in as Dev Hub'} disabled={loading || loggingIn} onPress={() => { void onLogin(loginHost, 'devhub') }}/>
+        </div>
+        {oauthJob && oauthJob.status !== 'failed' && <p className={`scratch-job scratch-job-${oauthJob.status === 'pending' ? 'queued' : oauthJob.status}`} role="status" aria-live="polite">{oauthJob.message}</p>}
       </section>
-      <section className="drawer-section"><h3>Create a scratch org</h3><p>Dispatch asks the saved Dev Hub to create a 30-day Developer scratch org, then selects it automatically.</p><box-text-field ref={aliasRef} label="Scratch org alias" description="Optional; Dispatch generates one when blank." value={alias}></box-text-field><DrawerButton label={creating ? 'Creating scratch org…' : 'Create and use scratch org'} tone="primary" disabled={loading || creating} onPress={() => onCreateScratch(alias)}/>{scratchJob && <p className={`scratch-job scratch-job-${scratchJob.status}`} role="status" aria-live="polite">{scratchJob.message}{scratchJob.expirationDate ? ` Expires ${scratchJob.expirationDate}.` : ''}</p>}</section>
-      <details className="drawer-section connection-setup"><summary>Dev Hub and REST connection</summary><p>Use a Dev Hub access token and Connected App client ID. A current-org token is optional until a scratch org is created.</p><box-text-field ref={instanceURLRef} label="Current org URL" value={input.instanceUrl} autocomplete="url"></box-text-field><box-text-field ref={accessTokenRef} label="Current org access token" type="password" value={input.accessToken} autocomplete="off" reveal></box-text-field><box-text-field ref={devHubURLRef} label="Dev Hub URL" required value={input.devHubUrl} autocomplete="url"></box-text-field><box-text-field ref={devHubTokenRef} label="Dev Hub access token" type="password" required value={input.devHubAccessToken} autocomplete="off" reveal></box-text-field><box-text-field ref={clientIDRef} label="Connected App client ID" required value={input.clientId} autocomplete="off"></box-text-field><box-text-field ref={clientSecretRef} label="Connected App client secret" type="password" value={input.clientSecret} autocomplete="off" reveal></box-text-field><DrawerButton label={loading ? 'Saving…' : 'Save REST connection'} tone="primary" disabled={loading || !canSaveREST} onPress={() => onSaveREST(input)}/></details>
+      <section className="drawer-section scratch-org-section">
+        <h3>Create a scratch org</h3>
+        <box-text-field className="scratch-org-alias" ref={aliasRef} label="Scratch org alias" value={alias}></box-text-field>
+        <DrawerButton label={creating ? 'Creating scratch org…' : 'Create and use scratch org'} tone="primary" disabled={loading || creating || !canCreateScratch} onPress={() => onCreateScratch(alias)}/>
+        {scratchJob && scratchJob.status !== 'failed' && <p className={`scratch-job scratch-job-${scratchJob.status}`} role="status" aria-live="polite">{scratchJob.message}{scratchJob.expirationDate ? ` Expires ${scratchJob.expirationDate}.` : ''}</p>}
+      </section>
     </section>
     <footer slot="footer" className="drawer-actions"><DrawerButton label="Close" onPress={closeDrawer}/></footer>
   </box-drawer>
 }
 
-export function BoxConnectionDrawer({ connection, loading, error, onSave, onVerify, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; onSave: (input: BoxConnectionInput) => Promise<boolean>; onVerify: () => Promise<boolean>; onClose: () => void }) {
+export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLogin, onSelect, onRemove, onVerify, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: BoxOAuthJob | null; onLogin: () => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onVerify: () => Promise<boolean>; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
   const closeDrawer = () => (drawerRef.current as DrawerElement | null)?.close()
-  const [input, setInput] = useState<BoxConnectionInput>({ alias: connection?.alias || connection?.selection || 'Box CCG', clientId: '', clientSecret: '', subjectType: connection?.subjectType === 'enterprise' ? 'enterprise' : 'user', subjectId: '' })
-  const set = (field: keyof BoxConnectionInput) => (value: string) => setInput((current) => ({ ...current, [field]: value }))
-  const aliasRef = useValueChanged(set('alias'))
-  const clientIDRef = useValueChanged(set('clientId'))
-  const clientSecretRef = useValueChanged(set('clientSecret'))
-  const subjectTypeRef = useValueChanged(set('subjectType'))
-  const subjectIDRef = useValueChanged(set('subjectId'))
-  const canSave = input.alias.trim() !== '' && input.clientId.trim() !== '' && input.clientSecret.trim() !== '' && input.subjectId.trim() !== ''
-  const saveConnection = async () => {
-    if (canSave && await onSave(input)) closeDrawer()
-  }
-  return <box-drawer ref={drawerRef} open heading="Connect Box" description="Set up the Client Credentials Grant connection used by Dispatch. Secrets go only to the local Dispatch service and are never returned to the browser." position="right" size="large" busy={loading}>
+  const apps = connection?.connections ?? []
+  const selected = apps.find((app) => app.selected) ?? apps[0]
+  const appSelectRef = useValueChanged((value) => { if (value && value !== selected?.id) void onSelect(value) })
+  const loggingIn = oauthJob?.status === 'pending'
+  const canLogin = Boolean(connection?.oauthConfigured)
+  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Connect Box" position="right" size="large" busy={loading}>
     <section className="drawer-content box-connection-form">
-      {error && <div className="drawer-inline-error" role="alert"><strong>Connection not saved</strong><p>{error}</p></div>}
-      {connection?.configured && <section className="saved-connection-summary" aria-label="Saved Box connection details"><h3>Saved connection</h3><dl>
-        <div><dt>Alias</dt><dd>{connection.alias || connection.selection || 'Box CCG'}</dd></div>
-        <div><dt>Status</dt><dd>{connection.verified ? 'Verified' : connection.status || 'Needs verification'}</dd></div>
-        <div><dt>Authentication</dt><dd>{connection.authType || 'Client credentials'}</dd></div>
-        <div><dt>Subject type</dt><dd>{connection.subjectType || 'Configured'}</dd></div>
-        <div><dt>Client ID</dt><dd>{connection.clientIdHint || 'Configured'}</dd></div>
-        <div><dt>Subject ID</dt><dd>{connection.subjectIdHint || 'Configured'}</dd></div>
-      </dl>{!connection.verified && <div className="saved-connection-actions"><p>The credentials are saved but have not passed a live Box identity check.</p><DrawerButton label={loading ? 'Verifying…' : 'Verify saved connection'} tone="primary" disabled={loading} onPress={() => { void onVerify() }}/></div>}<p>Enter replacement credentials below only when you want to update this connection.</p></section>}
-      <box-text-field ref={aliasRef} label="Connection alias" description="A recognizable name for this Box connection." value={input.alias} required autocomplete="off"></box-text-field>
-      <box-text-field ref={clientIDRef} label="Client ID" value={input.clientId} required autocomplete="off"></box-text-field>
-      <box-text-field ref={clientSecretRef} label="Client secret" value={input.clientSecret} type="password" required autocomplete="off" reveal></box-text-field>
-      <box-select ref={subjectTypeRef} label="Subject type" value={input.subjectType} options={[{ label: 'User', value: 'user' }, { label: 'Enterprise', value: 'enterprise' }]} required></box-select>
-      <box-text-field ref={subjectIDRef} label="Subject ID" value={input.subjectId} required></box-text-field>
+      {error && <div className="drawer-inline-error" role="alert"><strong>Box connection needs attention</strong><p>{error}</p></div>}
+      {apps.length > 0 && <section className="saved-connection-summary" aria-label="Connected Box users">
+        <h3>Connected users</h3>
+        <div className="saved-connection-picker">
+          <box-select ref={appSelectRef} label="Box connection" value={selected?.id ?? ''} options={apps.map((app) => ({ label: app.alias || app.identity || 'Box', value: app.id ?? '' }))}></box-select>
+          <RemoveConnectionButton label="Remove Box connection" disabled={loading || !selected?.id} onPress={() => { if (selected?.id) void onRemove(selected.id) }}/>
+        </div>
+        {selected && <p>Connected as {selected.identity || selected.alias || 'the selected Box user'}.</p>}
+        <div className="saved-connection-actions"><DrawerButton label={loading ? 'Checking…' : 'Check availability'} tone="primary" disabled={loading} onPress={() => { void onVerify() }}/></div>
+      </section>}
+      <section className="drawer-section">
+        <h3>Log in with Box</h3>
+        {!canLogin && <p>Set BOX_CLIENT_ID and BOX_CLIENT_SECRET in .env, then restart Dispatch.</p>}
+        <div className="drawer-button-row">
+          <DrawerButton label={loggingIn ? 'Waiting for Box…' : apps.length > 0 ? 'Add another Box user' : 'Log in with Box'} tone="primary" disabled={loading || loggingIn || !canLogin} onPress={() => { void onLogin() }}/>
+        </div>
+        {oauthJob && oauthJob.status !== 'failed' && <p className={`scratch-job scratch-job-${oauthJob.status === 'pending' ? 'queued' : oauthJob.status}`} role="status" aria-live="polite">{oauthJob.message}</p>}
+      </section>
     </section>
-    <footer slot="footer" className="drawer-actions"><DrawerButton label="Cancel" onPress={closeDrawer}/><DrawerButton label={loading ? 'Saving…' : 'Save Box connection'} tone="primary" disabled={!canSave || loading} onPress={() => { void saveConnection() }}/></footer>
+    <footer slot="footer" className="drawer-actions"><DrawerButton label="Close" onPress={closeDrawer}/></footer>
   </box-drawer>
 }
