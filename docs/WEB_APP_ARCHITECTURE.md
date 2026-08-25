@@ -21,6 +21,24 @@ flowchart LR
     API --> Audit
 ```
 
+Frontend development has a provider-independent path that preserves the same
+browser contract:
+
+```mermaid
+flowchart LR
+    React["React workspace"] -->|"HTTP + SSE"| Boundary{"API boundary"}
+    Boundary -->|"live mode"| Live["Lifecycle + provider APIs"]
+    Boundary -->|"mock mode"| Mock["Deterministic in-memory state"]
+    Boundary -->|"optional recording"| Trace["Redacted JSONL exchange trace"]
+    Mock --> E2E["Playwright full-workflow tests"]
+```
+
+`box-dispatch mock` serves the embedded UI with in-memory connections, package
+assembly, validation, deployment, deployment history, and server-sent progress
+events. It never reads credentials or calls a provider. The live executable's
+optional `--record-api` middleware captures the same browser-facing contract;
+it redacts credential-shaped JSON fields and omits callback query strings.
+
 ## First vertical slice
 
 - `web/` is a React 19 + Vite + TypeScript application using the published

@@ -412,21 +412,30 @@ func TestSalesforcePlanIncludesManagedPackageFromStart(t *testing.T) {
 	}
 }
 
-func TestSalesforcePackageInventoryRequiresExactVersion(t *testing.T) {
+func TestSalesforcePackageInventoryRequiresMinimumVersion(t *testing.T) {
 	required := []solution.SalesforcePackageRequirement{{
 		Name: "Box for Salesforce", Namespace: "box", PackageID: "033700000004yvWAAQ",
 		VersionID: "04tKi000000gPNZIA2", VersionName: "5.43", VersionNumber: "5.43.0.1",
 	}}
 	installed := []installedSalesforcePackage{{
 		SubscriberPackageID: "033700000004yvWAAQ", SubscriberPackageName: "Box for Salesforce",
-		SubscriberPackageNamespace: "box", SubscriberPackageVersionID: "04tOlder",
+		SubscriberPackageNamespace: "box", SubscriberPackageVersionID: "04tOlder", SubscriberPackageVersionNumber: "5.42.0.1",
 	}}
 	if missing := missingSalesforcePackages(required, installed); len(missing) != 1 {
-		t.Fatalf("older package satisfied exact prerequisite: %#v", missing)
+		t.Fatalf("older package satisfied minimum prerequisite: %#v", missing)
 	}
 	installed[0].SubscriberPackageVersionID = "04tKi000000gPNZIA2"
 	if missing := missingSalesforcePackages(required, installed); len(missing) != 0 {
 		t.Fatalf("exact package version was reported missing: %#v", missing)
+	}
+	installed[0].SubscriberPackageVersionID = "04tNewer"
+	installed[0].SubscriberPackageVersionNumber = "5.53.0.1"
+	if missing := missingSalesforcePackages(required, installed); len(missing) != 0 {
+		t.Fatalf("newer package version was reported missing: %#v", missing)
+	}
+	installed[0].SubscriberPackageVersionNumber = "unreadable"
+	if missing := missingSalesforcePackages(required, installed); len(missing) != 1 {
+		t.Fatalf("unreadable non-matching version satisfied prerequisite: %#v", missing)
 	}
 }
 

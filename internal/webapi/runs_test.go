@@ -144,6 +144,25 @@ func TestValidationFailsWhenProviderReturnsFailedItem(t *testing.T) {
 	}
 }
 
+func TestEmitDeploymentResultDoesNotReportFailedProviderAsApplied(t *testing.T) {
+	var provider string
+	var update lifecycle.ProgressUpdate
+	emitDeploymentResult(lifecycle.Item{
+		Provider: "salesforce",
+		Status:   lifecycle.StatusFailed,
+		Detail:   "managed-package install request was rejected",
+	}, func(actualProvider string, actualUpdate lifecycle.ProgressUpdate) {
+		provider, update = actualProvider, actualUpdate
+	})
+
+	if provider != "salesforce" || update.State != lifecycle.ProgressFailed {
+		t.Fatalf("provider=%q update=%#v", provider, update)
+	}
+	if !strings.Contains(update.Message, "configuration failed") || strings.Contains(update.Message, "configuration applied") {
+		t.Fatalf("message = %q", update.Message)
+	}
+}
+
 func TestRunHistorySurvivesRestartAndInterruptedRunIsMarkedFailed(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC) }
 	store := &testRunStore{runs: []persistedRun{{
@@ -219,6 +238,58 @@ func TestSafeDiagnosticExplainsMissingScratchOrg(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(strings.Join(diagnostic.NextSteps, " ")), "cli") {
 		t.Fatalf("diagnostic requires CLI knowledge: %#v", diagnostic.NextSteps)
+	}
+}
+
+func TestSafeDiagnosticExplainsInvalidSalesforceSessionWithoutCallingItExpiredOrg(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "salesforce",
+		Detail:   "Unable to inspect installed Salesforce packages: INVALID_SESSION_ID: Session expired or invalid",
+	})
+	if diagnostic.Code != "SALESFORCE_SESSION_EXPIRED" || !strings.Contains(diagnostic.Summary, "session") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if strings.Contains(strings.ToLower(diagnostic.Summary), "org is expired") {
+		t.Fatalf("session failure was misclassified as an expired org: %#v", diagnostic)
+	}
+}
+
+func TestSafeDiagnosticExplainsExpiredBoxOAuthSession(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "box",
+		Detail:   "Box OAuth session has expired. Return to Connect and reconnect the selected Box account: invalid_grant: Refresh token has expired",
+	})
+	if diagnostic.Provider != "Box" || diagnostic.Code != "BOX_OAUTH_SESSION_EXPIRED" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !strings.Contains(strings.ToLower(diagnostic.Summary), "no longer authorized") || len(diagnostic.NextSteps) != 2 {
+		t.Fatalf("diagnostic was not actionable: %#v", diagnostic)
+	}
+}
+
+func TestSafeDiagnosticExplainsSalesforceMetadataTimeout(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "salesforce",
+		Detail:   `Unable to read Salesforce metadata: Post "https://example.my.salesforce.com/services/Soap/m/67.0": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+	})
+	if diagnostic.Provider != "Salesforce" || diagnostic.Code != "SALESFORCE_METADATA_TIMEOUT" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !strings.Contains(strings.ToLower(diagnostic.Summary), "metadata inventory") || len(diagnostic.NextSteps) != 2 {
+		t.Fatalf("diagnostic was not actionable: %#v", diagnostic)
+	}
+}
+
+func TestSafeDiagnosticExplainsIncompleteSalesforceMetadataResponse(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "salesforce",
+		Detail:   "Unable to read Salesforce metadata: parse Salesforce metadata inventory: XML syntax error on line 1: unexpected EOF",
+	})
+	if diagnostic.Provider != "Salesforce" || diagnostic.Code != "SALESFORCE_METADATA_RESPONSE_INCOMPLETE" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !strings.Contains(strings.ToLower(diagnostic.Summary), "before it was complete") || len(diagnostic.NextSteps) != 2 {
+		t.Fatalf("diagnostic was not actionable: %#v", diagnostic)
 	}
 }
 

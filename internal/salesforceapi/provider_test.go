@@ -37,7 +37,7 @@ func TestInstallPackageUsesToolingRequest(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == path:
 			var input map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&input)
-			if input["SubscriberPackageVersionKey"] != "04tbox" || input["SecurityType"] != "AdminsOnly" {
+			if input["SubscriberPackageVersionKey"] != "04tbox" || input["SecurityType"] != "None" {
 				t.Fatalf("input = %#v", input)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "0Hf123", "success": true})
@@ -54,9 +54,41 @@ func TestInstallPackageUsesToolingRequest(t *testing.T) {
 	})
 	defer server.Close()
 
-	err := (&Client{HTTP: server.Client(), PollInterval: time.Millisecond}).InstallPackage(context.Background(), Credential{InstanceURL: server.URL, AccessToken: "token"}, "04tbox", "")
+	err := (&Client{HTTP: server.Client(), PollInterval: time.Millisecond}).InstallPackage(context.Background(), Credential{InstanceURL: server.URL, AccessToken: "token"}, "04tbox", "AdminsOnly")
 	if err != nil || polls != 2 {
 		t.Fatalf("polls=%d err=%v", polls, err)
+	}
+}
+
+func TestToolingPackageSecurityTypeTranslatesManifestValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		expected  string
+		wantError bool
+	}{
+		{name: "default administrators only", expected: "None"},
+		{name: "CLI administrators only", input: "AdminsOnly", expected: "None"},
+		{name: "CLI all users", input: "AllUsers", expected: "Full"},
+		{name: "Tooling API none", input: "None", expected: "None"},
+		{name: "Tooling API full", input: "Full", expected: "Full"},
+		{name: "Tooling API custom", input: "Custom", expected: "Custom"},
+		{name: "Tooling API push", input: "Push", expected: "Push"},
+		{name: "unknown value", input: "Admins", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := toolingPackageSecurityType(test.input)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("expected an error, got %q", actual)
+				}
+				return
+			}
+			if err != nil || actual != test.expected {
+				t.Fatalf("security type = %q, err=%v; want %q", actual, err, test.expected)
+			}
+		})
 	}
 }
 

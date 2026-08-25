@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "DISPATCH_API_TARGET=http://127.0.0.1:8788 vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",

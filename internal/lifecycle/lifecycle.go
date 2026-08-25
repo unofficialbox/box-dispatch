@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -921,7 +922,7 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 				item.Status, item.Detail = StatusFailed, "Prepare sample content folder: "+createErr.Error()
 				return item
 			}
-			_, remoteSHA, exists, inspectErr := api.fileDigest(ctx, folderID, filepath.Base(file.Source))
+			fileID, remoteSHA, exists, inspectErr := api.fileDigest(ctx, folderID, filepath.Base(file.Source))
 			if inspectErr != nil {
 				item.Status, item.Detail = StatusFailed, "Inspect "+component+": "+inspectErr.Error()
 				return item
@@ -934,27 +935,25 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 			switch {
 			case !exists:
 				report.step("Uploading sample content " + filepath.Base(file.Source))
-				if uploadErr := api.uploadFile(ctx, folderID, source); uploadErr != nil {
-					item.Status, item.Detail = StatusFailed, "Deploy "+component+": "+uploadErr.Error()
+				fileID, inspectErr = api.uploadFile(ctx, folderID, source)
+				if inspectErr != nil {
+					item.Status, item.Detail = StatusFailed, "Deploy "+component+": "+inspectErr.Error()
 					return item
 				}
 			case remoteSHA != "" && remoteSHA != localSHA:
 				// The packaged file differs from the one in Box: replace it with a
 				// new version rather than leaving stale content or failing.
 				report.step("Updating changed sample content " + filepath.Base(file.Source))
-				if uploadErr := api.uploadFileVersion(ctx, folderID, source); uploadErr != nil {
-					item.Status, item.Detail = StatusFailed, "Update "+component+": "+uploadErr.Error()
+				fileID, inspectErr = api.uploadFileVersion(ctx, folderID, source)
+				if inspectErr != nil {
+					item.Status, item.Detail = StatusFailed, "Update "+component+": "+inspectErr.Error()
 					return item
 				}
 			default:
 				report.step("Sample content unchanged " + filepath.Base(file.Source))
 			}
-			fileID, found, fileErr := api.findFile(ctx, folderID, filepath.Base(file.Source))
-			if fileErr != nil || !found {
+			if fileID == "" {
 				item.Status, item.Detail = StatusFailed, "Resolve deployed "+component+" ID"
-				if fileErr != nil {
-					item.Detail += ": " + fileErr.Error()
-				}
 				return item
 			}
 			addResource(&item, component, "file", filepath.Base(file.Source), fileID, "https://app.box.com/file/"+fileID)
@@ -1198,7 +1197,8 @@ func missingSalesforcePackages(required []solution.SalesforcePackageRequirement,
 			if !identityMatches {
 				continue
 			}
-			if requirement.VersionID == "" || candidate.SubscriberPackageVersionID == requirement.VersionID {
+			if requirement.VersionID == "" || candidate.SubscriberPackageVersionID == requirement.VersionID ||
+				salesforcePackageVersionAtLeast(candidate.SubscriberPackageVersionNumber, requirement.VersionNumber) {
 				satisfied = true
 			}
 			break
@@ -1208,6 +1208,48 @@ func missingSalesforcePackages(required []solution.SalesforcePackageRequirement,
 		}
 	}
 	return missing
+}
+
+func salesforcePackageVersionAtLeast(installed, required string) bool {
+	installedParts, installedOK := parseSalesforcePackageVersion(installed)
+	requiredParts, requiredOK := parseSalesforcePackageVersion(required)
+	if !installedOK || !requiredOK {
+		return false
+	}
+	partCount := max(len(installedParts), len(requiredParts))
+	for index := 0; index < partCount; index++ {
+		installedPart, requiredPart := 0, 0
+		if index < len(installedParts) {
+			installedPart = installedParts[index]
+		}
+		if index < len(requiredParts) {
+			requiredPart = requiredParts[index]
+		}
+		if installedPart != requiredPart {
+			return installedPart > requiredPart
+		}
+	}
+	return true
+}
+
+func parseSalesforcePackageVersion(version string) ([]int, bool) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return nil, false
+	}
+	parts := strings.Split(version, ".")
+	parsed := make([]int, len(parts))
+	for index, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return nil, false
+		}
+		parsed[index] = value
+	}
+	return parsed, true
 }
 
 func salesforcePackageComponent(requirement solution.SalesforcePackageRequirement) string {

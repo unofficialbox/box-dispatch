@@ -25,6 +25,20 @@ Use `box-dispatch terminal` when the legacy full-screen terminal interface is sp
 needed. `box-dispatch serve --no-open` serves the complete browser application without opening
 a browser. Use `box-dispatch check --json` for machine-readable connectivity automation.
 
+For frontend refinement without provider dependencies, run the same embedded UI
+against the deterministic in-memory API:
+
+```bash
+box-dispatch mock
+```
+
+To capture a credential-redacted browser/API contract from a live successful
+workflow, add `--record-api`:
+
+```bash
+box-dispatch --record-api .dispatch/recordings/clm-success.jsonl
+```
+
 Use the explicit `check` command when connectivity validation is the intended operation:
 
 ```bash
