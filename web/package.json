@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "DISPATCH_API_TARGET=http://127.0.0.1:8788 vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
@@ -13,8 +14,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@unofficialbox/box-open-elements": "0.9.0",
-    "@unofficialbox/box-open-elements-react": "0.9.0",
+    "@unofficialbox/box-open-elements": "0.12.0",
+    "@unofficialbox/box-open-elements-react": "0.12.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

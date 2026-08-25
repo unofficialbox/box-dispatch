@@ -413,6 +413,21 @@ func safeDiagnostic(action runAction, err error) *runDiagnostic {
 	message := strings.ToLower(detail)
 	code := "PROVIDER_OPERATION_FAILED"
 	switch {
+	case strings.Contains(message, "box oauth session has expired"), strings.Contains(message, "box") && strings.Contains(message, "invalid_grant"):
+		summary = "The selected Box connection is no longer authorized."
+		nextSteps = []string{"Return to Connect and reconnect the selected Box account.", "Run validation again after Dispatch verifies the renewed connection."}
+		code = "BOX_OAUTH_SESSION_EXPIRED"
+		provider = "Box"
+	case strings.Contains(message, "context deadline exceeded"), strings.Contains(message, "client.timeout exceeded"):
+		summary = "Salesforce metadata inventory did not respond before Dispatch's provider timeout."
+		nextSteps = []string{"Retry validation; Dispatch will keep reporting metadata progress while it waits.", "If it continues, reconnect the selected Salesforce org and retry."}
+		code = "SALESFORCE_METADATA_TIMEOUT"
+		provider = "Salesforce"
+	case strings.Contains(message, "parse salesforce metadata inventory") && (strings.Contains(message, "unexpected eof") || strings.Contains(message, ": eof")):
+		summary = "Salesforce ended a metadata inventory response before it was complete."
+		nextSteps = []string{"Retry validation; Dispatch retries one incomplete metadata response automatically.", "If it continues, reconnect the selected Salesforce org and retry."}
+		code = "SALESFORCE_METADATA_RESPONSE_INCOMPLETE"
+		provider = "Salesforce"
 	case strings.Contains(message, "conflict"):
 		summary = "Existing Salesforce source conflicts with the package you are applying."
 		nextSteps = []string{"Resolve the source conflicts in the Salesforce project.", "Run validation again before applying changes."}
@@ -430,6 +445,11 @@ func safeDiagnostic(action runAction, err error) *runDiagnostic {
 			"Run validation again after the replacement connection is verified.",
 		}
 		code = "SALESFORCE_SCRATCH_ORG_UNAVAILABLE"
+		provider = "Salesforce"
+	case strings.Contains(message, "invalid_session_id"), strings.Contains(message, "session expired"), strings.Contains(message, "session invalid"):
+		summary = "The selected Salesforce session is no longer valid."
+		nextSteps = []string{"Return to Connect and reconnect the selected Salesforce org.", "Run validation again after Dispatch confirms the refreshed connection."}
+		code = "SALESFORCE_SESSION_EXPIRED"
 		provider = "Salesforce"
 	case strings.Contains(message, "expired"), strings.Contains(message, "scratch org") && strings.Contains(message, "inactive"):
 		summary = "The selected Salesforce org is expired or inactive."
@@ -515,6 +535,10 @@ func validatePlanRun(ctx context.Context, plan config.SolutionPlan, _ []lifecycl
 			return items, err
 		}
 		items = append(items, item)
+		if item.Status == lifecycle.StatusFailed {
+			emit(provider, lifecycle.ProgressUpdate{Message: providerName(provider) + " validation failed: " + item.Detail, State: lifecycle.ProgressFailed})
+			continue
+		}
 		emit(provider, lifecycle.ProgressUpdate{Message: providerName(provider) + " validation complete", State: lifecycle.ProgressCompleted})
 	}
 	return items, nil
@@ -537,10 +561,18 @@ func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecy
 			return items, err
 		}
 		items[index] = result
-		emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " configuration applied", State: lifecycle.ProgressCompleted})
+		emitDeploymentResult(result, emit)
 	}
 	if _, err := audit.ExportDeployment(plan.PackagePath, before, items, startedAt, time.Now().UTC()); err != nil {
 		return items, fmt.Errorf("record deployment audit: %w", err)
 	}
 	return items, nil
+}
+
+func emitDeploymentResult(item lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) {
+	if item.Status == lifecycle.StatusFailed {
+		emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " configuration failed: " + item.Detail, State: lifecycle.ProgressFailed})
+		return
+	}
+	emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " configuration applied", State: lifecycle.ProgressCompleted})
 }

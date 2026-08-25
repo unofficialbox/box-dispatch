@@ -1,5 +1,6 @@
 import type { RunStep, RunStepStatus } from '@unofficialbox/box-open-elements'
 import type { ComponentProgress, ProviderProgress } from './runTimelineModel'
+import { LiveActivityFeed } from './LiveActivityFeed'
 
 export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
   const steps: RunStep[] = providers.map((provider) => {
@@ -22,7 +23,7 @@ export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
     }
   })
 
-  return <box-run-trace className="dispatch-run-trace" heading="Live provider progress" steps={steps}></box-run-trace>
+  return <><box-run-trace className="dispatch-run-trace" heading="Provider progress" steps={steps}></box-run-trace><LiveActivityFeed providers={providers}/></>
 }
 
 function providerStatus(state: ProviderProgress['state']): RunStepStatus {

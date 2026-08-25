@@ -1,26 +1,38 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-open-go-sdk/auth"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
+	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 	"github.com/unofficialbox/box-open-go-sdk/serialization"
 )
 
 type boxSDK struct {
-	client *boxclient.Client
+	client        *boxclient.Client
+	accessToken   string
+	httpClient    *http.Client
+	uploadBaseURL string
 }
+
+const defaultBoxUploadBaseURL = "https://upload.box.com/api/2.0"
 
 type boxAPI interface {
 	findFolder(context.Context, string, string) (string, bool, error)
@@ -30,9 +42,9 @@ type boxAPI interface {
 	// fileDigest returns a file's id and its Box-side SHA-1 content hash, so the
 	// caller can tell an unchanged file from one that needs a new version.
 	fileDigest(context.Context, string, string) (id, sha1 string, found bool, err error)
-	uploadFile(context.Context, string, string) error
+	uploadFile(context.Context, string, string) (string, error)
 	// uploadFileVersion replaces an existing same-named file with a new version.
-	uploadFileVersion(context.Context, string, string) error
+	uploadFileVersion(context.Context, string, string) (string, error)
 	metadataTemplateKeys(context.Context, []string) (map[string]bool, error)
 	createMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
@@ -68,6 +80,26 @@ func newBoxSDK() (*boxSDK, error) {
 	if err != nil {
 		return nil, err
 	}
+	accessToken, err := connection.AccessToken(context.Background())
+	if err != nil {
+		if boxOAuthSessionExpired(err) {
+			return nil, fmt.Errorf("Box OAuth session has expired. Return to Connect and reconnect the selected Box account: %w", err)
+		}
+		return nil, err
+	}
+	tokenSource, err := boxSDKTokenSource(connection, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	return &boxSDK{
+		client:        boxclient.NewClient(tokenSource),
+		accessToken:   accessToken,
+		httpClient:    &http.Client{Timeout: 2 * time.Minute},
+		uploadBaseURL: defaultBoxUploadBaseURL,
+	}, nil
+}
+
+func boxSDKTokenSource(connection boxconn.AuthConfig, accessToken string) (gantryruntime.TokenSource, error) {
 	switch connection.Method {
 	case boxconn.AuthCCG:
 		subjectID := connection.SubjectID
@@ -81,18 +113,20 @@ func newBoxSDK() (*boxSDK, error) {
 			ccgConfig.EnterpriseID = subjectID
 			ccgConfig.UserID = ""
 		}
-		client := boxclient.NewClient(auth.ClientCredentials(ccgConfig))
-		return &boxSDK{client: client}, nil
+		return auth.ClientCredentials(ccgConfig), nil
 	case boxconn.AuthOAuth2:
-		oauthConfig := auth.OAuthConfig{
-			ClientID:     connection.ClientID,
-			ClientSecret: connection.ClientSecret,
-		}
-		client := boxclient.NewClient(auth.OAuth(oauthConfig, connection.RefreshToken))
-		return &boxSDK{client: client}, nil
+		// AccessToken already exchanged the single-use refresh token and persisted
+		// Box's rotated replacement. Reusing OAuth here would consume that new
+		// refresh token immediately and leave the persisted connection stale.
+		return auth.DeveloperToken(accessToken), nil
 	default:
 		return nil, fmt.Errorf("unsupported Box authentication method %q", connection.Method)
 	}
+}
+
+func boxOAuthSessionExpired(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "invalid_grant") || strings.Contains(message, "refresh token has expired")
 }
 
 func (sdk *boxSDK) findFolder(ctx context.Context, parentID, name string) (string, bool, error) {
@@ -156,56 +190,132 @@ func (sdk *boxSDK) fileDigest(ctx context.Context, folderID, name string) (strin
 	return "", "", false, nil
 }
 
-func (sdk *boxSDK) uploadFile(ctx context.Context, folderID, source string) error {
-	f, err := os.Open(source)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", filepath.Base(source), err)
-	}
-	defer func() { _ = f.Close() }()
-
-	request := &schemas.CreateFileContentRequest{
-		Attributes: schemas.PostFileContentAttributes{
-			Name:   filepath.Base(source),
-			Parent: schemas.AttributesParent{Id: folderID},
+func (sdk *boxSDK) uploadFile(ctx context.Context, folderID, source string) (string, error) {
+	name := filepath.Base(source)
+	files, err := sdk.sendUpload(ctx, "/files/content", source, map[string]any{
+		"name": name,
+		"parent": map[string]string{
+			"id": folderID,
 		},
-		File: f,
-	}
-
-	_, err = sdk.client.Uploads.UploadFile(ctx, request, nil)
+	})
 	if err != nil {
-		return fmt.Errorf("upload %s: %w", filepath.Base(source), err)
+		return "", fmt.Errorf("upload %s: %w", name, err)
 	}
-	return nil
+	return resolveUploadedFileID(ctx, files, name, 10, 250*time.Millisecond, func(ctx context.Context) (string, bool, error) {
+		return sdk.findFile(ctx, folderID, name)
+	})
 }
 
-func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source string) error {
+func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source string) (string, error) {
 	// First find the existing file ID
 	fileID, found, err := sdk.findFile(ctx, folderID, filepath.Base(source))
 	if err != nil {
-		return fmt.Errorf("find existing file: %w", err)
+		return "", fmt.Errorf("find existing file: %w", err)
 	}
 	if !found {
-		return fmt.Errorf("file %s not found in folder %s", filepath.Base(source), folderID)
+		return "", fmt.Errorf("file %s not found in folder %s", filepath.Base(source), folderID)
 	}
 
-	f, err := os.Open(source)
+	name := filepath.Base(source)
+	_, err = sdk.sendUpload(ctx, "/files/"+url.PathEscape(fileID)+"/content", source, map[string]any{"name": name})
 	if err != nil {
-		return fmt.Errorf("open %s: %w", filepath.Base(source), err)
+		return "", fmt.Errorf("upload version of %s: %w", name, err)
 	}
-	defer func() { _ = f.Close() }()
+	return fileID, nil
+}
 
-	request := &schemas.CreateFileIdContentRequest{
-		Attributes: schemas.PostFileIdContentAttributes{
-			Name: filepath.Base(source),
-		},
-		File: f,
-	}
-
-	_, err = sdk.client.Uploads.UploadFileVersion(ctx, fileID, request, nil)
+func (sdk *boxSDK) sendUpload(ctx context.Context, endpoint, source string, attributes any) (*schemas.Files, error) {
+	file, err := os.Open(source)
 	if err != nil {
-		return fmt.Errorf("upload version of %s: %w", filepath.Base(source), err)
+		return nil, fmt.Errorf("open %s: %w", filepath.Base(source), err)
 	}
-	return nil
+	defer func() { _ = file.Close() }()
+	attributeJSON, err := json.Marshal(attributes)
+	if err != nil {
+		return nil, fmt.Errorf("encode upload attributes: %w", err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	attributePart, err := writer.CreateFormField("attributes")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := attributePart.Write(attributeJSON); err != nil {
+		return nil, err
+	}
+	filePart, err := writer.CreateFormFile("file", filepath.Base(source))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(filePart, file); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(sdk.uploadBaseURL, "/")+endpoint, &body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+sdk.accessToken)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	httpClient := sdk.httpClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("Box upload returned %s: %s", response.Status, strings.TrimSpace(string(responseBody)))
+	}
+	var files schemas.Files
+	if err := json.Unmarshal(responseBody, &files); err != nil {
+		return nil, fmt.Errorf("decode Box upload response: %w", err)
+	}
+	return &files, nil
+}
+
+func uploadedFileID(files *schemas.Files, name string) (string, error) {
+	if files == nil || len(files.Entries) == 0 || strings.TrimSpace(files.Entries[0].Id) == "" {
+		return "", fmt.Errorf("Box upload response for %s did not include a file ID", name)
+	}
+	return files.Entries[0].Id, nil
+}
+
+func resolveUploadedFileID(ctx context.Context, files *schemas.Files, name string, attempts int, delay time.Duration, lookup func(context.Context) (string, bool, error)) (string, error) {
+	fileID, responseErr := uploadedFileID(files, name)
+	if responseErr == nil {
+		return fileID, nil
+	}
+	var lookupErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 && delay > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		fileID, found, err := lookup(ctx)
+		if err != nil {
+			lookupErr = err
+			continue
+		}
+		if found && strings.TrimSpace(fileID) != "" {
+			return fileID, nil
+		}
+	}
+	if lookupErr != nil {
+		return "", fmt.Errorf("%w; follow-up lookup failed: %v", responseErr, lookupErr)
+	}
+	return "", fmt.Errorf("%w; follow-up lookup did not find the uploaded file", responseErr)
 }
 
 func (sdk *boxSDK) metadataTemplateKeys(ctx context.Context, _ []string) (map[string]bool, error) {

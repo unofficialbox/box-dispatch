@@ -23,7 +23,7 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.6.0.
+The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.12.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -43,6 +43,7 @@ substitutes where the published contract matched the approved workflow.
 | Components | `box-switch` | Provider and component enablement. |
 | Components | `box-badge` | Live and verified state labels. |
 | Components | `box-progress-bar` | Connection and run progress. |
+| Components | `box-spinner` | The currently active item in the live activity feed. |
 | Components | `box-metric-card` | Overview summary metrics and readiness state. |
 | Components | `box-table` | Overview deployment history with rich cell content and empty state. |
 | Components | `box-drawer` | Connection editing and run diagnostics, including large sizing, busy state, sticky footer actions, focus management, Escape/backdrop dismissal, and controlled open state. |
@@ -50,9 +51,11 @@ substitutes where the published contract matched the approved workflow.
 | Components | `box-split-view` | Connect and Configure master-detail page structure. |
 | Patterns | `box-run-trace` | Live provider and component validation/deployment activity. |
 
-React 19 sets custom-element properties directly. Dispatch currently keeps a small
-local JSX declaration file and listens to typed custom events at the application
-boundary; an official React wrapper is not required.
+The published React adapter currently provides wrappers for `box-button`,
+`box-text-field`, `box-select`, and `box-dialog`, where typed property and event
+bridging is useful. Components without an adapter wrapper remain supported native
+custom elements in React 19; Dispatch keeps a narrow JSX declaration boundary for
+those elements.
 
 ## Available components that are not gaps
 
@@ -66,6 +69,7 @@ boundary; an official React wrapper is not required.
 | Components | `box-split-view` | Controlled ratio, optional resizing, and `ratio-changed` are present. | Adopted as the Connect and Configure layout primitive. Selection and detail behavior remain application composition. |
 | Components | `box-nav-sidebar` | Structured navigation items, collapsible behavior, slots, and badges are present. | Keep the compact Dispatch rail for now because the approved interaction uses route links, icon-only geometry, and application-owned active state. Track a compact-link recipe rather than forking the component. |
 | Components | `box-stage-path` | Read-only horizontal lifecycle steps are published. | Do not use for editable wizard navigation because it does not expose eligibility-gated step activation. |
+| Components | `box-progress-ring` | A minimum 48px ring that includes a percentage and label. | Use only when showing aggregate progress. It is intentionally not used as a per-row activity marker because repeated 0%-100% rings make the live log harder to scan. |
 
 ## Composition recipes needed
 
@@ -83,7 +87,10 @@ state to a low-level element.
 | --- | --- | --- | --- | --- |
 | P1 | Foundations | TypeScript custom-element declarations | JSX tag maps and typed event maps for React and TypeScript consumers. | Maintain the narrow local `boe.d.ts` boundary and native event listeners. Remove redundant declarations after adoption. |
 | P1 | Components | `box-drawer` action integration | Preserve directly actionable footer and body controls when the drawer portals its content outside a framework's delegated event root. A typed `action` event or documented imperative action bridge would make React integrations reliable. | Keep the drawer, fields, and selects from Box Open Elements, with a narrow native-button listener only for drawer actions. Remove it when the published drawer/button contract supports portaled framework actions. |
+| P2 | Components | `box-drawer` close affordance control | A `closable` property or equivalent slot/configuration to opt out of the built-in header Close control when a workflow presents one explicit footer Close action. | Use the published drawer and its footer slot; hide only the duplicate header part on connection drawers until a public configuration is available. |
 | P1 | Patterns | Horizontal workflow navigation | A clickable horizontal wizard that combines eligibility gating with complete, current, pending, blocked, and failed states. | Keep the small local workflow header; neither the vertical `box-progress-steps` nor read-only `box-stage-path` matches the approved workflow. |
+| P2 | Patterns | `box-run-trace` live-tail behavior | An opt-in auto-follow mode for continuously appended run events, with a bounded scroll region and an accessible way to inspect older activity. | Keep the small Dispatch scroll container around the BOE run trace/activity composition; it always follows the newest event while retaining the most recent 100 rows. |
+| P2 | Foundations | `box-run-trace` marker geometry tokens | The pattern's connector position is coupled to its internal step padding. Public marker/connector inset tokens, or an invariant that part-level step padding preserves alignment, would let consuming products tune density without breaking the trace geometry. | Do not override the `step` part. Dispatch relies on the published internal geometry so marker centres and connectors remain aligned. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
 Accessibility corrections for `box-dropdown`, `box-selectable-card`, and
@@ -112,12 +119,16 @@ Dispatch migrated its provider/component progress adapter to `box-run-trace` and
 removed the custom timeline DOM and styling. The application still owns the mapping
 from Dispatch server events to the reusable run-step data model.
 
-## Declined proposal
+## React adapter boundary
 
-An official React wrapper is not planned. The supported direction is React 19's
-native custom-element property handling plus generated TypeScript tag and event maps.
-Dispatch may keep a tiny local helper for event subscription, but must not build a
-parallel wrapper library.
+**Category:** Components
+
+Dispatch should use `@unofficialbox/box-open-elements-react` for the published
+adapter surface when a component needs property synchronization or direct event
+binding. It must not create its own wrappers for components that the adapter does
+not yet expose. Native custom elements are the supported React integration for
+those remaining components, including `box-spinner`, `box-badge`,
+`box-progress-bar`, and `box-run-trace`.
 
 ## Dispatch adoption sequence
 

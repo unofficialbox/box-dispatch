@@ -9,6 +9,12 @@ declare module 'react' {
         disabled?: boolean
         isLoading?: boolean
       }
+      'box-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        icon?: string
+        label?: string
+        tone?: 'primary' | 'secondary' | 'danger'
+        disabled?: boolean
+      }
       'box-card': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         eyebrow?: string
         heading?: string
@@ -51,6 +57,10 @@ declare module 'react' {
         label?: string
         max?: number
         value?: number
+      }
+      'box-spinner': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        label?: string
+        size?: 'small' | 'medium' | 'large'
       }
       'box-drawer': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         heading?: string
@@ -95,6 +105,16 @@ declare module 'react' {
         label?: string
         ratio?: number
         resizable?: boolean
+      }
+      'box-toast': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        message?: string
+        heading?: string
+        open?: boolean
+        tone?: string
+        duration?: number
+        mode?: 'dismissible' | 'sticky'
+        borderless?: boolean
+        popover?: 'auto' | 'manual' | 'hint'
       }
     }
   }

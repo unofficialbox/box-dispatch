@@ -74,6 +74,7 @@ func newRootCommand() *cobra.Command {
 		makePresentCommand(),
 		makeSmokeCommand(),
 		makePublishCheckCommand(),
+		makeMockCommand(),
 		makeServeCommand(),
 		makeTerminalCommand(),
 	}

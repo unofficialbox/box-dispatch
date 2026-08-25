@@ -68,13 +68,13 @@ func (c *Client) InstallPackage(ctx context.Context, credential Credential, vers
 	if versionID == "" {
 		return fmt.Errorf("Salesforce package version ID is required")
 	}
-	version, err := c.latestAPIVersion(ctx, credential)
+	securityType, err := toolingPackageSecurityType(securityType)
 	if err != nil {
 		return err
 	}
-	securityType = strings.TrimSpace(securityType)
-	if securityType == "" {
-		securityType = "AdminsOnly"
+	version, err := c.latestAPIVersion(ctx, credential)
+	if err != nil {
+		return err
 	}
 	var created struct {
 		ID      string   `json:"id"`
@@ -116,6 +116,23 @@ func (c *Client) InstallPackage(ctx context.Context, credential Credential, vers
 			}
 			return fmt.Errorf("Salesforce managed-package install failed: %s", firstNonEmpty(strings.Join(messages, "; "), "unknown Salesforce error"))
 		}
+	}
+}
+
+// toolingPackageSecurityType translates the public CLI-style values used by
+// dispatch.bcl into PackageInstallRequest's restricted Tooling API picklist.
+func toolingPackageSecurityType(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "adminsonly", "none":
+		return "None", nil
+	case "allusers", "full":
+		return "Full", nil
+	case "custom":
+		return "Custom", nil
+	case "push":
+		return "Push", nil
+	default:
+		return "", fmt.Errorf("unsupported Salesforce package security type %q", value)
 	}
 }
 

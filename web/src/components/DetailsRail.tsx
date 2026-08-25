@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 
-export function DetailsRail({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+export function DetailsRail({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return <aside className="details-rail" aria-live="polite">
     <box-card>
       <section>
         <h2>{title}</h2>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
         <div className="details-rail-content">{children}</div>
       </section>
     </box-card>
