@@ -1,16 +1,11 @@
 package lifecycle
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +21,8 @@ import (
 )
 
 type boxSDK struct {
-	client        *boxclient.Client
-	accessToken   string
-	httpClient    *http.Client
-	uploadBaseURL string
+	client *boxclient.Client
 }
-
-const defaultBoxUploadBaseURL = "https://upload.box.com/api/2.0"
 
 type boxAPI interface {
 	findFolder(context.Context, string, string) (string, bool, error)
@@ -91,12 +81,7 @@ func newBoxSDK() (*boxSDK, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &boxSDK{
-		client:        boxclient.NewClient(tokenSource),
-		accessToken:   accessToken,
-		httpClient:    &http.Client{Timeout: 2 * time.Minute},
-		uploadBaseURL: defaultBoxUploadBaseURL,
-	}, nil
+	return &boxSDK{client: boxclient.NewClient(tokenSource)}, nil
 }
 
 func boxSDKTokenSource(connection boxconn.AuthConfig, accessToken string) (gantryruntime.TokenSource, error) {
@@ -192,12 +177,18 @@ func (sdk *boxSDK) fileDigest(ctx context.Context, folderID, name string) (strin
 
 func (sdk *boxSDK) uploadFile(ctx context.Context, folderID, source string) (string, error) {
 	name := filepath.Base(source)
-	files, err := sdk.sendUpload(ctx, "/files/content", source, map[string]any{
-		"name": name,
-		"parent": map[string]string{
-			"id": folderID,
+	file, err := os.Open(source)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	files, err := sdk.client.Uploads.UploadFile(ctx, &schemas.CreateFileContentRequest{
+		Attributes: schemas.PostFileContentAttributes{
+			Name:   name,
+			Parent: schemas.AttributesParent{Id: folderID},
 		},
-	})
+		File: file,
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("upload %s: %w", name, err)
 	}
@@ -217,69 +208,19 @@ func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source strin
 	}
 
 	name := filepath.Base(source)
-	_, err = sdk.sendUpload(ctx, "/files/"+url.PathEscape(fileID)+"/content", source, map[string]any{"name": name})
+	file, err := os.Open(source)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	_, err = sdk.client.Uploads.UploadFileVersion(ctx, fileID, &schemas.CreateFileIdContentRequest{
+		Attributes: schemas.PostFileIdContentAttributes{Name: name},
+		File:       file,
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("upload version of %s: %w", name, err)
 	}
 	return fileID, nil
-}
-
-func (sdk *boxSDK) sendUpload(ctx context.Context, endpoint, source string, attributes any) (*schemas.Files, error) {
-	file, err := os.Open(source)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", filepath.Base(source), err)
-	}
-	defer func() { _ = file.Close() }()
-	attributeJSON, err := json.Marshal(attributes)
-	if err != nil {
-		return nil, fmt.Errorf("encode upload attributes: %w", err)
-	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	attributePart, err := writer.CreateFormField("attributes")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := attributePart.Write(attributeJSON); err != nil {
-		return nil, err
-	}
-	filePart, err := writer.CreateFormFile("file", filepath.Base(source))
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(filePart, file); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(sdk.uploadBaseURL, "/")+endpoint, &body)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+sdk.accessToken)
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	httpClient := sdk.httpClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	response, err := httpClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = response.Body.Close() }()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("Box upload returned %s: %s", response.Status, strings.TrimSpace(string(responseBody)))
-	}
-	var files schemas.Files
-	if err := json.Unmarshal(responseBody, &files); err != nil {
-		return nil, fmt.Errorf("decode Box upload response: %w", err)
-	}
-	return &files, nil
 }
 
 func uploadedFileID(files *schemas.Files, name string) (string, error) {

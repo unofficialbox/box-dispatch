@@ -5,13 +5,10 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
 
 // TestMain isolates the runtime config directory so ambient machine config does
-// not leak into shell construction. Tests that need a specific runtime config
+// not leak into command construction. Tests that need a specific runtime config
 // seed their own via t.Setenv("XDG_CONFIG_HOME", ...), which overrides this for
 // the duration of that test.
 func TestMain(m *testing.M) {
@@ -41,13 +38,13 @@ func TestRootHelpGroupsCommonAndAdvancedCommands(t *testing.T) {
 		t.Fatalf("root help omitted ordered command groups:\n%s", help)
 	}
 	common := help[commonStart:advancedStart]
-	for _, command := range []string{"check", "deploy", "reset", "status"} {
+	for _, command := range []string{"check", "deploy", "status"} {
 		commandRow := "\n  " + command + " "
 		if !strings.Contains(common, commandRow) {
 			t.Errorf("common help omitted %q:\n%s", command, common)
 		}
 	}
-	for _, command := range []string{"init", "resolve", "validate", "present", "serve", "terminal"} {
+	for _, command := range []string{"init", "resolve", "validate", "present", "serve"} {
 		commandRow := "\n  " + command + " "
 		if strings.Contains(common, commandRow) {
 			t.Errorf("advanced command %q leaked into common help:\n%s", command, common)
@@ -58,33 +55,16 @@ func TestRootHelpGroupsCommonAndAdvancedCommands(t *testing.T) {
 	}
 }
 
-func TestRootHelpExposesNoColorFlag(t *testing.T) {
+func TestRootOmitsInteractiveTerminalCommandsAndFlags(t *testing.T) {
 	root := newRootCommand()
-	if flag := root.PersistentFlags().Lookup("no-color"); flag == nil || !strings.Contains(flag.Usage, "ANSI color") {
-		t.Fatalf("--no-color flag = %#v", flag)
+	for _, command := range []string{"terminal", "reset"} {
+		found, _, err := root.Find([]string{command})
+		if err == nil && found.Name() == command {
+			t.Fatalf("interactive command %q is still registered", command)
+		}
 	}
-}
-
-func TestTerminalPresentationHonorsNoColorAndDumbTerminal(t *testing.T) {
-	original := lipgloss.ColorProfile()
-	t.Cleanup(func() { lipgloss.SetColorProfile(original) })
-
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Setenv("NO_COLOR", "1")
-	configureTerminalPresentation(false)
-	if got := lipgloss.ColorProfile(); got != termenv.Ascii {
-		t.Fatalf("NO_COLOR profile = %v, want Ascii", got)
-	}
-
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	configureTerminalPresentation(true)
-	if got := lipgloss.ColorProfile(); got != termenv.Ascii {
-		t.Fatalf("explicit --no-color profile = %v, want Ascii", got)
-	}
-
-	t.Setenv("TERM", "dumb")
-	if terminalSupportsFullScreen() {
-		t.Fatal("TERM=dumb should disable the full-screen shell")
+	if flag := root.PersistentFlags().Lookup("no-color"); flag != nil {
+		t.Fatalf("terminal-only --no-color flag is still registered: %#v", flag)
 	}
 }
 

@@ -1,7 +1,7 @@
 # Dispatch web application
 
-Dispatch currently joins its Bubble Tea user interface and Go execution logic in one
-process. The web application must not recreate that provider logic in the browser.
+Dispatch joins its embedded React interface and Go execution logic in one process.
+The web application must not recreate provider logic in the browser.
 
 The target is a local-first browser application. React owns presentation and temporary
 form state; Go remains the sole authority for credentials, provider requests, package
@@ -125,5 +125,5 @@ never cross the browser boundary.
 2. Secret storage: move owner-only BCL credential values into the operating
    system keychain without changing the browser contract.
 
-The old terminal shell can remain as an operator fallback during this migration. Both
-surfaces must call the same Go services and share the same BCL contracts.
+The browser is the sole interactive surface. Plain commands call the same Go services and
+share the same BCL contracts without prompts, animated output, or terminal presentation state.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -14,6 +15,19 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/webapi"
 	"github.com/unofficialbox/box-dispatch/internal/webui"
 )
+
+func browserOpenCommand(goos, target string) *exec.Cmd {
+	switch goos {
+	case "darwin":
+		return exec.Command("open", target)
+	case "linux":
+		return exec.Command("xdg-open", target)
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		return nil
+	}
+}
 
 func makeServeCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -28,16 +42,6 @@ func makeServeCommand() *cobra.Command {
 	}
 	addWebApplicationFlags(cmd)
 	return cmd
-}
-
-func makeTerminalCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "terminal",
-		Short: "Open the legacy full-screen terminal interface",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runLaunchShell()
-		},
-	}
 }
 
 func makeMockCommand() *cobra.Command {

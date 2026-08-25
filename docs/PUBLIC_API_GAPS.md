@@ -19,29 +19,6 @@ covering the complete lifecycle needed by an automated environment. A private
 web endpoint, reverse-engineered browser call, or UI script is not an acceptable
 substitute.
 
-## BCL visibility configuration
-
-The launch shell writes project-local display preferences to
-`.dispatch/ui-settings.bcl`. `metadata.boxComponentVisibility` maps capability
-IDs to booleans:
-
-```json
-"boxComponentVisibility": {
-  "folder_structure": true,
-  "box_form": false,
-  "box_app": false,
-  "https_connector": false,
-  "automate_workflow": false
-}
-```
-
-Supported capabilities default to `true`. Unsupported and partial-API
-capabilities default to `false`. Changing an unsupported entry to `true` shows a
-gold, locked reference row on **Configure Box components**; it does not enable
-selection, packaging, validation, deployment, or reset. See
-[`config/runtime/ui-settings.example.bcl`](../config/runtime/ui-settings.example.bcl)
-for the complete example.
-
 ## Partial public APIs
 
 | Capability | Available publicly | Missing operation | Current behavior |
