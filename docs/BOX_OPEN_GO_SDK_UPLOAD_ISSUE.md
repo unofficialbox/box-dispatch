@@ -1,89 +1,33 @@
-# Generated upload methods omit the file stream from multipart requests
+# Multipart upload SDK issue resolved
 
-## Summary
+## Status
 
-In `github.com/unofficialbox/box-open-go-sdk@v0.4.1`, both generated upload
-methods build a multipart request with a `nil` file reader. The request contains
-an `attributes` part but no `file` part, even when the caller populates
-`CreateFileContentRequest.File` or `CreateFileIdContentRequest.File`.
+Resolved in `github.com/unofficialbox/box-open-go-sdk@v0.4.3`.
 
-The same methods marshal the entire request wrapper for the `attributes` part,
-producing `{"attributes": {...}}`; Box expects the value of `body.Attributes`
-directly.
-
-Affected generated methods:
+Dispatch now uses the generated SDK methods directly:
 
 - `managers.(*UploadsManager).UploadFile`
 - `managers.(*UploadsManager).UploadFileVersion`
 
-## Current generated code
+The temporary Dispatch-owned multipart HTTP transport has been removed.
 
-```go
-attributes, err := json.Marshal(body)
-if err != nil {
-    return nil, err
-}
-req = gantryruntime.WithMultipartBody(req, attributes, "file", nil)
-```
+## Original defect
 
-`body.File` is never passed to `WithMultipartBody`.
+In v0.4.1, both generated upload methods omitted the supplied file reader from
+the multipart request and serialized the request wrapper instead of
+`body.Attributes`. The outgoing request therefore lacked a usable `file` part
+and used the wrong JSON shape for `attributes`.
 
-## Reproduction
+## v0.4.3 behavior
 
-```go
-source, _ := os.Open("example.txt")
-defer source.Close()
+The generated methods now:
 
-result, err := client.Uploads.UploadFile(ctx, &schemas.CreateFileContentRequest{
-    Attributes: schemas.PostFileContentAttributes{
-        Name: "example.txt",
-        Parent: schemas.AttributesParent{Id: "12345"},
-    },
-    File: source,
-}, nil)
-```
+1. serialize `body.Attributes` as the `attributes` form part;
+2. pass `body.File` as the `file` form part;
+3. preserve the normal generated-client authentication, retry, and response
+   handling path.
 
-Inspecting the outgoing multipart body shows:
-
-- an `attributes` part containing a nested `attributes` object;
-- no `file` form part;
-- the supplied file bytes are never read.
-
-In a live Dispatch deployment, the request returned without a transport error,
-but the decoded `Files` response contained no entry ID and the file did not
-appear in the target folder.
-
-## Expected behavior
-
-The multipart request should contain:
-
-1. an `attributes` part whose JSON value is `body.Attributes`;
-2. a `file` part whose reader is `body.File` and whose filename is the
-   requested file name.
-
-## Suggested generated output
-
-For `UploadFile`:
-
-```go
-attributes, err := json.Marshal(body.Attributes)
-if err != nil {
-    return nil, err
-}
-req = gantryruntime.WithMultipartBody(req, attributes, body.Attributes.Name, body.File)
-```
-
-Use the equivalent change for `UploadFileVersion`.
-
-## Regression test
-
-Point the generated client at an `httptest.Server`, call both upload methods,
-parse the multipart request, and assert:
-
-- `FormValue("attributes")` decodes directly to the expected Box attributes;
-- `FormFile("file")` exists;
-- reading the file part returns the exact source bytes.
-
-Because the file is already represented as `io.Reader` and tagged `json:"-"`,
-the generator should treat multipart request schemas specially rather than
-marshalling the whole request wrapper.
+Dispatch regression coverage points the generated client at an HTTP test
+server, invokes its production upload adapter, parses the multipart request,
+and verifies the authorization header, attributes, multipart filename, file
+bytes, and returned file ID.

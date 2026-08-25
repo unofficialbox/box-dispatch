@@ -1,9 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Removed the legacy full-screen terminal workflow and all Charmbracelet dependencies.
+- Connectivity and deployment subcommands now use flags with plain text or JSON output only.
+- Moved all interactive configuration, validation, deployment, and destructive confirmation to the web workspace.
+- Upgraded `box-open-go-sdk` to v0.4.3 and returned multipart uploads to the generated SDK methods.
+
 ## 0.1.0
 
 - Added Go CLI bootstrap and command scaffolding for `box-dispatch`.
-- Added interactive dependency + connectivity check with Charm Bracelet Bubble Tea.
+- Added the original interactive dependency and connectivity check (removed in Unreleased).
 - Added per-provider check flow for:
   - Box (`BOX_ACCESS_TOKEN`)
   - Salesforce (Salesforce CLI + org display check)

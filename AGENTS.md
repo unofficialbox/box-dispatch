@@ -6,15 +6,15 @@ Guidance for AI coding agents (Codex, Cursor, Claude Code, and any tool that rea
 
 ## What this project is
 
-`box-dispatch` is a Go application whose default interactive mode serves and opens the React
+`box-dispatch` is a Go application whose default mode serves and opens the React
 browser workspace while the same process owns the loopback Go API. The browser experience
 packages and deploys Box + partner solution stacks. Module
 `github.com/unofficialbox/box-dispatch`, `go 1.26`.
 
 Run with **no subcommand** → the complete browser application. The executable serves the
-embedded interface and local API together, then opens the browser. Use `box-dispatch check`
-for connectivity reports. The previous full-screen Bubble Tea interface remains available
-through `box-dispatch terminal`.
+embedded interface and local API together, then opens the browser. Subcommands are plain,
+non-interactive commands with flags and optional JSON output. Do not add terminal prompts,
+full-screen interfaces, ANSI presentation frameworks, or alternate CLI UX.
 
 ## Verification gate — run before every commit/push/merge
 
@@ -46,7 +46,7 @@ Rules:
 go build -o box-dispatch ./cmd/box-dispatch   # binary is gitignored (/box-dispatch)
 ./box-dispatch                                # web UI + local API; opens the browser
 go run ./cmd/box-dispatch                     # same, without building
-./box-dispatch terminal                       # legacy full-screen terminal interface
+./box-dispatch check --offline --json         # plain machine-readable command
 ```
 
 ### Launch behavior (important for agents)
@@ -55,10 +55,9 @@ go run ./cmd/box-dispatch                     # same, without building
 is supplied. Consequences:
 
 - `go run ./cmd/box-dispatch --no-open` starts the embedded UI and local API without opening a browser.
-- Run `./box-dispatch terminal` to exercise the legacy alt-screen TUI.
 - Machine-readable connectivity check: `go run ./cmd/box-dispatch check --json`
   (add `--offline` to skip live provider calls).
-- Shell tests: `go test ./cmd/box-dispatch/...` (`shell_test.go`).
+- Command tests: `go test ./cmd/box-dispatch/...`.
 
 ## Runtime configuration
 
@@ -71,19 +70,19 @@ The checker looks for: a Box CCG app saved by Dispatch, or Box `BOX_CLIENT_ID`,
 
 ## Repository map
 
-- `cmd/box-dispatch/main.go` — cobra root; default browser launch; `runLaunchShell()` (alt-screen).
-- `cmd/box-dispatch/shell.go` — the shell model: screen enum, `Update`/`View`, welcome menu,
-  package/deploy/history flows. `newDispatchShell()` ~L426; `View()` ~L2053.
+- `cmd/box-dispatch/main.go` — Cobra root, plain subcommands, and default browser launch.
+- `cmd/box-dispatch/serve.go` — embedded web/API server, mock server, and browser opening.
 - `internal/workspace/package.go` — template clone + component pruning. The clone runs
   **non-interactively** (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`, `Stdin=nil`) so a
-  credential challenge fails fast instead of hanging invisibly inside the shell. Keep it so.
+  credential challenge fails fast instead of hanging invisibly inside a process. Keep it so.
 - `internal/lifecycle/` — deploy engine + public Box/Salesforce backends.
 - `internal/audit/deployment.go` — deployment audit records (`ListDeployments`).
 - `internal/bcl/`, `internal/engine/` — BCL is the single import/export artifact contract
   (`BCL_ARTIFACT_CONTRACT.md`).
 - `internal/solution/` — typed BCL solution/deployment configuration, bundled manifests,
   and BCL-only package configuration validation.
-- `internal/{checker,config,boxconn,providers,shellstate,model}` — supporting packages.
+- `internal/{checker,config,boxconn,providers,shellstate,model}` — supporting packages. Despite
+  its historical name, `shellstate` now stores web-owned connections and deployment plans only.
 
 ## Conventions
 
@@ -93,11 +92,6 @@ The checker looks for: a Box CCG app saved by Dispatch, or Box `BOX_CLIENT_ID`,
 - Delete/teardown work, when added, must operate **by recorded resource ID only** (never
   name-matching) and must refuse Box folder ID `"0"`. See the plan referenced in the current
   `HANDOFF_*.md`.
-- Regenerating the README hero image (`docs/landing.png`) has a specific pipeline (force
-  truecolor → ANSI → HTML → headless-Chrome screenshot, because `freeze`/resvg can't render
-  color emoji). Claude Code users: see the `landing-screenshot` skill. Others: see
-  `.claude/skills/landing-screenshot/SKILL.md` and its bundled `ansi2html.py`.
-
 ## Handoffs
 
 The latest `HANDOFF_*.md` at the repo root carries current branch state, recent fixes, and

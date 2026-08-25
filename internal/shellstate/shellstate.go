@@ -1,6 +1,6 @@
-// Package shellstate persists the launch shell's local state (connection
-// settings and the saved solution plan) as BCL, the single interchange format
-// for box-dispatch. It lives outside internal/config because the BCL writer
+// Package shellstate persists local web application state (connection settings
+// and the saved solution plan) as BCL, the single interchange format for
+// box-dispatch. It lives outside internal/config because the BCL writer
 // imports internal/config, so config cannot depend on bcl in return.
 package shellstate
 
@@ -20,7 +20,6 @@ const (
 	stateDirName          = ".dispatch"
 	connectionSettingsBCL = "connection-settings.bcl"
 	solutionPlanBCL       = "solution-plan.bcl"
-	uiSettingsBCL         = "ui-settings.bcl"
 	// Legacy JSON files (under the old .windlass state dir) read once for
 	// forward migration to BCL.
 	legacyStateDirName     = ".windlass"
@@ -30,7 +29,6 @@ const (
 	stateProvider         = "box-dispatch"
 	connectionSettingsCtx = "connection-settings"
 	solutionPlanContext   = "solution-plan"
-	uiSettingsContext     = "ui-settings"
 )
 
 func stateDir() string { return filepath.Join(config.Paths().Root, stateDirName) }
@@ -73,25 +71,6 @@ func LoadSolutionPlan() (config.SolutionPlan, error) {
 func SaveSolutionPlan(plan config.SolutionPlan) error {
 	if err := writeState(statePath(solutionPlanBCL), solutionPlanContext, plan); err != nil {
 		return fmt.Errorf("write solution plan: %w", err)
-	}
-	return nil
-}
-
-// LoadUISettings reads local presentation preferences from BCL. A missing file
-// returns an empty value; the shell fills capability-aware defaults and writes
-// them back so the configuration is explicit and editable.
-func LoadUISettings() (config.UISettings, error) {
-	var settings config.UISettings
-	if err := readState(statePath(uiSettingsBCL), "", &settings); err != nil {
-		return settings, fmt.Errorf("read UI settings: %w", err)
-	}
-	return settings, nil
-}
-
-// SaveUISettings writes local presentation preferences as BCL.
-func SaveUISettings(settings config.UISettings) error {
-	if err := writeState(statePath(uiSettingsBCL), uiSettingsContext, settings); err != nil {
-		return fmt.Errorf("write UI settings: %w", err)
 	}
 	return nil
 }
