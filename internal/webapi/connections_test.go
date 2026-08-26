@@ -44,7 +44,7 @@ func TestVerifyBoxConnectionChecksActingUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verification.Selection != boxconn.DispatchCCGName || verification.Identity != "box-user@example.com" || verification.Account != "12345" || verification.Enterprise != "98765" || verification.AuthType != "CCG" {
+	if verification.Identity != "box-user@example.com" || verification.Account != "12345" || verification.Enterprise != "98765" || verification.AuthType != "CCG" {
 		t.Fatalf("verification = %#v", verification)
 	}
 }

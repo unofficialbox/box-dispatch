@@ -153,6 +153,15 @@ func readSourceDescriptors(project string) (map[string]sourceDescriptor, string,
 			}
 			return nil
 		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if descriptor, ok := digitalExperienceContentDescriptor(path, relative); ok {
+			result[descriptor.Type+":"+descriptor.Member] = descriptor
+			return nil
+		}
 		if !strings.HasSuffix(entry.Name(), "-meta.xml") {
 			return nil
 		}
@@ -160,15 +169,16 @@ func readSourceDescriptors(project string) (map[string]sourceDescriptor, string,
 		if err != nil {
 			return err
 		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		relative = filepath.ToSlash(relative)
 		descriptor := sourceDescriptor{Type: metadataType, Path: path, Relative: relative}
 		parts := strings.Split(relative, "/")
 		base := strings.TrimSuffix(entry.Name(), "-meta.xml")
 		base = strings.TrimSuffix(base, filepath.Ext(base))
+		if parts[0] == "settings" && strings.HasSuffix(metadataType, "Settings") {
+			descriptor.Type = "Settings"
+			descriptor.Member = strings.TrimSuffix(metadataType, "Settings")
+			result[descriptor.Type+":"+descriptor.Member] = descriptor
+			return nil
+		}
 		switch metadataType {
 		case "CustomObject":
 			if len(parts) < 2 {
@@ -188,7 +198,9 @@ func readSourceDescriptors(project string) (map[string]sourceDescriptor, string,
 			descriptor.ObjectName, descriptor.ChildTag = parts[1], "listViews"
 			descriptor.Member = parts[1] + "." + base
 		default:
-			if metadataBundleRoot(relative) != "" {
+			if parts[0] == "digitalExperiences" && len(parts) >= 3 {
+				descriptor.Member = strings.Join(parts[1:3], "/")
+			} else if metadataBundleRoot(relative) != "" {
 				descriptor.Member = parts[1]
 			} else {
 				descriptor.Member = base
@@ -201,6 +213,15 @@ func readSourceDescriptors(project string) (map[string]sourceDescriptor, string,
 		return nil, "", fmt.Errorf("inventory Salesforce source: %w", err)
 	}
 	return result, version, nil
+}
+
+func digitalExperienceContentDescriptor(path, relative string) (sourceDescriptor, bool) {
+	parts := strings.Split(relative, "/")
+	if len(parts) < 6 || parts[0] != "digitalExperiences" || parts[1] != "site" || parts[len(parts)-1] != "_meta.json" {
+		return sourceDescriptor{}, false
+	}
+	member := strings.Join(parts[1:3], "/") + "." + strings.Join(parts[3:len(parts)-1], "/")
+	return sourceDescriptor{Type: "DigitalExperience", Member: member, Path: path, Relative: relative}, true
 }
 
 func sourceDefaultRoot(project string) string {
@@ -233,6 +254,11 @@ func metadataBundleRoot(relative string) string {
 	switch parts[0] {
 	case "aura", "lwc", "uiBundles", "experienceBundles":
 		return strings.Join(parts[:2], "/")
+	case "digitalExperiences":
+		if len(parts) >= 4 && parts[1] == "site" {
+			return strings.Join(parts[:3], "/")
+		}
+		return ""
 	default:
 		return ""
 	}

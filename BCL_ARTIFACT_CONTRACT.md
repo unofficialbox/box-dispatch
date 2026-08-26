@@ -33,8 +33,6 @@ New solution packages use:
 - `.dispatch/deployment.bcl`
   - `context = "deployment-settings"`
   - `metadata.settings` contains naming, rollback, strategy, and component selection
-- `.dispatch/ui-settings.bcl`
-  - `context = "ui-settings"`
   - `metadata.boxComponentVisibility` controls presentation only and cannot grant deployment
     support
 

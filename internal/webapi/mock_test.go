@@ -28,7 +28,7 @@ func TestMockHandlerRunsCompleteValidationAndDeploymentWithoutProviders(t *testi
 			t.Fatalf("mock response leaked %q: %s", forbidden, connectionBody)
 		}
 	}
-	packageResponse, err := http.Post(server.URL+"/api/packages", "application/json", bytes.NewBufferString(`{"templateId":"clm","components":["box","salesforce"],"strategy":"reuse"}`))
+	packageResponse, err := http.Post(server.URL+"/api/packages", "application/json", bytes.NewBufferString(`{"name":"Northstar CLM rollout","templateId":"clm","components":["box","salesforce"],"strategy":"reuse"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +54,76 @@ func TestMockHandlerRunsCompleteValidationAndDeploymentWithoutProviders(t *testi
 	completed := waitForMockRun(t, server.URL, deployment.ID)
 	if completed.Status != runCompleted || len(completed.Providers) != 2 {
 		t.Fatalf("deployment = %#v", completed)
+	}
+	deploymentEvents, err := http.Get(server.URL + "/api/runs/" + deployment.ID + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deploymentEventBody, _ := io.ReadAll(deploymentEvents.Body)
+	_ = deploymentEvents.Body.Close()
+	for _, expected := range []string{"Salesforce org is available", "Salesforce reports queued", "Salesforce reports in progress", "Managed package installed", "Salesforce configuration applied"} {
+		if !strings.Contains(string(deploymentEventBody), expected) {
+			t.Fatalf("deployment events omitted %q: %s", expected, deploymentEventBody)
+		}
+	}
+}
+
+func TestMockHandlerCanSimulateAuthenticationFailure(t *testing.T) {
+	server := httptest.NewServer(NewMockHandlerWithOptions(MockOptions{ValidationFailureProvider: "salesforce"}))
+	defer server.Close()
+	packageResponse, err := http.Post(server.URL+"/api/packages", "application/json", bytes.NewBufferString(`{"name":"Northstar CLM rollout","templateId":"clm","components":["box","salesforce"],"strategy":"reuse"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = packageResponse.Body.Close()
+
+	validation := startMockRun(t, server.URL+"/api/runs")
+	failed := waitForMockRun(t, server.URL, validation.ID)
+	if failed.Status != runFailed || len(failed.Providers) != 1 || failed.Providers[0].Name != "salesforce" {
+		t.Fatalf("validation = %#v", failed)
+	}
+	events, err := http.Get(server.URL + "/api/runs/" + validation.ID + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBody, _ := io.ReadAll(events.Body)
+	_ = events.Body.Close()
+	if !strings.Contains(string(eventBody), `"component":"Authentication"`) || !strings.Contains(string(eventBody), `"progressState":"failed"`) || strings.Contains(string(eventBody), "Inspecting mock box configuration") {
+		t.Fatalf("authentication failure did not stop configuration checks: %s", eventBody)
+	}
+	diagnostic, err := http.Get(server.URL + "/api/runs/" + validation.ID + "/diagnostics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnosticBody, _ := io.ReadAll(diagnostic.Body)
+	_ = diagnostic.Body.Close()
+	if diagnostic.StatusCode != http.StatusOK || !strings.Contains(string(diagnosticBody), `"code":"SALESFORCE_SESSION_EXPIRED"`) || !strings.Contains(string(diagnosticBody), "reconnect the selected Salesforce org") {
+		t.Fatalf("authentication diagnostic = %d: %s", diagnostic.StatusCode, diagnosticBody)
+	}
+}
+
+func TestMockHandlerCanSimulateStaleConnectionBeforeValidation(t *testing.T) {
+	server := httptest.NewServer(NewMockHandlerWithOptions(MockOptions{ConnectionFailureProvider: "salesforce"}))
+	defer server.Close()
+
+	response, err := http.Post(server.URL+"/api/connections/salesforce/check", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "reconnect the selected Salesforce org") {
+		t.Fatalf("check = %d: %s", response.StatusCode, body)
+	}
+
+	connections, err := http.Get(server.URL + "/api/connections")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionBody, _ := io.ReadAll(connections.Body)
+	_ = connections.Body.Close()
+	if connections.StatusCode != http.StatusOK || strings.Count(string(connectionBody), `"verified":true`) != 1 || !strings.Contains(string(connectionBody), `"name":"Salesforce","configured":true,"verified":false`) {
+		t.Fatalf("connections = %d: %s", connections.StatusCode, connectionBody)
 	}
 }
 

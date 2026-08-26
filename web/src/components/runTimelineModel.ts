@@ -24,7 +24,7 @@ export function presentProviderProgress(components: DeploymentPlan['components']
     const componentEvents = events.filter((event) => event.provider === component.id)
     const updates = componentEvents.filter((event) => event.type === 'activity')
     const componentProgress = presentComponents(updates)
-    if (result) {
+    if (result && run?.status !== 'queued' && run?.status !== 'running') {
       const failed = result.status === 'failed'
       return { id: component.id, name: component.name, state: failed ? 'failed' : 'complete', updates, components: finishInterruptedComponents(componentProgress, failed) }
     }

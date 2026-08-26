@@ -7,6 +7,52 @@ import (
 	"testing"
 )
 
+func TestSalesforceLoginRedirectHandlerServesOauthRedirect(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/OauthRedirect" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("login-ok"))
+	})
+	handler := salesforceLoginRedirectHandler(api)
+
+	ok := httptest.NewRecorder()
+	handler.ServeHTTP(ok, httptest.NewRequest(http.MethodGet, "/OauthRedirect?code=auth-code", nil))
+	if ok.Code != http.StatusOK || ok.Body.String() != "login-ok" {
+		t.Fatalf("oauth redirect = %d %q", ok.Code, ok.Body.String())
+	}
+
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("other path = %d", missing.Code)
+	}
+}
+
+func TestBoxLoginRedirectHandlerServesOAuthCallback(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/callback" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("box-login-ok"))
+	})
+	handler := boxLoginRedirectHandler(api)
+
+	ok := httptest.NewRecorder()
+	handler.ServeHTTP(ok, httptest.NewRequest(http.MethodGet, "/oauth/callback?code=auth-code", nil))
+	if ok.Code != http.StatusOK || ok.Body.String() != "box-login-ok" {
+		t.Fatalf("oauth redirect = %d %q", ok.Code, ok.Body.String())
+	}
+
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("other path = %d", missing.Code)
+	}
+}
+
 func TestDispatchWebHandlerServesUIAndAPI(t *testing.T) {
 	handler := dispatchWebHandler("demo")
 

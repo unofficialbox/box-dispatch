@@ -14,6 +14,9 @@ export function DetailsRail({ title, description, children }: { title: string; d
 
 export function DetailList({ rows }: { rows: Array<[string, string]> }) {
   return <dl className="detail-list">
-    {rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    {rows.map(([label, value]) => {
+      const valueClass = value.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')
+      return <div className={`detail-row detail-row-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`} key={label}><dt>{label}</dt><dd className={`detail-value detail-value-${valueClass}`}>{value}</dd></div>
+    })}
   </dl>
 }

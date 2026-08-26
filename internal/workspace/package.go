@@ -50,8 +50,8 @@ func Build(req PackageRequest) (PackageManifest, error) {
 	// Run the clone non-interactively. Without this, a credential challenge for
 	// github.com (private repo, proxy, rate-limit, or a machine-level credential
 	// helper) makes git block on a "Username for 'https://github.com':" prompt.
-	// Inside the full-screen shell that prompt is invisible and unanswerable, so
-	// packaging appears to hang forever. Failing fast surfaces a real error.
+	// Dispatch commands are non-interactive, so a prompt would hang forever.
+	// Failing fast surfaces a real error.
 	cmd.Stdin = nil
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0", // git: never fall back to an interactive prompt

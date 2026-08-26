@@ -1,5 +1,11 @@
 # Progress
 
+## 2026-08-25
+
+- ✅ Made the embedded browser workspace the only interactive Dispatch experience.
+- ✅ Removed the Bubble Tea shell, animated check UI, terminal-only settings, and Charmbracelet dependencies.
+- ✅ Kept plain flag-based commands with text or JSON output for automation.
+
 ## 2026-07-21
 
 - ✅ Started repository as Go CLI project named `box-dispatch`.
@@ -14,4 +20,4 @@
 ## Next
 
 - Keep profile references clean: verify all engine calls route through profile-scoped paths.
-- Add `glow`-based markdown preview mode for check report rendering in interactive sessions.
+- Keep command output deterministic and non-interactive.

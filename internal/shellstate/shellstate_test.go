@@ -29,17 +29,25 @@ func isolateRoot(t *testing.T) string {
 func TestConnectionSettingsRoundTripAsBCL(t *testing.T) {
 	root := isolateRoot(t)
 	want := config.ConnectionSettings{
-		SalesforceAlias:        "salesforce",
-		SalesforceDevHubAlias:  "devhub",
-		SalesforceInstanceURL:  "https://scratch.example.com",
-		SalesforceAccessToken:  "scratch-token",
-		SalesforceDevHubURL:    "https://devhub.example.com",
-		SalesforceDevHubToken:  "hub-token",
-		SalesforceClientID:     "client-id",
-		SalesforceClientSecret: "client-secret",
-		DatabricksProfile:      "clm",
-		AWSProfile:             "demo",
-		AWSRegion:              "us-east-1",
+		SalesforceAlias:              "salesforce",
+		SalesforceDevHubAlias:        "devhub",
+		SalesforceInstanceURL:        "https://scratch.example.com",
+		SalesforceAccessToken:        "scratch-token",
+		SalesforceRefreshToken:       "refresh-token",
+		SalesforceDevHubURL:          "https://devhub.example.com",
+		SalesforceDevHubToken:        "hub-token",
+		SalesforceDevHubRefreshToken: "hub-refresh",
+		SalesforceClientID:           "client-id",
+		SalesforceClientSecret:       "client-secret",
+		SalesforceSelectedOrgID:      "org-1",
+		SalesforceDevHubOrgID:        "org-1",
+		SalesforceOrgs: []config.SalesforceOrgConnection{{
+			ID: "org-1", Alias: "salesforce", Username: "user@example.test", InstanceURL: "https://scratch.example.com",
+			AccessToken: "scratch-token", RefreshToken: "refresh-token", OrgType: "scratch", DevHub: false,
+		}},
+		DatabricksProfile: "clm",
+		AWSProfile:        "demo",
+		AWSRegion:         "us-east-1",
 		VerifiedConnections: map[string]config.VerifiedConnection{
 			"salesforce": {VerifiedAt: "2026-08-12T12:00:00Z", Selection: "salesforce", Identity: "user@example.test"},
 		},
@@ -83,29 +91,6 @@ func TestSolutionPlanRoundTripAsBCL(t *testing.T) {
 	}
 	if got.TemplateID != want.TemplateID || got.Repository != want.Repository || len(got.Components) != 2 {
 		t.Fatalf("round-trip mismatch: got %+v want %+v", got, want)
-	}
-}
-
-func TestUISettingsRoundTripAsBCL(t *testing.T) {
-	root := isolateRoot(t)
-	want := config.UISettings{AccessibleForms: true, BoxComponentVisibility: map[string]bool{
-		"folder_structure": true,
-		"box_form":         false,
-	}}
-	if err := SaveUISettings(want); err != nil {
-		t.Fatal(err)
-	}
-
-	path := filepath.Join(root, stateDirName, uiSettingsBCL)
-	if _, err := bcl.LoadBCL(path); err != nil {
-		t.Fatalf("written file is not valid BCL: %v", err)
-	}
-	got, err := LoadUISettings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.AccessibleForms || len(got.BoxComponentVisibility) != 2 || !got.BoxComponentVisibility["folder_structure"] || got.BoxComponentVisibility["box_form"] {
-		t.Fatalf("round-trip mismatch: got %+v", got)
 	}
 }
 

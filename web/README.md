@@ -42,6 +42,13 @@ bun run dev:mock
 The complete Choose → Connect → Configure → Validate → Deploy flow is available
 at the Vite URL. The same mock powers `bun run test:e2e`.
 
+To refine the failed-validation UI without expiring a real provider session, run a
+separate mock instance with an authentication failure:
+
+```bash
+go run ./cmd/box-dispatch mock --no-open --port 8790 --fail-validation-provider salesforce
+```
+
 ### Record a successful browser/API workflow
 
 The live server can write every browser API request and response—including the

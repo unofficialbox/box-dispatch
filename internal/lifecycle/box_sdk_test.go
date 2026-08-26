@@ -8,9 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-open-go-sdk/auth"
+	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
+	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
 
@@ -79,11 +83,14 @@ func TestBoxUploadSendsFileBytes(t *testing.T) {
 		if attributes.Name != "example.txt" || attributes.Parent.ID != "folder-1" {
 			t.Fatalf("attributes = %#v", attributes)
 		}
-		file, _, err := r.FormFile("file")
+		file, header, err := r.FormFile("file")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer func() { _ = file.Close() }()
+		if header.Filename != "file" {
+			t.Fatalf("file name = %q", header.Filename)
+		}
 		content, err := io.ReadAll(file)
 		if err != nil {
 			t.Fatal(err)
@@ -99,12 +106,52 @@ func TestBoxUploadSendsFileBytes(t *testing.T) {
 	if err := os.WriteFile(source, []byte("real file bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sdk := &boxSDK{accessToken: "access-token", httpClient: server.Client(), uploadBaseURL: server.URL}
+	sdk := &boxSDK{client: boxclient.NewClient(
+		auth.DeveloperToken("access-token"),
+		gantryruntime.WithBaseURL("upload", server.URL),
+		gantryruntime.WithHTTPClient(server.Client()),
+	)}
 	fileID, err := sdk.uploadFile(context.Background(), "folder-1", source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fileID != "file-1" {
 		t.Fatalf("file ID = %q", fileID)
+	}
+}
+
+func TestApplyMetadataTemplateRenamesExistingTemplate(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/metadata_templates/enterprise":
+			_, _ = io.WriteString(w, `{"entries":[{"type":"metadata_template","templateKey":"clmContract","displayName":"CLM Contract"}]}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/metadata_templates/enterprise/clmContract/schema":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), `"op":"editTemplate"`) || !strings.Contains(string(body), `"displayName":"Contract"`) {
+				t.Fatalf("unexpected update body: %s", body)
+			}
+			_, _ = io.WriteString(w, `{"type":"metadata_template","templateKey":"clmContract","displayName":"Contract"}`)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	sdk := &boxSDK{client: boxclient.NewClient(
+		auth.DeveloperToken("access-token"),
+		gantryruntime.WithBaseURL("api", server.URL),
+		gantryruntime.WithHTTPClient(server.Client()),
+	)}
+	if err := sdk.applyMetadataTemplate(context.Background(), boxMetadataTemplate{TemplateKey: "clmContract", DisplayName: "Contract"}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want get and update", requests)
 	}
 }

@@ -150,48 +150,6 @@ func (e *Engine) Check(scenario string, platform string, offline bool) (*model.C
 	return report, code
 }
 
-func (e *Engine) CheckInteractive(scenario string, platform string, offline bool) (*model.CommandReport, int) {
-	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
-	if err != nil {
-		report := model.NewReport("check")
-		report.AddPhase("check.runtime", string(model.PhaseFailed), 0, err)
-		return &report, 2
-	}
-
-	scenarioName, err := e.resolveScenario(cfg, scenario)
-	if err != nil {
-		report := model.NewReport("check")
-		report.AddPhase("check.scenario", string(model.PhaseFailed), 0, err)
-		return &report, 2
-	}
-
-	report := model.NewReport("check")
-	report.Scenario = scenarioName
-	report.Validation["platform"] = platform
-	report.Validation["offline"] = offline
-
-	ui := newCheckUI(e, cfg, scenarioName, platform, offline, &report)
-	result, runErr := ui.Run()
-	if runErr != nil {
-		result.AddPhase("check.ui", string(model.PhaseFailed), 0, runErr)
-		return result, 2
-	}
-
-	if result.Status == string(model.PhaseBlocked) {
-		result.NextCommand = "box-dispatch resolve --scenario " + scenarioName + " --allow-unresolved"
-		return result, 2
-	}
-	if result.Status == string(model.PhaseWarn) {
-		result.NextCommand = "box-dispatch check --scenario " + scenarioName
-		return result, 0
-	}
-	if result.Status == string(model.PhasePassed) {
-		result.NextCommand = "box-dispatch setup"
-		return result, 0
-	}
-	return result, 2
-}
-
 func (e *Engine) Doctor(scenario string, platform string, offline bool) (*model.CommandReport, int) {
 	cfg, err := config.LoadRuntimeConfigFromPaths(e.Paths)
 	if err != nil {

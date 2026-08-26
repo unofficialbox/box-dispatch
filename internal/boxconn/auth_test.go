@@ -28,6 +28,43 @@ func TestResolveAuthUsesSelectedCCG(t *testing.T) {
 	}
 }
 
+func TestResolveAuthUsesSelectedCCGWhenDefaultIsOAuth(t *testing.T) {
+	settings := config.ConnectionSettings{BoxDefaultConnection: DispatchOAuthName}.UpsertBoxConnection(config.BoxAppConnection{
+		Alias: "Box CCG", ClientID: "ccg-id", ClientSecret: "ccg-secret",
+		SubjectType: "user", SubjectID: "123",
+	}, true)
+	settings.BoxDefaultConnection = DispatchOAuthName
+	isolateConnectionSettings(t, settings)
+	t.Setenv("BOX_CLIENT_ID", "")
+	t.Setenv("BOX_CLIENT_SECRET", "")
+	t.Setenv("BOX_REFRESH_TOKEN", "")
+
+	got, err := ResolveAuth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Method != AuthCCG || got.ClientID != "ccg-id" || got.SubjectID != "123" {
+		t.Fatalf("selected CCG should win over a leftover OAuth default: %+v", got)
+	}
+}
+
+func TestResolveAuthUsesSelectedOAuthConnection(t *testing.T) {
+	isolateConnectionSettings(t, config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{
+		Alias: "Legal Box", RefreshToken: "stored-refresh", Identity: "box-user@example.com", Account: "12345",
+	}, true))
+	t.Setenv("BOX_CLIENT_ID", "env-client")
+	t.Setenv("BOX_CLIENT_SECRET", "env-secret")
+	t.Setenv("BOX_REFRESH_TOKEN", "")
+
+	got, err := ResolveAuth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Method != AuthOAuth2 || got.RefreshToken != "stored-refresh" || got.ClientID != "env-client" {
+		t.Fatalf("resolved stored OAuth = %+v", got)
+	}
+}
+
 func TestResolveAuthUsesOAuth2Environment(t *testing.T) {
 	isolateConnectionSettings(t, config.ConnectionSettings{})
 	t.Setenv("BOX_CLIENT_ID", "client-id")

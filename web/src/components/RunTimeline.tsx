@@ -1,8 +1,10 @@
+import { useEffect, useRef } from 'react'
 import type { RunStep, RunStepStatus } from '@unofficialbox/box-open-elements'
 import type { ComponentProgress, ProviderProgress } from './runTimelineModel'
 import { LiveActivityFeed } from './LiveActivityFeed'
 
 export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
+  const traceRef = useRef<HTMLElement>(null)
   const steps: RunStep[] = providers.map((provider) => {
     const latest = provider.updates.at(-1)
     const first = provider.updates.at(0)
@@ -23,7 +25,41 @@ export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
     }
   })
 
-  return <><box-run-trace className="dispatch-run-trace" heading="Provider progress" steps={steps}></box-run-trace><LiveActivityFeed providers={providers}/></>
+  useEffect(() => {
+    const trace = traceRef.current
+    if (!trace) return
+    let cancelled = false
+    let style: HTMLStyleElement | null = null
+    const installRunningIndicator = () => {
+      if (cancelled || !trace.shadowRoot || trace.shadowRoot.querySelector('[data-dispatch-running-pulse]')) return
+      style = document.createElement('style')
+      style.dataset.dispatchRunningPulse = ''
+      style.textContent = `
+        @keyframes dispatch-provider-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--run-tone) 30%, transparent); }
+          50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--run-tone) 10%, transparent); }
+        }
+        [part="step"][data-status="running"] [part="marker"] {
+          animation: dispatch-provider-pulse 1.45s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [part="step"][data-status="running"] [part="marker"] {
+            animation: none;
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--run-tone) 14%, transparent);
+          }
+        }
+      `
+      trace.shadowRoot.append(style)
+    }
+    installRunningIndicator()
+    void customElements.whenDefined('box-run-trace').then(installRunningIndicator)
+    return () => {
+      cancelled = true
+      style?.remove()
+    }
+  }, [])
+
+  return <><box-run-trace ref={traceRef} className="dispatch-run-trace" heading="Provider progress" steps={steps}></box-run-trace><LiveActivityFeed providers={providers}/></>
 }
 
 function providerStatus(state: ProviderProgress['state']): RunStepStatus {

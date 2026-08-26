@@ -77,6 +77,9 @@ func TestLoadBundledManifestFromBCL(t *testing.T) {
 	if permissionSets := manifest.Salesforce.RequiredPermissionSets; len(permissionSets) != 5 || permissionSets[0].Name != "box__Box_Admin_All_Licenses" || permissionSets[4].Name != "CLM_Demo_Operator" {
 		t.Fatalf("bundled Salesforce permission sets = %#v", permissionSets)
 	}
+	if scripts := manifest.Salesforce.SeedScripts; len(scripts) != 1 || scripts[0].Path != "scripts/seed-clm-salesforce-sample-data.apex" {
+		t.Fatalf("bundled Salesforce seed scripts = %#v", scripts)
+	}
 	if got := manifest.DefaultDeploymentSettings().Box.GlobalStrategy; got != StrategyReuse {
 		t.Fatalf("bundled deployment strategy = %q, want %q", got, StrategyReuse)
 	}
@@ -103,6 +106,9 @@ func TestCLMManifestMigratesSalesforcePackagePrerequisite(t *testing.T) {
 	}
 	if permissionSets := manifest.Salesforce.RequiredPermissionSets; len(permissionSets) != 5 {
 		t.Fatalf("migrated permission sets = %#v", permissionSets)
+	}
+	if scripts := manifest.Salesforce.SeedScripts; len(scripts) != 1 || scripts[0].Label != "CLM sample contract records" {
+		t.Fatalf("migrated seed scripts = %#v", scripts)
 	}
 }
 

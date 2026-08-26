@@ -33,21 +33,22 @@ const (
 )
 
 type Item struct {
-	Provider             string              `json:"provider"`
-	Name                 string              `json:"name"`
-	Source               string              `json:"source"`
-	Status               Status              `json:"status"`
-	Detail               string              `json:"detail"`
-	Diagnostic           string              `json:"diagnostic,omitempty"`
-	Deployable           bool                `json:"deployable"`
-	DeployableComponents []string            `json:"deployable_components,omitempty"`
-	AdapterPending       []string            `json:"adapter_pending,omitempty"`
-	Experimental         []string            `json:"experimental,omitempty"`
-	ComponentOrder       []string            `json:"component_order,omitempty"`
-	Present              []string            `json:"present,omitempty"`
-	Missing              []string            `json:"missing,omitempty"`
-	Planned              []string            `json:"planned,omitempty"`
-	Resources            []ResourceReference `json:"resources,omitempty"`
+	Provider             string                           `json:"provider"`
+	Name                 string                           `json:"name"`
+	Source               string                           `json:"source"`
+	Status               Status                           `json:"status"`
+	Detail               string                           `json:"detail"`
+	Diagnostic           string                           `json:"diagnostic,omitempty"`
+	Deployable           bool                             `json:"deployable"`
+	DeployableComponents []string                         `json:"deployable_components,omitempty"`
+	AdapterPending       []string                         `json:"adapter_pending,omitempty"`
+	Experimental         []string                         `json:"experimental,omitempty"`
+	ComponentOrder       []string                         `json:"component_order,omitempty"`
+	Present              []string                         `json:"present,omitempty"`
+	Missing              []string                         `json:"missing,omitempty"`
+	Planned              []string                         `json:"planned,omitempty"`
+	Resources            []ResourceReference              `json:"resources,omitempty"`
+	Changes              []salesforceapi.MetadataFileDiff `json:"changes,omitempty"`
 }
 
 type ResourceReference struct {
@@ -458,20 +459,18 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 		if templateErr != nil {
 			return item, templateErr
 		}
-		templateKeys := make([]string, 0, len(templates))
 		for _, template := range templates {
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
 			report.component(component, ProgressRunning, "Inspecting the Box metadata template", componentIndex(components, component), len(components))
-			templateKeys = append(templateKeys, template.TemplateKey)
 		}
-		existingTemplates, templateErr := api.metadataTemplateKeys(ctx, templateKeys)
+		existingTemplates, templateErr := api.metadataTemplateDisplayNames(ctx)
 		if templateErr != nil {
 			item.Status, item.Detail = StatusFailed, "Unable to inspect Box metadata templates: "+templateErr.Error()
 			return item, nil
 		}
 		for _, template := range templates {
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
-			present := existingTemplates[template.TemplateKey]
+			present := existingTemplates[template.TemplateKey] == template.DisplayName
 			classifyBoxComponent(&item, component, present, !present)
 			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
 		}
@@ -734,9 +733,17 @@ func deployProvider(root string, item Item, settings config.ConnectionSettings, 
 	if item.Provider != "salesforce" {
 		return item
 	}
+	settings = settings.HydrateSalesforceOrgs()
 	if settings.HasSalesforceREST() {
 		return deploySalesforceREST(root, item, settings, report)
 	}
+	if requireSalesforceRESTTransport() {
+		item.Status, item.Detail = StatusFailed, "Connect a Salesforce org in Dispatch before deployment."
+		return item
+	}
+
+	// Kept for the isolated terminal migration path. The web application is
+	// REST-only and always takes the branch above.
 	project := findSalesforceProject(root)
 	if settings.SalesforceAlias == "" {
 		item.Status, item.Detail = StatusFailed, "No Salesforce alias is selected."
@@ -898,8 +905,8 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 				continue
 			}
 			report.step("Applying metadata template " + firstNonEmpty(template.DisplayName, template.TemplateKey))
-			if createErr := api.createMetadataTemplate(ctx, template); createErr != nil {
-				item.Status, item.Detail = StatusFailed, "Create "+component+": "+createErr.Error()
+			if applyErr := api.applyMetadataTemplate(ctx, template); applyErr != nil {
+				item.Status, item.Detail = StatusFailed, "Apply "+component+": "+applyErr.Error()
 				return item
 			}
 			addResource(&item, component, "metadata_template", template.DisplayName, template.TemplateKey, "")
@@ -1025,9 +1032,17 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	if err != nil {
 		return item, err
 	}
+	settings = settings.HydrateSalesforceOrgs()
 	if settings.HasSalesforceREST() {
 		return validateSalesforceREST(root, item, report, settings)
 	}
+	if requireSalesforceRESTTransport() {
+		item.Status, item.Detail = StatusFailed, "Connect a Salesforce org in Dispatch before validation."
+		return item, nil
+	}
+
+	// Kept for the isolated terminal migration path. The web application is
+	// REST-only and always takes the branch above.
 	if settings.SalesforceAlias == "" {
 		item.Status, item.Detail = StatusFailed, "No Salesforce alias is selected. Connect Salesforce before validation."
 		return item, nil
@@ -1169,6 +1184,10 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 	reportValidationResults(report, metadataComponents, result.Present, result.Missing)
 	result = addSalesforcePackageResults(result, manifestContract.Salesforce.RequiredPackages, installedPackages, settings.SalesforceAlias)
 	return addSalesforcePermissionSetResults(result, manifestContract.Salesforce.RequiredPermissionSets, permissionInventory.Assigned, settings.SalesforceAlias), nil
+}
+
+func requireSalesforceRESTTransport() bool {
+	return true
 }
 
 func listInstalledSalesforcePackages(target string) ([]installedSalesforcePackage, error) {
@@ -1497,7 +1516,7 @@ func missingSalesforceMetadata(missing []string) []string {
 			continue
 		}
 		switch metadataType {
-		case "Managed Package", "Permission Set Assignment":
+		case "Managed Package", "Permission Set Assignment", "Sample Records":
 			continue
 		default:
 			metadata = append(metadata, component)

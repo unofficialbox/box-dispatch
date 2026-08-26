@@ -1,16 +1,11 @@
 package lifecycle
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +21,8 @@ import (
 )
 
 type boxSDK struct {
-	client        *boxclient.Client
-	accessToken   string
-	httpClient    *http.Client
-	uploadBaseURL string
+	client *boxclient.Client
 }
-
-const defaultBoxUploadBaseURL = "https://upload.box.com/api/2.0"
 
 type boxAPI interface {
 	findFolder(context.Context, string, string) (string, bool, error)
@@ -45,8 +35,8 @@ type boxAPI interface {
 	uploadFile(context.Context, string, string) (string, error)
 	// uploadFileVersion replaces an existing same-named file with a new version.
 	uploadFileVersion(context.Context, string, string) (string, error)
-	metadataTemplateKeys(context.Context, []string) (map[string]bool, error)
-	createMetadataTemplate(context.Context, boxMetadataTemplate) error
+	metadataTemplateDisplayNames(context.Context) (map[string]string, error)
+	applyMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
 	createDocgenTemplate(context.Context, string) error
 	aiAgentNames(context.Context) (map[string]bool, error)
@@ -83,6 +73,7 @@ func newBoxSDK() (*boxSDK, error) {
 	accessToken, err := connection.AccessToken(context.Background())
 	if err != nil {
 		if boxOAuthSessionExpired(err) {
+			boxconn.InvalidateSelectedOAuthConnection()
 			return nil, fmt.Errorf("Box OAuth session has expired. Return to Connect and reconnect the selected Box account: %w", err)
 		}
 		return nil, err
@@ -91,12 +82,7 @@ func newBoxSDK() (*boxSDK, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &boxSDK{
-		client:        boxclient.NewClient(tokenSource),
-		accessToken:   accessToken,
-		httpClient:    &http.Client{Timeout: 2 * time.Minute},
-		uploadBaseURL: defaultBoxUploadBaseURL,
-	}, nil
+	return &boxSDK{client: boxclient.NewClient(tokenSource)}, nil
 }
 
 func boxSDKTokenSource(connection boxconn.AuthConfig, accessToken string) (gantryruntime.TokenSource, error) {
@@ -192,12 +178,18 @@ func (sdk *boxSDK) fileDigest(ctx context.Context, folderID, name string) (strin
 
 func (sdk *boxSDK) uploadFile(ctx context.Context, folderID, source string) (string, error) {
 	name := filepath.Base(source)
-	files, err := sdk.sendUpload(ctx, "/files/content", source, map[string]any{
-		"name": name,
-		"parent": map[string]string{
-			"id": folderID,
+	file, err := os.Open(source)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	files, err := sdk.client.Uploads.UploadFile(ctx, &schemas.CreateFileContentRequest{
+		Attributes: schemas.PostFileContentAttributes{
+			Name:   name,
+			Parent: schemas.AttributesParent{Id: folderID},
 		},
-	})
+		File: file,
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("upload %s: %w", name, err)
 	}
@@ -217,69 +209,19 @@ func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source strin
 	}
 
 	name := filepath.Base(source)
-	_, err = sdk.sendUpload(ctx, "/files/"+url.PathEscape(fileID)+"/content", source, map[string]any{"name": name})
+	file, err := os.Open(source)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	_, err = sdk.client.Uploads.UploadFileVersion(ctx, fileID, &schemas.CreateFileIdContentRequest{
+		Attributes: schemas.PostFileIdContentAttributes{Name: name},
+		File:       file,
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("upload version of %s: %w", name, err)
 	}
 	return fileID, nil
-}
-
-func (sdk *boxSDK) sendUpload(ctx context.Context, endpoint, source string, attributes any) (*schemas.Files, error) {
-	file, err := os.Open(source)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", filepath.Base(source), err)
-	}
-	defer func() { _ = file.Close() }()
-	attributeJSON, err := json.Marshal(attributes)
-	if err != nil {
-		return nil, fmt.Errorf("encode upload attributes: %w", err)
-	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	attributePart, err := writer.CreateFormField("attributes")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := attributePart.Write(attributeJSON); err != nil {
-		return nil, err
-	}
-	filePart, err := writer.CreateFormFile("file", filepath.Base(source))
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(filePart, file); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(sdk.uploadBaseURL, "/")+endpoint, &body)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+sdk.accessToken)
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	httpClient := sdk.httpClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	response, err := httpClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = response.Body.Close() }()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("Box upload returned %s: %s", response.Status, strings.TrimSpace(string(responseBody)))
-	}
-	var files schemas.Files
-	if err := json.Unmarshal(responseBody, &files); err != nil {
-		return nil, fmt.Errorf("decode Box upload response: %w", err)
-	}
-	return &files, nil
 }
 
 func uploadedFileID(files *schemas.Files, name string) (string, error) {
@@ -318,20 +260,35 @@ func resolveUploadedFileID(ctx context.Context, files *schemas.Files, name strin
 	return "", fmt.Errorf("%w; follow-up lookup did not find the uploaded file", responseErr)
 }
 
-func (sdk *boxSDK) metadataTemplateKeys(ctx context.Context, _ []string) (map[string]bool, error) {
-	keys := map[string]bool{}
+func (sdk *boxSDK) metadataTemplateDisplayNames(ctx context.Context) (map[string]string, error) {
+	templates := map[string]string{}
 	for template, err := range sdk.client.MetadataTemplates.ListEnterprise(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
 		if template.TemplateKey != nil {
-			keys[*template.TemplateKey] = true
+			templates[*template.TemplateKey] = firstNonEmpty(pointerString(template.DisplayName), *template.TemplateKey)
 		}
 	}
-	return keys, nil
+	return templates, nil
 }
 
-func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
+func (sdk *boxSDK) applyMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
+	existing, err := sdk.metadataTemplateDisplayNames(ctx)
+	if err != nil {
+		return err
+	}
+	if displayName, found := existing[template.TemplateKey]; found {
+		if displayName == template.DisplayName {
+			return nil
+		}
+		_, err = sdk.client.MetadataTemplates.UpdateSchema(ctx, schemas.GetFileIdMetadataIdScopeEnterprise, template.TemplateKey, []schemas.UpdateSchemaRequest{{
+			Op:   schemas.PutIdSchemaOpEditTemplate,
+			Data: map[string]any{"displayName": template.DisplayName},
+		}})
+		return err
+	}
+
 	fields := make([]schemas.PostSchemaFields, 0, len(template.Fields))
 	for _, field := range template.Fields {
 		fieldType := schemas.CreateSchemaRequestFieldsType(field.Type)
@@ -346,10 +303,17 @@ func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetad
 		}
 		fields = append(fields, schemas.PostSchemaFields{Type: fieldType, Key: field.Key, DisplayName: field.DisplayName, Options: options})
 	}
-	_, err := sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
+	_, err = sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
 		Scope: "enterprise", TemplateKey: &template.TemplateKey, DisplayName: template.DisplayName, Fields: fields,
 	})
 	return err
+}
+
+func pointerString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (sdk *boxSDK) docgenTemplateFileIDs(ctx context.Context) (map[string]bool, error) {

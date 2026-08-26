@@ -1,4 +1,4 @@
-import type { ConnectionSummary, DeploymentPlan, Phase } from './types'
+import type { ConnectionSummary, DeploymentPlan, DispatchRun, Phase } from './types'
 
 export function connectionsReadyForPlan(plan: DeploymentPlan, connections: ConnectionSummary[]) {
   return plan.components.length > 0 && plan.components.every((component) =>
@@ -6,9 +6,12 @@ export function connectionsReadyForPlan(plan: DeploymentPlan, connections: Conne
   )
 }
 
-export function resumeWorkflowPhase(plan: DeploymentPlan, connections: ConnectionSummary[]): Phase {
+export function resumeWorkflowPhase(plan: DeploymentPlan, connections: ConnectionSummary[], run: DispatchRun | null = null): Phase {
   if (!plan.exists || plan.components.length === 0) return 'Choose'
-  return connectionsReadyForPlan(plan, connections) ? 'Review' : 'Connect'
+  if (!connectionsReadyForPlan(plan, connections)) return 'Connect'
+  if (!run) return 'Review'
+  if (run.action === 'deploy' && run.status === 'completed') return 'Summary'
+  return 'Deploy'
 }
 
 export function guardedWorkflowPhase(requested: Phase, plan: DeploymentPlan, connections: ConnectionSummary[]): Phase {

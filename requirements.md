@@ -10,12 +10,12 @@
 - The CLI must never assume a single environment; all target integrations must be optional and environment-profile driven.
 
 ## 2) UX Goals
-- First-class interactive setup for first-time users:
-  - Guided prompts for prerequisites and credentials
-  - Clear dependency matrix and actionable remediation steps
-  - Smooth defaults, progress visibility, and friendly recovery
-- High-quality silent mode for automation and CI:
-  - Non-interactive flags only
+- The browser is the only interactive user experience:
+  - Guided provider connection and deployment workflow
+  - Clear dependency state and actionable remediation
+  - Live progress, safe confirmation, and friendly recovery
+- Commands are automation-first:
+  - Non-interactive flags only; no prompts or terminal UI
   - Deterministic execution and strict machine-readable output
 - Command surface must be composable:
   - `init`, `check`, `configure`, `deploy`, `status`, `teardown`, `source`
@@ -33,7 +33,8 @@
 - Minimal mandatory dependencies, with optional external CLIs detected and validated.
 
 ## 5) Implementation Strategy (Go-first)
-- Go CLI with a Bubble Tea terminal experience (`github.com/charmbracelet/bubbletea`) and rich markdown/status rendering using `github.com/charmbracelet/glamour`.
+- Embedded React browser application backed by a loopback Go API.
+- Thin Cobra command layer with plain text or JSON output and flags only.
 - Keep command layer thin and policy layer centralized:
   - Engine coordinates steps and state
   - Providers encapsulate Box/Salesforce/Databricks/AgentCore adapters
@@ -50,5 +51,4 @@
   - Deploy solution topology and activate services.
 - `box-dispatch status`:
   - Show health and runtime summaries.
-- `box-dispatch teardown`:
-  - Controlled deletion and rollback actions.
+- Destructive teardown/reset is browser-owned so the operator can review recorded resources and explicitly confirm the action.

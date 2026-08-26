@@ -7,17 +7,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
+	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
 	"github.com/unofficialbox/box-dispatch/internal/model"
-	"golang.org/x/term"
 )
 
 func main() {
+	if err := config.LoadDotEnv(""); err != nil {
+		fmt.Fprintf(os.Stderr, "could not load .env: %v\n", err)
+	}
 	if err := newRootCommand().Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -42,11 +42,6 @@ func newRootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().String("profile", "", "configuration profile (defaults to BOX_DISPATCH_PROFILE or default)")
 	root.PersistentFlags().Bool("json", false, "machine-readable JSON output")
-	root.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
-	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		noColor, _ := cmd.Flags().GetBool("no-color")
-		configureTerminalPresentation(noColor)
-	}
 	addWebApplicationFlags(root)
 
 	root.AddGroup(
@@ -60,7 +55,6 @@ func newRootCommand() *cobra.Command {
 		makeDeployCommand(),
 		makeCheckCommand(),
 		makeStatusCommand(),
-		makeResetCommand(),
 	}
 	advancedCommands := []*cobra.Command{
 		makeInitCommand(),
@@ -76,7 +70,6 @@ func newRootCommand() *cobra.Command {
 		makePublishCheckCommand(),
 		makeMockCommand(),
 		makeServeCommand(),
-		makeTerminalCommand(),
 	}
 	for _, cmd := range commonCommands {
 		cmd.GroupID = commonCommandGroup
@@ -86,20 +79,6 @@ func newRootCommand() *cobra.Command {
 	}
 	root.AddCommand(append(commonCommands, advancedCommands...)...)
 	return root
-}
-
-func isTTY() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}
-
-func terminalSupportsFullScreen() bool {
-	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
-}
-
-func configureTerminalPresentation(explicitNoColor bool) {
-	if explicitNoColor || os.Getenv("NO_COLOR") != "" || !terminalSupportsFullScreen() {
-		lipgloss.SetColorProfile(termenv.Ascii)
-	}
 }
 
 func asJSON(cmd *cobra.Command) bool {
@@ -132,7 +111,7 @@ func makeCheckCommand() *cobra.Command {
 			scenario, _ := cmd.Flags().GetString("scenario")
 			platform, _ := cmd.Flags().GetString("platform")
 			offline, _ := cmd.Flags().GetBool("offline")
-			return runConnectivityCheck(cmd, scenario, platform, offline, isTTY())
+			return runConnectivityCheck(cmd, scenario, platform, offline)
 		},
 	}
 
@@ -147,24 +126,7 @@ func addConnectivityFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("offline", false, "skip live connectivity checks")
 }
 
-// runLaunchShell starts the full-screen solution launch wizard.
-func runLaunchShell() error {
-	program := tea.NewProgram(newDispatchShell(), tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("launch shell failed: %w", err)
-	}
-	return nil
-}
-
-func runResetShell() error {
-	program := tea.NewProgram(newResetShell(), tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("reset shell failed: %w", err)
-	}
-	return nil
-}
-
-func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline, preferInteractive bool) error {
+func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline bool) error {
 	cfg := checker.CheckConfig{
 		Scenario:  scenario,
 		Platform:  platform,
@@ -172,32 +134,9 @@ func runConnectivityCheck(cmd *cobra.Command, scenario, platform string, offline
 		Providers: checker.ProvidersForScenarioAndPlatform(scenario, platform),
 	}
 
-	var report checker.CheckReport
-	var err error
-
-	interactive := preferInteractive && terminalSupportsFullScreen() && !asJSON(cmd)
-	if interactive {
-		p := checker.NewInteractiveCheckModel(cfg)
-		if _, err := tea.NewProgram(p).Run(); err != nil {
-			// Fall back to non-interactive text mode if interactive execution is unavailable.
-			report, err = checker.Check(cfg)
-			if err != nil {
-				return err
-			}
-			if asJSON(cmd) {
-				return writeJSON(cmd, report)
-			}
-			return printTextReport(cmd, report)
-		}
-		if asJSON(cmd) {
-			return writeJSON(cmd, p.Report())
-		}
-		return nil
-	} else {
-		report, err = checker.Check(cfg)
-		if err != nil {
-			return err
-		}
+	report, err := checker.Check(cfg)
+	if err != nil {
+		return err
 	}
 
 	if asJSON(cmd) {
@@ -283,24 +222,10 @@ func makeDeployCommand() *cobra.Command {
 	}
 	cmd.Flags().String("scenario", "", "scenario key (defaults to active scenario)")
 	cmd.Flags().Bool("dry-run", false, "run through bootstrap steps without writing state")
-	cmd.Flags().Bool("yes", false, "apply without interactive confirmation")
+	cmd.Flags().Bool("yes", false, "confirm that deployment changes may be applied")
 	cmd.Flags().Bool("allow-unresolved", false, "continue when tokens are unresolved")
 	cmd.Flags().Bool("skip-validate", false, "skip provider-level precheck validation")
 	return cmd
-}
-
-func makeResetCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reset",
-		Short: "Reset a recorded deployment by its audited resource IDs",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if asJSON(cmd) || !isTTY() {
-				return fmt.Errorf("reset requires an interactive terminal because it previews recorded resources and requires typed confirmation")
-			}
-			return runResetShell()
-		},
-	}
 }
 
 func makeSourceCommand() *cobra.Command {

@@ -1,6 +1,6 @@
 // Package webapi exposes a local, credential-safe control-plane boundary for
 // the Dispatch web application. Browser requests execute the same explicit
-// lifecycle operations as the terminal shell; the browser never sees secrets.
+// lifecycle operations behind plain commands; the browser never sees secrets.
 package webapi
 
 import (
@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
@@ -22,24 +24,33 @@ import (
 
 type deploymentStore func() ([]audit.DeploymentRecord, error)
 type connectionStore func() (config.ConnectionSettings, error)
+type salesforceExperiencePath func(context.Context, salesforceapi.Credential, string, string) (string, error)
 
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
-	Profile           string
-	DeploymentStore   deploymentStore
-	ConnectionStore   connectionStore
-	ConnectionSaver   connectionSaver
-	BoxCheck          boxConnectionCheck
-	SalesforceTargets salesforceTargetStore
-	SalesforceCheck   salesforceCheck
-	SalesforceCreate  salesforceScratchCreate
-	PlanStore         planStore
-	PlanSaver         planSaver
-	Templates         templateStore
-	PackageAssembler  packageAssembler
-	Runs              *runManager
-	Now               func() time.Time
+	Profile                  string
+	DeploymentStore          deploymentStore
+	ConnectionStore          connectionStore
+	ConnectionSaver          connectionSaver
+	BoxCheck                 boxConnectionCheck
+	SalesforceTargets        salesforceTargetStore
+	SalesforceCheck          salesforceCheck
+	SalesforceDevHubCheck    salesforceDevHubCheck
+	SalesforceCreate         salesforceScratchCreate
+	SalesforcePackagePrepare salesforcePackagePrepare
+	SalesforceOAuth          salesforceOAuthExchange
+	SalesforceRefresh        salesforceTokenRefresh
+	SalesforceExperiencePath salesforceExperiencePath
+	BoxOAuth                 boxOAuthExchange
+	SalesforceCallbackReady  func() bool
+	BoxCallbackReady         func() bool
+	PlanStore                planStore
+	PlanSaver                planSaver
+	Templates                templateStore
+	PackageAssembler         packageAssembler
+	Runs                     *runManager
+	Now                      func() time.Time
 }
 
 // NewHandler returns the API exposed to a local browser. Mount it only on a
@@ -71,6 +82,26 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.SalesforceCreate == nil {
 		options.SalesforceCreate = salesforceClient.CreateScratch
+		if options.SalesforceDevHubCheck == nil {
+			options.SalesforceDevHubCheck = salesforceClient.HasDevHub
+		}
+	}
+	if options.SalesforcePackagePrepare == nil {
+		options.SalesforcePackagePrepare = func(ctx context.Context, plan config.SolutionPlan, credential salesforceapi.Credential, report func(scratchPackageProgress)) (string, error) {
+			return prepareSalesforcePackages(ctx, salesforceClient, plan, credential, report)
+		}
+	}
+	if options.SalesforceOAuth == nil {
+		options.SalesforceOAuth = salesforceClient.ExchangeAuthorizationCode
+	}
+	if options.SalesforceRefresh == nil {
+		options.SalesforceRefresh = salesforceClient.RefreshAccessToken
+	}
+	if options.SalesforceExperiencePath == nil {
+		options.SalesforceExperiencePath = salesforceClient.ExperienceEmployeePath
+	}
+	if options.BoxOAuth == nil {
+		options.BoxOAuth = boxconn.ExchangeAuthorizationCode
 	}
 	if options.PlanStore == nil {
 		options.PlanStore = loadPlan
@@ -94,7 +125,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	if profile == "" {
 		profile = strings.TrimSpace(os.Getenv("BOX_DISPATCH_PROFILE"))
 	}
-	scratchJobs := newScratchJobManager(options.SalesforceCreate, options.ConnectionStore, options.ConnectionSaver)
+	scratchJobs := newScratchJobManager(options.SalesforceCreate, options.SalesforcePackagePrepare, options.ConnectionStore, options.PlanStore, options.ConnectionSaver, options.SalesforceDevHubCheck)
+	oauthJobs := newSalesforceOAuthManager(options.Now)
+	boxOAuthJobs := newBoxOAuthManager(options.Now)
 	if profile == "" {
 		profile = "default"
 	}
@@ -144,6 +177,11 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
 			return
 		}
+		settings = settings.HydrateSalesforceOrgs()
+		if len(settings.SalesforceOrgs) > 0 {
+			writeJSON(w, http.StatusOK, presentSalesforceOrgOptions(settings))
+			return
+		}
 		if settings.HasSalesforceREST() {
 			writeJSON(w, http.StatusOK, presentSalesforceRESTOption(settings))
 			return
@@ -179,7 +217,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "could not save the Salesforce connection")
 			return
 		}
-		writeJSON(w, http.StatusOK, connectionSummary{Name: "Salesforce", Configured: true, AuthType: "Salesforce REST API", Selection: settings.SalesforceAlias, Status: "Needs availability check", ExpiresAt: settings.SalesforceExpirationDate})
+		writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
 	})
 	mux.HandleFunc("POST /api/connections/salesforce/check", func(w http.ResponseWriter, r *http.Request) {
 		settings, err := options.ConnectionStore()
@@ -187,6 +225,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
 			return
 		}
+		settings = settings.HydrateSalesforceOrgs()
 		if !settings.HasSalesforceREST() {
 			writeError(w, http.StatusBadRequest, "connect a Salesforce org before checking availability")
 			return
@@ -194,7 +233,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		if strings.EqualFold(settings.SalesforceOrgType, "scratch") && settings.SalesforceExpirationDate != "" {
 			expiresAt, parseErr := time.Parse("2006-01-02", settings.SalesforceExpirationDate)
 			if parseErr == nil && expiresAt.Before(options.Now().UTC().Truncate(24*time.Hour)) {
-				settings.SalesforceOrgStatus = "Expired"
+				settings = settings.InvalidateSelectedSalesforceVerification("Expired")
 				_ = options.ConnectionSaver(settings)
 				writeError(w, http.StatusGone, "The selected Salesforce scratch org expired. Create a replacement scratch org to continue.")
 				return
@@ -202,24 +241,238 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		status, err := options.SalesforceCheck(ctx, targetCredential(settings))
+		credential := targetCredential(settings)
+		status, err := options.SalesforceCheck(ctx, credential)
 		if err != nil {
-			settings.SalesforceOrgStatus = "Unavailable"
+			if refreshed, refreshErr := refreshSalesforceAccess(ctx, options.SalesforceRefresh, settings, credential); refreshErr == nil {
+				settings = refreshed
+				status, err = options.SalesforceCheck(ctx, targetCredential(settings))
+			}
+		}
+		if err != nil {
+			settings = settings.InvalidateSelectedSalesforceVerification("Unavailable")
 			_ = options.ConnectionSaver(settings)
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}
-		settings.SalesforceOrgID = status.OrgID
+		orgID := firstNonEmpty(status.OrgID, settings.SalesforceOrgID)
+		username := firstNonEmpty(status.Username, selectedSalesforceUsername(settings))
+		status.OrgID = orgID
+		status.Username = username
+		if orgID != "" {
+			settings.SalesforceOrgID = orgID
+		}
 		settings.SalesforceOrgStatus = status.Status
+		if status.InstanceURL != "" {
+			settings.SalesforceInstanceURL = status.InstanceURL
+		}
+		settings = settings.SyncSelectedSalesforceOrg()
 		if settings.VerifiedConnections == nil {
 			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
 		}
-		settings.VerifiedConnections["salesforce"] = config.VerifiedConnection{VerifiedAt: options.Now().UTC().Format(time.RFC3339), Selection: settings.SalesforceAlias, Identity: status.Username, OrgID: status.OrgID, OrgStatus: status.Status, OrgType: settings.SalesforceOrgType, ExpiresAt: settings.SalesforceExpirationDate, AuthType: "Salesforce REST API"}
+		authType := "Salesforce REST API"
+		if settings.SalesforceRefreshToken != "" {
+			authType = "Salesforce OAuth"
+		}
+		settings.VerifiedConnections["salesforce"] = config.VerifiedConnection{VerifiedAt: options.Now().UTC().Format(time.RFC3339), Selection: settings.SalesforceAlias, Identity: username, OrgID: orgID, OrgStatus: status.Status, OrgType: settings.SalesforceOrgType, ExpiresAt: settings.SalesforceExpirationDate, AuthType: authType}
+		if options.SalesforceDevHubCheck != nil {
+			if hasHub, hubErr := options.SalesforceDevHubCheck(ctx, targetCredential(settings)); hubErr == nil && hasHub {
+				settings = settings.MarkSelectedAsDevHub()
+			}
+		}
 		if err := options.ConnectionSaver(settings); err != nil {
 			writeError(w, http.StatusInternalServerError, "Salesforce is available, but Dispatch could not save the check")
 			return
 		}
 		writeJSON(w, http.StatusOK, status)
+	})
+	mux.HandleFunc("GET /api/connections/salesforce/open", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings = settings.HydrateSalesforceOrgs()
+		if !settings.HasSalesforceREST() {
+			writeError(w, http.StatusBadRequest, "connect a Salesforce org before opening Salesforce")
+			return
+		}
+		if strings.EqualFold(settings.SalesforceOrgType, "scratch") && settings.SalesforceExpirationDate != "" {
+			expiresAt, parseErr := time.Parse("2006-01-02", settings.SalesforceExpirationDate)
+			if parseErr == nil && expiresAt.Before(options.Now().UTC().Truncate(24*time.Hour)) {
+				settings = settings.InvalidateSelectedSalesforceVerification("Expired")
+				_ = options.ConnectionSaver(settings)
+				writeError(w, http.StatusGone, "The selected Salesforce scratch org expired. Create a replacement scratch org to continue.")
+				return
+			}
+		}
+		credential := targetCredential(settings)
+		if settings.SalesforceRefreshToken != "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			refreshed, refreshErr := refreshSalesforceAccess(ctx, options.SalesforceRefresh, settings, credential)
+			if refreshErr != nil {
+				settings = settings.InvalidateSelectedSalesforceVerification("Reconnect required")
+				_ = options.ConnectionSaver(settings)
+				writeError(w, http.StatusUnauthorized, "Salesforce could not renew the selected org session. Reconnect the org, then try again.")
+				return
+			}
+			settings = refreshed
+			credential = targetCredential(settings)
+			if err := options.ConnectionSaver(settings); err != nil {
+				writeError(w, http.StatusInternalServerError, "Salesforce renewed the session, but Dispatch could not save it")
+				return
+			}
+		}
+		returnPath := "/lightning/page/home"
+		switch strings.TrimSpace(r.URL.Query().Get("destination")) {
+		case "box-settings":
+			returnPath = "/lightning/n/box__Box_Settings"
+		case "clm-app":
+			returnPath = "/lightning/app/c__CLM_Demo"
+		case "experience-site":
+			networkID := strings.TrimSpace(r.URL.Query().Get("site"))
+			if networkID == "" {
+				writeError(w, http.StatusBadRequest, "the Experience Cloud site is missing")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			returnPath, err = options.SalesforceExperiencePath(ctx, credential, "", networkID)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "Salesforce could not open the Experience Cloud site for the selected employee")
+				return
+			}
+		}
+		launchURL, err := salesforceFrontDoorURL(credential, returnPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "the selected Salesforce org is not ready to open")
+			return
+		}
+		w.Header().Set("Location", launchURL)
+		w.WriteHeader(http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /api/connections/salesforce/oauth/start", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if options.SalesforceCallbackReady != nil && !options.SalesforceCallbackReady() {
+			writeError(w, http.StatusConflict, "Salesforce login needs port 1717. Stop anything using 1717 and restart Dispatch.")
+			return
+		}
+		var input salesforceOAuthStartInput
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "Salesforce login request must be one valid JSON object")
+			return
+		}
+		started, err := oauthJobs.start(input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, started)
+	})
+	handleSalesforceOAuthCallback := func(w http.ResponseWriter, r *http.Request) {
+		if oauthError := strings.TrimSpace(r.URL.Query().Get("error")); oauthError != "" {
+			message := explainSalesforceOAuthError(oauthError, r.URL.Query().Get("error_description"))
+			oauthJobs.failState(r.URL.Query().Get("state"), message)
+			writeOAuthCallbackPage(w, "Salesforce login", message, false)
+			return
+		}
+		job, err := oauthJobs.lookup(r.URL.Query().Get("state"))
+		if err != nil {
+			writeOAuthCallbackPage(w, "Salesforce login", err.Error(), false)
+			return
+		}
+		code := strings.TrimSpace(r.URL.Query().Get("code"))
+		if code == "" {
+			oauthJobs.finish(job, "failed", "Salesforce did not return an authorization code", "", "", "")
+			writeOAuthCallbackPage(w, "Salesforce login", job.Message, false)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		token, err := options.SalesforceOAuth(ctx, salesforceapi.AuthorizationCodeRequest{
+			LoginURL: job.loginURL, ClientID: job.clientID, ClientSecret: job.clientSecret,
+			RedirectURL: job.redirectURL, Code: code, CodeVerifier: job.verifier,
+		})
+		if err != nil {
+			oauthJobs.finish(job, "failed", err.Error(), "", "", "")
+			writeOAuthCallbackPage(w, "Salesforce login", err.Error(), false)
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			oauthJobs.finish(job, "failed", "Connection settings are unavailable", "", "", "")
+			writeOAuthCallbackPage(w, "Salesforce login", "Connection settings are unavailable", false)
+			return
+		}
+		status, checkErr := options.SalesforceCheck(ctx, salesforceapi.Credential{
+			InstanceURL: token.InstanceURL, AccessToken: token.AccessToken,
+			ClientID: job.clientID, ClientSecret: job.clientSecret,
+		})
+		if checkErr != nil {
+			oauthJobs.finish(job, "failed", checkErr.Error(), "", "", "")
+			writeOAuthCallbackPage(w, "Salesforce login", checkErr.Error(), false)
+			return
+		}
+		username := status.Username
+		orgID := status.OrgID
+		role := job.Role
+		if role == "devhub" && options.SalesforceDevHubCheck != nil {
+			hasHub, hubErr := options.SalesforceDevHubCheck(ctx, salesforceapi.Credential{
+				InstanceURL: token.InstanceURL, AccessToken: token.AccessToken,
+				ClientID: job.clientID, ClientSecret: job.clientSecret,
+			})
+			if hubErr == nil && !hasHub {
+				settings = applySalesforceOAuthToken(settings, "org", job.clientID, job.clientSecret, token, username, orgID)
+				if err := options.ConnectionSaver(settings); err != nil {
+					oauthJobs.finish(job, "failed", "Salesforce login succeeded, but Dispatch could not save the connection", username, username, orgID)
+					writeOAuthCallbackPage(w, "Salesforce login", "Salesforce login succeeded, but Dispatch could not save the connection", false)
+					return
+				}
+				message := "This Salesforce org is not a Dev Hub. Enable Dev Hub in Setup, then log in as that org."
+				oauthJobs.finish(job, "failed", message, username, username, orgID)
+				writeOAuthCallbackPage(w, "Salesforce login", message, false)
+				return
+			}
+		}
+		settings = applySalesforceOAuthToken(settings, role, job.clientID, job.clientSecret, token, username, orgID)
+		if settings.VerifiedConnections == nil {
+			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
+		}
+		settings.VerifiedConnections["salesforce"] = config.VerifiedConnection{
+			VerifiedAt: options.Now().UTC().Format(time.RFC3339), Selection: settings.SalesforceAlias,
+			Identity: username, OrgID: orgID, OrgStatus: status.Status, AuthType: "Salesforce OAuth",
+		}
+		if err := options.ConnectionSaver(settings); err != nil {
+			oauthJobs.finish(job, "failed", "Salesforce login succeeded, but Dispatch could not save the connection", username, username, orgID)
+			writeOAuthCallbackPage(w, "Salesforce login", "Salesforce login succeeded, but Dispatch could not save the connection", false)
+			return
+		}
+		message := "Salesforce org connected and verified."
+		if job.Role == "devhub" {
+			message = "Salesforce Dev Hub connected."
+		}
+		alias := settings.SalesforceAlias
+		if job.Role == "devhub" {
+			alias = settings.SalesforceDevHubAlias
+		}
+		oauthJobs.finish(job, "active", message, alias, username, orgID)
+		writeOAuthCallbackPage(w, "Salesforce login", message, true)
+	}
+	mux.HandleFunc("GET /OauthRedirect", handleSalesforceOAuthCallback)
+	mux.HandleFunc("GET /api/connections/salesforce/oauth/callback", handleSalesforceOAuthCallback)
+	mux.HandleFunc("GET /api/connections/salesforce/oauth/{id}", func(w http.ResponseWriter, r *http.Request) {
+		job, ok := oauthJobs.get(r.PathValue("id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "Salesforce login was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
 	})
 	mux.HandleFunc("POST /api/salesforce/scratch-orgs", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -240,6 +493,14 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusAccepted, scratchJobs.start(input))
+	})
+	mux.HandleFunc("GET /api/salesforce/scratch-orgs/latest", func(w http.ResponseWriter, _ *http.Request) {
+		job, ok := scratchJobs.latest()
+		if !ok {
+			writeError(w, http.StatusNotFound, "scratch-org request was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
 	})
 	mux.HandleFunc("GET /api/salesforce/scratch-orgs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		job, ok := scratchJobs.get(r.PathValue("id"))
@@ -278,12 +539,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		verification.VerifiedAt = options.Now().UTC().Format(time.RFC3339)
 		if verification.Selection == "" {
-			verification.Selection = boxconn.DispatchCCGName
+			verification.Selection = firstNonEmpty(settings.BoxCCGAlias, boxconn.DispatchCCGName)
 		}
-		if settings.VerifiedConnections == nil {
-			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
-		}
-		settings.VerifiedConnections["box"] = verification
+		settings = settings.MarkBoxVerified(verification)
 		if err := options.ConnectionSaver(settings); err != nil {
 			writeError(w, http.StatusInternalServerError, "Box accepted the connection, but Dispatch could not save it")
 			return
@@ -296,8 +554,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
 			return
 		}
-		if !settings.HasBoxCCG() {
-			writeError(w, http.StatusBadRequest, "connect a Box CCG app before checking availability")
+		settings = settings.HydrateBoxConnections()
+		if !settings.HasBoxConnection() && !hasOAuthEnvironment() {
+			writeError(w, http.StatusBadRequest, "connect Box before checking availability")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -309,17 +568,164 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		verification.VerifiedAt = options.Now().UTC().Format(time.RFC3339)
 		if verification.Selection == "" {
-			verification.Selection = boxconn.DispatchCCGName
+			verification.Selection = firstNonEmpty(settings.BoxCCGAlias, boxconn.DispatchCCGName)
 		}
-		if settings.VerifiedConnections == nil {
-			settings.VerifiedConnections = map[string]config.VerifiedConnection{}
-		}
-		settings.VerifiedConnections["box"] = verification
+		settings = settings.MarkBoxVerified(verification)
 		if err := options.ConnectionSaver(settings); err != nil {
 			writeError(w, http.StatusInternalServerError, "Box is available, but Dispatch could not save the check")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
+	})
+	mux.HandleFunc("PUT /api/connections/box/selection", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input boxConnectionSelection
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "Box connection selection must be one valid JSON object")
+			return
+		}
+		input.ID = strings.TrimSpace(input.ID)
+		input.Alias = strings.TrimSpace(input.Alias)
+		if input.ID == "" && input.Alias == "" {
+			writeError(w, http.StatusBadRequest, "select a connected Box app")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings, err = settings.SelectBoxConnection(firstNonEmpty(input.ID, input.Alias))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not save the Box selection")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentBoxConnection(settings, settings.VerifiedConnections["box"]))
+	})
+	mux.HandleFunc("DELETE /api/connections/box/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("id"))
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "select a connected Box app to remove")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings, err = settings.RemoveBoxConnection(id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not remove the Box connection")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentBoxConnection(settings, settings.VerifiedConnections["box"]))
+	})
+	mux.HandleFunc("POST /api/connections/box/oauth/start", func(w http.ResponseWriter, r *http.Request) {
+		if options.BoxCallbackReady != nil && !options.BoxCallbackReady() {
+			writeError(w, http.StatusConflict, "Box login needs port 4400. Stop anything using 4400 and restart Dispatch.")
+			return
+		}
+		started, err := boxOAuthJobs.start()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, started)
+	})
+	handleBoxOAuthCallback := func(w http.ResponseWriter, r *http.Request) {
+		if oauthError := strings.TrimSpace(r.URL.Query().Get("error")); oauthError != "" {
+			message := firstNonEmpty(r.URL.Query().Get("error_description"), oauthError, "Box login did not finish")
+			boxOAuthJobs.failState(r.URL.Query().Get("state"), message)
+			writeOAuthCallbackPage(w, "Box login", message, false)
+			return
+		}
+		job, err := boxOAuthJobs.lookup(r.URL.Query().Get("state"))
+		if err != nil {
+			writeOAuthCallbackPage(w, "Box login", err.Error(), false)
+			return
+		}
+		code := strings.TrimSpace(r.URL.Query().Get("code"))
+		if code == "" {
+			boxOAuthJobs.finish(job, "failed", "Box did not return an authorization code", "", "", "")
+			writeOAuthCallbackPage(w, "Box login", job.Message, false)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		token, err := options.BoxOAuth(ctx, boxconn.AuthorizationCodeRequest{
+			ClientID: job.clientID, ClientSecret: job.clientSecret, RedirectURL: job.redirectURL,
+			Code: code, CodeVerifier: job.verifier,
+		})
+		if err != nil {
+			boxOAuthJobs.finish(job, "failed", err.Error(), "", "", "")
+			writeOAuthCallbackPage(w, "Box login", err.Error(), false)
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			boxOAuthJobs.finish(job, "failed", "Connection settings are unavailable", "", "", "")
+			writeOAuthCallbackPage(w, "Box login", "Connection settings are unavailable", false)
+			return
+		}
+		settings = applyBoxOAuthToken(settings, job.clientID, job.clientSecret, token, "", "", "")
+		verification, checkErr := options.BoxCheck(ctx, settings)
+		if checkErr != nil {
+			boxOAuthJobs.finish(job, "failed", checkErr.Error(), "", "", "")
+			writeOAuthCallbackPage(w, "Box login", checkErr.Error(), false)
+			return
+		}
+		verification.VerifiedAt = options.Now().UTC().Format(time.RFC3339)
+		settings = applyBoxOAuthToken(settings, job.clientID, job.clientSecret, token, verification.Identity, verification.Account, verification.Enterprise)
+		settings = settings.MarkBoxVerified(verification)
+		if err := options.ConnectionSaver(settings); err != nil {
+			boxOAuthJobs.finish(job, "failed", "Box login succeeded, but Dispatch could not save the connection", verification.Identity, verification.Identity, verification.Account)
+			writeOAuthCallbackPage(w, "Box login", "Box login succeeded, but Dispatch could not save the connection", false)
+			return
+		}
+		boxOAuthJobs.finish(job, "active", "Box connected and verified.", settings.BoxCCGAlias, verification.Identity, verification.Account)
+		writeOAuthCallbackPage(w, "Box login", "Box connected and verified.", true)
+	}
+	mux.HandleFunc("GET /oauth/callback", handleBoxOAuthCallback)
+	mux.HandleFunc("GET /api/connections/box/oauth/callback", handleBoxOAuthCallback)
+	mux.HandleFunc("GET /api/connections/box/oauth/{id}", func(w http.ResponseWriter, r *http.Request) {
+		job, ok := boxOAuthJobs.get(r.PathValue("id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "Box login was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+	})
+	mux.HandleFunc("DELETE /api/connections/salesforce/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("id"))
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "select a connected Salesforce org to remove")
+			return
+		}
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings, err = settings.RemoveSalesforceOrg(id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := options.ConnectionSaver(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not remove the Salesforce org")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
 	})
 	mux.HandleFunc("PUT /api/connections/salesforce", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -334,14 +740,28 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, "connection selection must contain one JSON object")
 			return
 		}
+		input.ID = strings.TrimSpace(input.ID)
 		input.Alias = strings.TrimSpace(input.Alias)
-		if input.Alias == "" {
+		if input.ID == "" && input.Alias == "" {
 			writeError(w, http.StatusBadRequest, "select an authenticated Salesforce org")
 			return
 		}
 		settings, err := options.ConnectionStore()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		settings = settings.HydrateSalesforceOrgs()
+		if selected, err := settings.SelectSalesforceOrg(firstNonEmpty(input.ID, input.Alias)); err == nil {
+			if selected.VerifiedConnections != nil {
+				delete(selected.VerifiedConnections, "salesforce")
+			}
+			settings = selected
+			if err := options.ConnectionSaver(settings); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not save the Salesforce selection")
+				return
+			}
+			writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
 			return
 		}
 		targets, err := options.SalesforceTargets()
@@ -404,7 +824,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		plan := config.SolutionPlan{
-			Components: input.Components, TemplateID: input.TemplateID,
+			Name: input.Name, Components: input.Components, TemplateID: input.TemplateID,
 			Template: input.Template, Repository: input.Repository, Strategy: input.Strategy,
 			// PackagePath is intentionally not browser-addressable in this slice.
 			PackagePath: existing.PackagePath,
@@ -469,6 +889,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusInternalServerError, "Dispatch could not assemble the selected template. Verify the template source is available, then try again.")
 			return
 		}
+		plan.Name = input.Name
 		if err := options.PlanSaver(plan); err != nil {
 			writeError(w, http.StatusInternalServerError, "Dispatch could not save the assembled deployment plan")
 			return
@@ -511,6 +932,14 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, diagnostic)
+	})
+	mux.HandleFunc("GET /api/runs/{id}/changes", func(w http.ResponseWriter, r *http.Request) {
+		changes, ok := options.Runs.changes(r.PathValue("id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "run was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, changes)
 	})
 	mux.HandleFunc("POST /api/runs/{id}/deploy", func(w http.ResponseWriter, r *http.Request) {
 		run, err := options.Runs.startDeployment(r.PathValue("id"))
@@ -562,17 +991,23 @@ type providerDetail struct {
 }
 
 type connectionSummary struct {
-	Name          string `json:"name"`
-	Configured    bool   `json:"configured"`
-	Verified      bool   `json:"verified"`
-	AuthType      string `json:"authType,omitempty"`
-	Selection     string `json:"selection,omitempty"`
-	Status        string `json:"status,omitempty"`
-	ExpiresAt     string `json:"expiresAt,omitempty"`
-	Alias         string `json:"alias,omitempty"`
-	SubjectType   string `json:"subjectType,omitempty"`
-	ClientIDHint  string `json:"clientIdHint,omitempty"`
-	SubjectIDHint string `json:"subjectIdHint,omitempty"`
+	Name             string                       `json:"name"`
+	Configured       bool                         `json:"configured"`
+	Verified         bool                         `json:"verified"`
+	AuthType         string                       `json:"authType,omitempty"`
+	Selection        string                       `json:"selection,omitempty"`
+	Status           string                       `json:"status,omitempty"`
+	ExpiresAt        string                       `json:"expiresAt,omitempty"`
+	Alias            string                       `json:"alias,omitempty"`
+	SubjectType      string                       `json:"subjectType,omitempty"`
+	ClientIDHint     string                       `json:"clientIdHint,omitempty"`
+	SubjectIDHint    string                       `json:"subjectIdHint,omitempty"`
+	RestConfigured   bool                         `json:"restConfigured,omitempty"`
+	DevHubConfigured bool                         `json:"devHubConfigured,omitempty"`
+	OAuthConfigured  bool                         `json:"oauthConfigured,omitempty"`
+	LaunchURL        string                       `json:"launchUrl,omitempty"`
+	Orgs             []salesforceConnectionOption `json:"orgs,omitempty"`
+	Connections      []boxConnectionOption        `json:"connections,omitempty"`
 }
 
 type planStore func() (config.SolutionPlan, error)
@@ -580,6 +1015,7 @@ type planSaver func(config.SolutionPlan) error
 
 type planResponse struct {
 	Exists     bool            `json:"exists"`
+	Name       string          `json:"name,omitempty"`
 	TemplateID string          `json:"templateId,omitempty"`
 	Template   string          `json:"template,omitempty"`
 	Repository string          `json:"repository,omitempty"`
@@ -596,6 +1032,7 @@ type planComponent struct {
 }
 
 type planUpdate struct {
+	Name       string   `json:"name"`
 	TemplateID string   `json:"templateId"`
 	Template   string   `json:"template"`
 	Repository string   `json:"repository"`
@@ -604,6 +1041,12 @@ type planUpdate struct {
 }
 
 func (p planUpdate) validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("enter a deployment name")
+	}
+	if utf8.RuneCountInString(p.Name) > 80 {
+		return fmt.Errorf("deployment name must be 80 characters or fewer")
+	}
 	if p.Strategy != solution.StrategyReuse && p.Strategy != solution.StrategyCreateNew {
 		return fmt.Errorf("choose reuse existing or create new")
 	}
@@ -632,6 +1075,7 @@ func (p planUpdate) validate() error {
 }
 
 func (p planUpdate) normalized() planUpdate {
+	p.Name = normalizeDeploymentName(p.Name)
 	p.TemplateID = strings.TrimSpace(p.TemplateID)
 	p.Template = strings.TrimSpace(p.Template)
 	p.Repository = strings.TrimSpace(p.Repository)
@@ -646,9 +1090,13 @@ func (p planUpdate) normalized() planUpdate {
 }
 
 func presentPlan(plan config.SolutionPlan, settings config.ConnectionSettings) planResponse {
+	name := strings.TrimSpace(plan.Name)
+	if name == "" {
+		name = strings.TrimSpace(plan.Template)
+	}
 	response := planResponse{
 		Exists: plan.TemplateID != "", TemplateID: plan.TemplateID,
-		Template: plan.Template, Repository: plan.Repository, Strategy: plan.Strategy,
+		Name: name, Template: plan.Template, Repository: plan.Repository, Strategy: plan.Strategy,
 		Components: make([]planComponent, 0, len(plan.Components)),
 	}
 	if response.Strategy == "" {
@@ -696,7 +1144,10 @@ func summarizeDeployment(record audit.DeploymentRecord) deploymentSummary {
 	for _, provider := range record.Providers {
 		providers = append(providers, providerSummary{Name: provider.Provider, Status: string(provider.StatusAfter)})
 	}
-	name := record.TemplateID
+	name := strings.TrimSpace(record.Name)
+	if name == "" {
+		name = record.TemplateID
+	}
 	if name == "" {
 		name = "Dispatch deployment"
 	}
@@ -726,33 +1177,25 @@ func detailDeployment(record audit.DeploymentRecord) deploymentDetail {
 func connectionSummaries(settings config.ConnectionSettings) []connectionSummary {
 	verified := settings.VerifiedConnections
 	boxVerification := verified["box"]
-	salesforceVerification := verified["salesforce"]
 
 	boxAuthType := ""
 	boxConfigured := false
-	if settings.HasBoxCCG() {
+	if settings.HasBoxOAuth() || hasOAuthEnvironment() {
+		boxConfigured = true
+		boxAuthType = "Box OAuth"
+	} else if settings.HasBoxCCG() {
 		boxConfigured = true
 		boxAuthType = "client credentials"
-	} else if hasOAuthEnvironment() {
-		boxConfigured = true
-		boxAuthType = "OAuth refresh token"
 	}
 	boxSummary := presentBoxConnection(settings, boxVerification)
 	boxSummary.Configured = boxConfigured
 	boxSummary.AuthType = boxAuthType
+	if boxSummary.Configured {
+		boxSummary.LaunchURL = "https://app.box.com/"
+	}
 	connections := []connectionSummary{
 		boxSummary,
-		{
-			Name: "Salesforce", Configured: settings.SalesforceAlias != "" || settings.HasSalesforceREST() || settings.HasSalesforceDevHub(), Verified: salesforceVerification.VerifiedAt != "",
-			AuthType: func() string {
-				if settings.HasSalesforceREST() || settings.HasSalesforceDevHub() {
-					return "Salesforce REST API"
-				}
-				return "Salesforce CLI"
-			}(),
-			Selection: settings.SalesforceAlias, Status: settings.SalesforceOrgStatus,
-			ExpiresAt: settings.SalesforceExpirationDate,
-		},
+		presentSalesforceConnection(settings),
 	}
 	if settings.DatabricksProfile != "" || settings.DatabricksHost != "" {
 		connections = append(connections, connectionSummary{
@@ -770,7 +1213,11 @@ func connectionSummaries(settings config.ConnectionSettings) []connectionSummary
 }
 
 func presentBoxConnection(settings config.ConnectionSettings, verification config.VerifiedConnection) connectionSummary {
+	settings = settings.HydrateBoxConnections()
 	alias := strings.TrimSpace(settings.BoxCCGAlias)
+	if alias == "" && settings.HasBoxOAuth() {
+		alias = firstNonEmpty(verification.Identity, "Box")
+	}
 	if alias == "" && settings.HasBoxCCG() {
 		alias = "Box CCG"
 	}
@@ -778,16 +1225,60 @@ func presentBoxConnection(settings config.ConnectionSettings, verification confi
 	if selection == "" {
 		selection = safeSelection(verification.Selection)
 	}
-	status := verification.AuthType
-	if status == "" && settings.HasBoxCCG() {
-		status = "Needs verification"
+	authType := "client credentials"
+	if settings.HasBoxOAuth() || hasOAuthEnvironment() {
+		authType = "Box OAuth"
 	}
 	return connectionSummary{
-		Name: "Box", Configured: settings.HasBoxCCG(), Verified: verification.VerifiedAt != "",
-		AuthType: "client credentials", Selection: selection, Status: status, Alias: alias,
-		SubjectType: settings.BoxCCGSubjectType, ClientIDHint: identifierHint(settings.BoxCCGClientID),
-		SubjectIDHint: identifierHint(settings.BoxCCGSubjectID),
+		Name: "Box", Configured: settings.HasBoxConnection() || hasOAuthEnvironment(), Verified: verification.VerifiedAt != "",
+		AuthType: authType, Selection: selection, Status: connectionReadiness(verification.VerifiedAt != ""),
+		Alias: alias, SubjectType: settings.BoxCCGSubjectType, ClientIDHint: identifierHint(settings.BoxCCGClientID),
+		SubjectIDHint: identifierHint(settings.BoxCCGSubjectID), OAuthConfigured: boxconn.HasBoxOAuthApp(),
+		Connections: presentBoxConnectionOptions(settings),
 	}
+}
+
+func presentSalesforceConnection(settings config.ConnectionSettings) connectionSummary {
+	settings = settings.HydrateSalesforceOrgs()
+	verification := settings.VerifiedConnections["salesforce"]
+	alias := strings.TrimSpace(settings.SalesforceAlias)
+	if alias == "" && settings.HasSalesforceREST() {
+		alias = restConnectionAlias()
+	}
+	authType := ""
+	switch {
+	case settings.SalesforceRefreshToken != "" || settings.SalesforceDevHubRefreshToken != "":
+		authType = "Salesforce OAuth"
+	case settings.HasSalesforceREST() || settings.HasSalesforceDevHub():
+		authType = "Salesforce REST API"
+	case alias != "":
+		authType = "Salesforce CLI"
+	}
+	launchURL := ""
+	if settings.HasSalesforceREST() {
+		launchURL = "/api/connections/salesforce/open"
+	}
+	return connectionSummary{
+		Name: "Salesforce", Configured: alias != "" || settings.HasSalesforceREST() || settings.HasSalesforceDevHub() || len(settings.SalesforceOrgs) > 0,
+		Verified: verification.VerifiedAt != "", AuthType: authType, Selection: alias,
+		Status: connectionReadiness(verification.VerifiedAt != ""), ExpiresAt: settings.SalesforceExpirationDate, Alias: alias,
+		ClientIDHint: identifierHint(settings.SalesforceClientID), RestConfigured: settings.HasSalesforceREST(),
+		DevHubConfigured: settings.HasSalesforceDevHub(), OAuthConfigured: settings.HasSalesforceOAuthApp(),
+		LaunchURL: launchURL,
+		Orgs:      presentSalesforceOrgOptions(settings),
+	}
+}
+
+func safeHTTPSLaunchURL(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	parsed.Path = "/"
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func identifierHint(value string) string {

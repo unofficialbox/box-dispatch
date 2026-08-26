@@ -28,7 +28,7 @@ an equivalent supported operation.
 Box Forms, Box Apps, Box HTTPS Connectors, and Box Automate workflows remain in
 the capability catalog but are nondeployable because they do not have complete
 public lifecycle APIs. They are hidden from the component picker by default
-through `.dispatch/ui-settings.bcl`; showing one produces a locked reference row.
+in the browser capability catalog as locked reference information.
 Box Dispatch does not use private web endpoints or browser automation as a
 provider adapter. Partial API coverage, including Automate's list/start-only
 surface, is tracked in [`PUBLIC_API_GAPS.md`](PUBLIC_API_GAPS.md).
