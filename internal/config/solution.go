@@ -4,6 +4,7 @@ package config
 // Persistence lives in internal/shellstate (BCL format); this package only owns
 // the type.
 type SolutionPlan struct {
+	Name        string   `json:"name,omitempty"`
 	Components  []string `json:"components"`
 	TemplateID  string   `json:"template_id"`
 	Template    string   `json:"template"`

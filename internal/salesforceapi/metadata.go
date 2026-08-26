@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+const (
+	metadataInventoryAttempts    = 3
+	maxMetadataSOAPResponseBytes = 64 << 20
+)
+
 type MetadataProgress struct {
 	ID                 string
 	Done               bool
@@ -24,6 +29,14 @@ type MetadataProgress struct {
 }
 
 type MetadataProgressFunc func(MetadataProgress)
+
+type MetadataRetrieveProgress struct {
+	ID     string
+	Done   bool
+	Status string
+}
+
+type MetadataRetrieveProgressFunc func(MetadataRetrieveProgress)
 
 // MetadataInventoryProgressFunc reports one completed metadata-type query. A
 // type is complete even when fullNames is empty, which lets browser clients
@@ -46,33 +59,20 @@ func (c *Client) ListMetadataWithProgress(ctx context.Context, credential Creden
 	result := map[string]bool{}
 	types := append([]string(nil), metadataTypes...)
 	sort.Strings(types)
-	for start := 0; start < len(types); start += 3 {
-		end := min(start+3, len(types))
-		queries := strings.Builder{}
-		for _, metadataType := range types[start:end] {
-			queries.WriteString("<met:queries><met:type>")
-			_ = xml.EscapeText(&queries, []byte(metadataType))
-			queries.WriteString("</met:type></met:queries>")
+	for _, metadataType := range types {
+		body := "<met:queries><met:type>" + xmlEscape(metadataType) + "</met:type></met:queries>" +
+			"<met:asOfVersion>" + apiVersion + "</met:asOfVersion>"
+		envelope, parseErr := c.listMetadataInventory(ctx, credential, apiVersion, body)
+		if parseErr != nil {
+			if metadataTypeUnavailableUntilDigitalExperiencesEnabled(metadataType, parseErr) {
+				if progress != nil {
+					progress(metadataType, []string{})
+				}
+				continue
+			}
+			return nil, fmt.Errorf("read Salesforce metadata type %s: %w", metadataType, parseErr)
 		}
-		body := queries.String() + "<met:asOfVersion>" + apiVersion + "</met:asOfVersion>"
-		data, err := c.metadataSOAP(ctx, credential, apiVersion, "listMetadata", body)
-		if err != nil {
-			return nil, fmt.Errorf("list Salesforce metadata: %w", err)
-		}
-		var envelope struct {
-			Body struct {
-				Response struct {
-					Results []struct {
-						FullName string `xml:"fullName"`
-						Type     string `xml:"type"`
-					} `xml:"result"`
-				} `xml:"listMetadataResponse"`
-			} `xml:"Body"`
-		}
-		if err := xml.Unmarshal(data, &envelope); err != nil {
-			return nil, fmt.Errorf("parse Salesforce metadata inventory: %w", err)
-		}
-		foundByType := make(map[string][]string, end-start)
+		foundByType := make(map[string][]string, 1)
 		for _, property := range envelope.Body.Response.Results {
 			if property.Type != "" && property.FullName != "" {
 				result[property.Type+":"+property.FullName] = true
@@ -80,14 +80,208 @@ func (c *Client) ListMetadataWithProgress(ctx context.Context, credential Creden
 			}
 		}
 		if progress != nil {
-			for _, metadataType := range types[start:end] {
-				fullNames := append([]string(nil), foundByType[metadataType]...)
-				sort.Strings(fullNames)
-				progress(metadataType, fullNames)
-			}
+			fullNames := append([]string(nil), foundByType[metadataType]...)
+			sort.Strings(fullNames)
+			progress(metadataType, fullNames)
 		}
 	}
 	return result, nil
+}
+
+// Salesforce rejects Network inventory queries while Digital Experiences is
+// disabled. For a deployment that enables Digital Experiences, that response
+// means the requested Network is absent; it is not a validation failure.
+func metadataTypeUnavailableUntilDigitalExperiencesEnabled(metadataType string, err error) bool {
+	if metadataType != "Network" || err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "invalid_type") && strings.Contains(message, "cannot use: network")
+}
+
+func (c *Client) listMetadataInventory(ctx context.Context, credential Credential, apiVersion, body string) (metadataInventoryEnvelope, error) {
+	var lastErr error
+	for attempt := 1; attempt <= metadataInventoryAttempts; attempt++ {
+		data, err := c.metadataSOAP(ctx, credential, apiVersion, "listMetadata", body)
+		if err != nil {
+			return metadataInventoryEnvelope{}, fmt.Errorf("list Salesforce metadata: %w", err)
+		}
+		envelope, parseErr := parseMetadataInventory(data)
+		if parseErr == nil {
+			return envelope, nil
+		}
+		lastErr = parseErr
+		if !incompleteSOAPResponse(parseErr) || attempt == metadataInventoryAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return metadataInventoryEnvelope{}, ctx.Err()
+		case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+		}
+	}
+	return metadataInventoryEnvelope{}, fmt.Errorf("parse Salesforce metadata inventory after %d attempts: %w", metadataInventoryAttempts, lastErr)
+}
+
+type metadataInventoryEnvelope struct {
+	Body struct {
+		Response struct {
+			Results []struct {
+				FullName string `xml:"fullName"`
+				Type     string `xml:"type"`
+			} `xml:"result"`
+		} `xml:"listMetadataResponse"`
+	} `xml:"Body"`
+}
+
+func parseMetadataInventory(data []byte) (metadataInventoryEnvelope, error) {
+	var envelope metadataInventoryEnvelope
+	if err := xml.Unmarshal(data, &envelope); err != nil {
+		return metadataInventoryEnvelope{}, err
+	}
+	return envelope, nil
+}
+
+func incompleteSOAPResponse(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unexpected eof") || message == "eof"
+}
+
+func (c *Client) RetrieveMetadata(ctx context.Context, credential Credential, apiVersion string, components []string, progress MetadataRetrieveProgressFunc) ([]byte, error) {
+	if !credential.Valid() {
+		return nil, fmt.Errorf("Salesforce connection is incomplete")
+	}
+	if len(components) == 0 {
+		return nil, fmt.Errorf("no Salesforce metadata components were selected")
+	}
+	apiVersion, err := c.metadataVersion(ctx, credential, apiVersion)
+	if err != nil {
+		return nil, err
+	}
+	members := map[string][]string{}
+	for _, component := range components {
+		metadataType, member, ok := strings.Cut(strings.TrimSpace(component), ":")
+		if !ok || metadataType == "" || member == "" {
+			return nil, fmt.Errorf("invalid Salesforce metadata component %q", component)
+		}
+		members[metadataType] = append(members[metadataType], member)
+	}
+	body := "<met:retrieveRequest><met:apiVersion>" + xmlEscape(apiVersion) + "</met:apiVersion><met:singlePackage>true</met:singlePackage><met:unpackaged>"
+	types := make([]string, 0, len(members))
+	for metadataType := range members {
+		types = append(types, metadataType)
+	}
+	sort.Strings(types)
+	for _, metadataType := range types {
+		body += "<met:types>"
+		values := append([]string(nil), members[metadataType]...)
+		sort.Strings(values)
+		for _, member := range values {
+			body += "<met:members>" + xmlEscape(member) + "</met:members>"
+		}
+		body += "<met:name>" + xmlEscape(metadataType) + "</met:name></met:types>"
+	}
+	body += "<met:version>" + xmlEscape(apiVersion) + "</met:version></met:unpackaged></met:retrieveRequest>"
+	data, err := c.metadataSOAP(ctx, credential, apiVersion, "retrieve", body)
+	if err != nil {
+		return nil, fmt.Errorf("start Salesforce metadata retrieval: %w", err)
+	}
+	var started struct {
+		Body struct {
+			Response struct {
+				Result struct {
+					ID    string `xml:"id"`
+					State string `xml:"state"`
+				} `xml:"result"`
+			} `xml:"retrieveResponse"`
+		} `xml:"Body"`
+	}
+	if err := xml.Unmarshal(data, &started); err != nil || strings.TrimSpace(started.Body.Response.Result.ID) == "" {
+		return nil, fmt.Errorf("parse Salesforce metadata retrieval response")
+	}
+	current := MetadataRetrieveProgress{ID: started.Body.Response.Result.ID, Status: started.Body.Response.Result.State}
+	if progress != nil {
+		progress(current)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("wait for Salesforce metadata retrieval: %w", ctx.Err())
+		case <-time.After(c.pollInterval()):
+		}
+		zipData, next, retrieveErr := c.checkMetadataRetrieve(ctx, credential, apiVersion, current.ID)
+		if retrieveErr != nil {
+			return nil, retrieveErr
+		}
+		current = next
+		if progress != nil {
+			progress(current)
+		}
+		if !current.Done {
+			continue
+		}
+		if len(zipData) == 0 {
+			return nil, fmt.Errorf("Salesforce metadata retrieval completed without a package")
+		}
+		return zipData, nil
+	}
+}
+
+func (c *Client) checkMetadataRetrieve(ctx context.Context, credential Credential, apiVersion, id string) ([]byte, MetadataRetrieveProgress, error) {
+	body := "<met:asyncProcessId>" + xmlEscape(id) + "</met:asyncProcessId><met:includeZip>true</met:includeZip>"
+	data, err := c.metadataSOAP(ctx, credential, apiVersion, "checkRetrieveStatus", body)
+	if err != nil {
+		return nil, MetadataRetrieveProgress{ID: id}, fmt.Errorf("read Salesforce metadata retrieval status: %w", err)
+	}
+	var envelope struct {
+		Body struct {
+			Response struct {
+				Result struct {
+					ID       string `xml:"id"`
+					Done     bool   `xml:"done"`
+					Status   string `xml:"status"`
+					Success  bool   `xml:"success"`
+					ZipFile  string `xml:"zipFile"`
+					Messages []struct {
+						FileName string `xml:"fileName"`
+						Problem  string `xml:"problem"`
+					} `xml:"messages"`
+				} `xml:"result"`
+			} `xml:"checkRetrieveStatusResponse"`
+		} `xml:"Body"`
+	}
+	if err := xml.Unmarshal(data, &envelope); err != nil {
+		return nil, MetadataRetrieveProgress{ID: id}, fmt.Errorf("parse Salesforce metadata retrieval status: %w", err)
+	}
+	result := envelope.Body.Response.Result
+	current := MetadataRetrieveProgress{ID: firstNonEmpty(result.ID, id), Done: result.Done, Status: result.Status}
+	if !result.Done {
+		return nil, current, nil
+	}
+	if !result.Success {
+		messages := []string{}
+		for _, message := range result.Messages {
+			problem := strings.TrimSpace(message.Problem)
+			if message.FileName != "" {
+				problem = message.FileName + ": " + problem
+			}
+			if problem != "" {
+				messages = append(messages, problem)
+			}
+		}
+		if len(messages) == 0 {
+			messages = append(messages, firstNonEmpty(result.Status, "failed"))
+		}
+		return nil, current, fmt.Errorf("Salesforce metadata retrieval failed: %s", strings.Join(messages, "; "))
+	}
+	zipData, err := base64.StdEncoding.DecodeString(strings.TrimSpace(result.ZipFile))
+	if err != nil {
+		return nil, current, fmt.Errorf("decode Salesforce metadata retrieval package: %w", err)
+	}
+	return zipData, current, nil
 }
 
 func (c *Client) DeployMetadata(ctx context.Context, credential Credential, apiVersion string, zipData []byte, progress MetadataProgressFunc) (MetadataProgress, error) {
@@ -217,12 +411,15 @@ func (c *Client) metadataSOAP(ctx context.Context, credential Credential, apiVer
 	}
 	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 	req.Header.Set("SOAPAction", operation)
-	response, err := c.httpClient().Do(req)
+	// Preserve the POST body when Salesforce redirects a Metadata API request.
+	// Go's default 301/302 handling changes POST to GET, which can turn a valid
+	// SOAP call into an empty 200 response and surface as an XML EOF.
+	response, err := c.jsonClient(http.MethodPost).Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	data, err := readMetadataSOAPResponse(response.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +438,17 @@ func (c *Client) metadataSOAP(ctx context.Context, credential Credential, apiVer
 			message = fmt.Sprintf("HTTP %d from Salesforce Metadata API", response.StatusCode)
 		}
 		return nil, fmt.Errorf("%s", message)
+	}
+	return data, nil
+}
+
+func readMetadataSOAPResponse(reader io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, maxMetadataSOAPResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxMetadataSOAPResponseBytes {
+		return nil, fmt.Errorf("Salesforce Metadata API response exceeds %d MiB", maxMetadataSOAPResponseBytes>>20)
 	}
 	return data, nil
 }

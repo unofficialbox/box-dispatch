@@ -131,6 +131,17 @@ type BoxManifest struct {
 type SalesforceManifest struct {
 	RequiredPackages       []SalesforcePackageRequirement       `json:"required_packages,omitempty"`
 	RequiredPermissionSets []SalesforcePermissionSetRequirement `json:"required_permission_sets,omitempty"`
+	SeedScripts            []SalesforceSeedScript               `json:"seed_scripts,omitempty"`
+}
+
+// SalesforceSeedScript declares an idempotent Apex script that populates the
+// solution's initial records after metadata and permission sets are ready.
+type SalesforceSeedScript struct {
+	Path            string   `json:"path"`
+	Label           string   `json:"label,omitempty"`
+	Object          string   `json:"object,omitempty"`
+	ExternalIDField string   `json:"external_id_field,omitempty"`
+	ExternalIDs     []string `json:"external_ids,omitempty"`
 }
 
 type SalesforcePackageRequirement struct {
@@ -563,6 +574,13 @@ func normalizeCapabilityCatalog(manifest Manifest) Manifest {
 	}
 	if manifest.TemplateID == "clm" && len(manifest.Salesforce.RequiredPermissionSets) == 0 {
 		manifest.Salesforce.RequiredPermissionSets = clmSalesforcePermissionSets()
+	}
+	if manifest.TemplateID == "clm" && len(manifest.Salesforce.SeedScripts) == 0 {
+		manifest.Salesforce.SeedScripts = []SalesforceSeedScript{{
+			Path: "scripts/seed-clm-salesforce-sample-data.apex", Label: "CLM sample contract records",
+			Object: "CLM_Contract__c", ExternalIDField: "Contract_ID__c",
+			ExternalIDs: []string{"CLM-SAMPLE-NST-001", "CLM-SAMPLE-NST-2024", "CLM-SAMPLE-NST-2025", "CLM-SAMPLE-ACM-001"},
+		}}
 	}
 	capabilityIDs := map[string]bool{}
 	for _, capability := range manifest.Box.Capabilities {

@@ -29,9 +29,12 @@ Run the complete embedded workspace against a deterministic in-memory API:
 ```bash
 go run ./cmd/box-dispatch mock
 go run ./cmd/box-dispatch mock --no-open --port 8788
+go run ./cmd/box-dispatch mock --no-open --port 8788 --fail-connection-provider salesforce
 ```
 
-The mock does not read credentials, clone packages, or call providers.
+The mock does not read credentials, clone packages, or call providers. Use
+`--fail-connection-provider` or `--fail-validation-provider` with `box` or
+`salesforce` to exercise recovery and diagnostic states.
 
 A live successful workflow can be recorded as credential-redacted JSON Lines:
 
@@ -41,11 +44,17 @@ go run ./cmd/box-dispatch --record-api .dispatch/recordings/clm-success.jsonl
 
 ## Build
 
-Build the React application and Go executable:
+```bash
+make build
+```
+
+This builds the React application into `internal/webui/dist` and then builds the Go
+executable. To build each side directly:
 
 ```bash
 cd web && bun install && bun run build
-cd .. && go build -o box-dispatch ./cmd/box-dispatch
+cd ..
+go build -o box-dispatch ./cmd/box-dispatch
 ```
 
 ## Plain command interface
@@ -81,18 +90,23 @@ Use `--profile <name>`, `BOX_DISPATCH_PROFILE=<name>`, or the default profile.
 Provider values are documented in [`.env.sample`](.env.sample). Real `.env` files and
 tokens must never be committed.
 
-Configuration and deployment-plan state are stored locally. The browser receives no
-provider credentials or raw provider responses.
+Dispatch supports one or more Box and Salesforce connections. OAuth and token refresh are
+owned by the loopback Go service; credentials are never returned to browser code. Safe
+connection selection and deployment-plan state are stored as owner-only BCL documents under
+`.dispatch/`.
+
+Salesforce browser login uses port `1717`. Box browser login uses port `4400`. Dispatch
+reports a direct remediation message if either callback port is unavailable.
 
 ## Browser workflow
 
 The web workspace guides operators through:
 
-1. Choose a supported solution and provider set.
+1. Name the deployment, then choose a supported solution and provider set.
 2. Connect and verify Box and Salesforce.
 3. Configure deployment strategy and supported components.
 4. Validate provider state and deployment prerequisites.
-5. Apply the validated deployment and review the audit result.
+5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
 
 Databricks and Amazon Bedrock AgentCore remain visible as unavailable roadmap items until
 their supported lifecycle is complete.
@@ -111,7 +125,6 @@ Architecture and endpoint details are documented in
 [`docs/WEB_APP_ARCHITECTURE.md`](docs/WEB_APP_ARCHITECTURE.md).
 
 ## Verification
-
 Before committing:
 
 ```bash

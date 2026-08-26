@@ -5,7 +5,7 @@ declare module 'react' {
     interface IntrinsicElements {
       'box-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
-        tone?: 'primary' | 'secondary' | 'danger' | 'success'
+        tone?: 'primary' | 'neutral' | 'danger'
         disabled?: boolean
         isLoading?: boolean
       }
@@ -51,7 +51,7 @@ declare module 'react' {
       }
       'box-badge': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
-        tone?: 'info' | 'success' | 'warning' | 'danger' | string
+        tone?: 'neutral' | 'info' | 'brand' | 'success' | 'error' | 'warning' | 'inprogress'
       }
       'box-progress-bar': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
@@ -69,6 +69,14 @@ declare module 'react' {
         position?: 'left' | 'right' | 'bottom'
         size?: 'small' | 'medium' | 'large' | 'full'
         busy?: boolean
+      }
+      'box-diff-viewer': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        heading?: string
+        'before-text'?: string
+        'after-text'?: string
+        'before-label'?: string
+        'after-label'?: string
+        mode?: 'split' | 'inline'
       }
       'box-text-field': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string

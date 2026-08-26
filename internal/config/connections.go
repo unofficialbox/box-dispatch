@@ -18,26 +18,33 @@ type ConnectionSettings struct {
 	// may submit them during connection setup, but API responses never return
 	// them. Like Box CCG credentials, these values are stored in the 0600 BCL
 	// settings file until a system keychain-backed store is introduced.
-	SalesforceInstanceURL  string `json:"salesforceInstanceUrl,omitempty"`
-	SalesforceAccessToken  string `json:"salesforceAccessToken,omitempty"`
-	SalesforceDevHubURL    string `json:"salesforceDevHubUrl,omitempty"`
-	SalesforceDevHubToken  string `json:"salesforceDevHubToken,omitempty"`
-	SalesforceClientID     string `json:"salesforceClientId,omitempty"`
-	SalesforceClientSecret string `json:"salesforceClientSecret,omitempty"`
-	DatabricksHost         string `json:"databricksHost,omitempty"`
-	DatabricksProfile      string `json:"databricksProfile,omitempty"`
-	AWSProfile             string `json:"awsProfile,omitempty"`
-	AWSRegion              string `json:"awsRegion,omitempty"`
+	SalesforceInstanceURL        string                    `json:"salesforceInstanceUrl,omitempty"`
+	SalesforceAccessToken        string                    `json:"salesforceAccessToken,omitempty"`
+	SalesforceRefreshToken       string                    `json:"salesforceRefreshToken,omitempty"`
+	SalesforceDevHubURL          string                    `json:"salesforceDevHubUrl,omitempty"`
+	SalesforceDevHubToken        string                    `json:"salesforceDevHubToken,omitempty"`
+	SalesforceDevHubRefreshToken string                    `json:"salesforceDevHubRefreshToken,omitempty"`
+	SalesforceClientID           string                    `json:"salesforceClientId,omitempty"`
+	SalesforceClientSecret       string                    `json:"salesforceClientSecret,omitempty"`
+	SalesforceOrgs               []SalesforceOrgConnection `json:"salesforceOrgs,omitempty"`
+	SalesforceSelectedOrgID      string                    `json:"salesforceSelectedOrgId,omitempty"`
+	SalesforceDevHubOrgID        string                    `json:"salesforceDevHubOrgId,omitempty"`
+	DatabricksHost               string                    `json:"databricksHost,omitempty"`
+	DatabricksProfile            string                    `json:"databricksProfile,omitempty"`
+	AWSProfile                   string                    `json:"awsProfile,omitempty"`
+	AWSRegion                    string                    `json:"awsRegion,omitempty"`
 
 	// Box Client Credentials Grant app. The subject determines who the token acts
 	// as: box_subject_type "user" keeps created resources owned by that user,
 	// "enterprise" acts as the service account. Either way the token carries the
 	// enterprise app's scopes (e.g. Doc Gen) the CLI's OAuth token lacks.
-	BoxCCGClientID     string `json:"boxCcgClientId,omitempty"`
-	BoxCCGClientSecret string `json:"boxCcgClientSecret,omitempty"`
-	BoxCCGSubjectType  string `json:"boxCcgSubjectType,omitempty"` // "user" or "enterprise"
-	BoxCCGSubjectID    string `json:"boxCcgSubjectId,omitempty"`
-	BoxCCGAlias        string `json:"boxCcgAlias,omitempty"`
+	BoxCCGClientID          string             `json:"boxCcgClientId,omitempty"`
+	BoxCCGClientSecret      string             `json:"boxCcgClientSecret,omitempty"`
+	BoxCCGSubjectType       string             `json:"boxCcgSubjectType,omitempty"` // "user" or "enterprise"
+	BoxCCGSubjectID         string             `json:"boxCcgSubjectId,omitempty"`
+	BoxCCGAlias             string             `json:"boxCcgAlias,omitempty"`
+	BoxConnections          []BoxAppConnection `json:"boxConnections,omitempty"`
+	BoxSelectedConnectionID string             `json:"boxSelectedConnectionId,omitempty"`
 
 	// BoxDefaultConnection records the selected CCG app. Older installations may
 	// contain a Box CLI environment name; Dispatch surfaces a migration message
@@ -54,32 +61,50 @@ type ConnectionSettings struct {
 // Selection identifies the configured alias/profile/environment that produced
 // the result so manually edited settings cannot reuse a mismatched snapshot.
 type VerifiedConnection struct {
-	VerifiedAt string   `json:"verifiedAt"`
-	Selection  string   `json:"selection,omitempty"`
-	Identity   string   `json:"identity,omitempty"`
-	Account    string   `json:"account,omitempty"`
-	Enterprise string   `json:"enterprise,omitempty"`
-	Profile    string   `json:"profile,omitempty"`
-	Host       string   `json:"host,omitempty"`
-	Region     string   `json:"region,omitempty"`
-	Options    []string `json:"options,omitempty"`
-	AuthType   string   `json:"authType,omitempty"`
-	OrgID      string   `json:"orgId,omitempty"`
-	OrgStatus  string   `json:"orgStatus,omitempty"`
-	OrgType    string   `json:"orgType,omitempty"`
-	ExpiresAt  string   `json:"expiresAt,omitempty"`
+	VerifiedAt   string   `json:"verifiedAt"`
+	Selection    string   `json:"selection,omitempty"`
+	Identity     string   `json:"identity,omitempty"`
+	Account      string   `json:"account,omitempty"`
+	Enterprise   string   `json:"enterprise,omitempty"`
+	Profile      string   `json:"profile,omitempty"`
+	Host         string   `json:"host,omitempty"`
+	Region       string   `json:"region,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	AuthType     string   `json:"authType,omitempty"`
+	OrgID        string   `json:"orgId,omitempty"`
+	OrgStatus    string   `json:"orgStatus,omitempty"`
+	OrgType      string   `json:"orgType,omitempty"`
+	ExpiresAt    string   `json:"expiresAt,omitempty"`
+	RefreshToken string   `json:"-"`
 }
 
 // HasBoxCCG reports whether a complete CCG credential set has been captured.
 func (c ConnectionSettings) HasBoxCCG() bool {
+	c = c.HydrateBoxConnections()
 	return c.BoxCCGClientID != "" && c.BoxCCGClientSecret != "" &&
 		c.BoxCCGSubjectType != "" && c.BoxCCGSubjectID != ""
 }
 
+func (c ConnectionSettings) HasBoxOAuth() bool {
+	c = c.HydrateBoxConnections()
+	for _, app := range c.BoxConnections {
+		if app.RefreshToken != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c ConnectionSettings) HasBoxConnection() bool {
+	return c.HasBoxOAuth() || c.HasBoxCCG()
+}
+
 func (c ConnectionSettings) HasSalesforceREST() bool {
+	c = c.HydrateSalesforceOrgs()
 	return c.SalesforceInstanceURL != "" && c.SalesforceAccessToken != ""
 }
 
-func (c ConnectionSettings) HasSalesforceDevHub() bool {
-	return c.SalesforceDevHubURL != "" && c.SalesforceDevHubToken != "" && c.SalesforceClientID != ""
+func (c ConnectionSettings) HasSalesforceOAuthApp() bool {
+	// Browser login uses Salesforce's public PlatformCLI client.
+	return true
 }

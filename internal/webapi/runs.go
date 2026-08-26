@@ -13,6 +13,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 )
 
 type runAction string
@@ -45,13 +46,16 @@ type runEvent struct {
 }
 
 type runResponse struct {
-	ID          string            `json:"id"`
-	Action      runAction         `json:"action"`
-	Status      runStatus         `json:"status"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	StartedAt   *time.Time        `json:"startedAt,omitempty"`
-	CompletedAt *time.Time        `json:"completedAt,omitempty"`
-	Providers   []providerSummary `json:"providers,omitempty"`
+	ID          string                        `json:"id"`
+	Deployment  string                        `json:"deployment,omitempty"`
+	ChangeCount int                           `json:"changeCount,omitempty"`
+	Action      runAction                     `json:"action"`
+	Status      runStatus                     `json:"status"`
+	CreatedAt   time.Time                     `json:"createdAt"`
+	StartedAt   *time.Time                    `json:"startedAt,omitempty"`
+	CompletedAt *time.Time                    `json:"completedAt,omitempty"`
+	Providers   []providerSummary             `json:"providers,omitempty"`
+	Resources   []lifecycle.ResourceReference `json:"resources,omitempty"`
 }
 
 type runDiagnostic struct {
@@ -64,15 +68,21 @@ type runDiagnostic struct {
 }
 
 type persistedRun struct {
-	ID          string            `json:"id"`
-	Action      runAction         `json:"action"`
-	Status      runStatus         `json:"status"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	StartedAt   *time.Time        `json:"startedAt,omitempty"`
-	CompletedAt *time.Time        `json:"completedAt,omitempty"`
-	Providers   []providerSummary `json:"providers,omitempty"`
-	Events      []runEvent        `json:"events,omitempty"`
-	Diagnostic  *runDiagnostic    `json:"diagnostic,omitempty"`
+	ID          string              `json:"id"`
+	Action      runAction           `json:"action"`
+	Status      runStatus           `json:"status"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	StartedAt   *time.Time          `json:"startedAt,omitempty"`
+	CompletedAt *time.Time          `json:"completedAt,omitempty"`
+	Providers   []providerSummary   `json:"providers,omitempty"`
+	Plan        config.SolutionPlan `json:"plan,omitempty"`
+	Items       []lifecycle.Item    `json:"items,omitempty"`
+	Events      []runEvent          `json:"events,omitempty"`
+	Diagnostic  *runDiagnostic      `json:"diagnostic,omitempty"`
+}
+
+type runChangesResponse struct {
+	Files []salesforceapi.MetadataFileDiff `json:"files"`
 }
 
 type runExecutor func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error)
@@ -254,6 +264,20 @@ func (m *runManager) response(id string) (runResponse, bool) {
 	return summarizeRun(run), true
 }
 
+func (m *runManager) changes(id string) (runChangesResponse, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	run := m.runs[id]
+	if run == nil {
+		return runChangesResponse{}, false
+	}
+	files := []salesforceapi.MetadataFileDiff{}
+	for _, item := range run.items {
+		files = append(files, item.Changes...)
+	}
+	return runChangesResponse{Files: files}, true
+}
+
 func (m *runManager) history() []runResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -326,10 +350,34 @@ func (m *runManager) appendProgressEventLocked(run *deploymentRun, provider stri
 
 func summarizeRun(run *deploymentRun) runResponse {
 	providers := make([]providerSummary, 0, len(run.items))
+	resources := []lifecycle.ResourceReference{}
+	changeCount := 0
 	for _, item := range run.items {
-		providers = append(providers, providerSummary{Name: item.Provider, Status: string(item.Status)})
+		resources = append(resources, item.Resources...)
+		changeCount += len(item.Changes)
+		status := item.Status
+		if run.action == runActionDeploy && (run.status == runQueued || run.status == runRunning) {
+			status = deploymentProviderStatus(run.events, item.Provider)
+		}
+		providers = append(providers, providerSummary{Name: item.Provider, Status: string(status)})
 	}
-	return runResponse{ID: run.id, Action: run.action, Status: run.status, CreatedAt: run.createdAt, StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: providers}
+	return runResponse{ID: run.id, Deployment: run.plan.Name, ChangeCount: changeCount, Action: run.action, Status: run.status, CreatedAt: run.createdAt, StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: providers, Resources: resources}
+}
+
+func deploymentProviderStatus(events []runEvent, provider string) lifecycle.Status {
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event.Provider != provider || event.Component != "" {
+			continue
+		}
+		switch event.ProgressState {
+		case lifecycle.ProgressCompleted:
+			return lifecycle.StatusPresent
+		case lifecycle.ProgressFailed:
+			return lifecycle.StatusFailed
+		}
+	}
+	return lifecycle.StatusPending
 }
 
 func (m *runManager) restoreHistory() {
@@ -347,10 +395,13 @@ func (m *runManager) restoreHistory() {
 			continue
 		}
 		run := &deploymentRun{
-			id: saved.ID, action: saved.Action, status: saved.Status, createdAt: saved.CreatedAt,
+			id: saved.ID, action: saved.Action, status: saved.Status, plan: saved.Plan, createdAt: saved.CreatedAt,
 			startedAt: saved.StartedAt, completedAt: saved.CompletedAt,
-			items: summariesToItems(saved.Providers), events: append([]runEvent(nil), saved.Events...),
+			items: append([]lifecycle.Item(nil), saved.Items...), events: append([]runEvent(nil), saved.Events...),
 			diagnostic: saved.Diagnostic, listeners: map[chan runEvent]struct{}{},
+		}
+		if len(run.items) == 0 {
+			run.items = summariesToItems(saved.Providers)
 		}
 		if run.status == runQueued || run.status == runRunning {
 			completed := m.now().UTC()
@@ -379,6 +430,7 @@ func (m *runManager) saveLocked() {
 		persisted = append(persisted, persistedRun{
 			ID: run.id, Action: run.action, Status: run.status, CreatedAt: run.createdAt,
 			StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: summarizeRun(run).Providers,
+			Plan: run.plan, Items: append([]lifecycle.Item(nil), run.items...),
 			Events: append([]runEvent(nil), run.events...), Diagnostic: run.diagnostic,
 		})
 	}
@@ -401,7 +453,11 @@ func safeDiagnostic(action runAction, err error) *runDiagnostic {
 	var providerFailure *providerRunFailure
 	if errors.As(err, &providerFailure) {
 		provider = providerName(providerFailure.Provider)
-		detail = strings.TrimSpace(strings.Join([]string{providerFailure.Detail, providerFailure.Diagnostic}, "\n\n"))
+		detail = strings.TrimSpace(providerFailure.Detail)
+		diagnostic := strings.TrimSpace(providerFailure.Diagnostic)
+		if diagnostic != "" && !strings.Contains(detail, diagnostic) {
+			detail = strings.TrimSpace(strings.Join([]string{detail, diagnostic}, "\n\n"))
+		}
 		if provider != "" {
 			summary = provider + " could not complete validation."
 		}
@@ -524,13 +580,33 @@ func sanitizeDiagnosticDetail(value string) string {
 }
 
 func validatePlanRun(ctx context.Context, plan config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+	return validatePlanRunWith(ctx, plan, emit, lifecycle.ValidateProviderAuthentication, lifecycle.ValidateProvider)
+}
+
+type providerAuthenticationCheck func(context.Context, string) error
+type providerValidation func(string, string, lifecycle.Reporter) (lifecycle.Item, error)
+
+func validatePlanRunWith(ctx context.Context, plan config.SolutionPlan, emit func(string, lifecycle.ProgressUpdate), authenticate providerAuthenticationCheck, validate providerValidation) ([]lifecycle.Item, error) {
 	items := make([]lifecycle.Item, 0, len(plan.Components))
 	for _, provider := range plan.Components {
 		if err := ctx.Err(); err != nil {
 			return items, err
 		}
+		component := "Authentication"
+		emit(provider, lifecycle.ProgressUpdate{Message: "Testing the selected " + providerName(provider) + " connection", Component: component, State: lifecycle.ProgressRunning, Current: 0, Total: 1})
+		if err := authenticate(ctx, provider); err != nil {
+			detail := providerName(provider) + " authentication failed: " + err.Error()
+			emit(provider, lifecycle.ProgressUpdate{Message: detail, Component: component, State: lifecycle.ProgressFailed, Current: 1, Total: 1})
+			return append(items, lifecycle.Item{Provider: provider, Name: providerName(provider), Status: lifecycle.StatusFailed, Detail: detail}), nil
+		}
+		emit(provider, lifecycle.ProgressUpdate{Message: "Authentication verified", Component: component, State: lifecycle.ProgressCompleted, Current: 1, Total: 1})
+	}
+	for _, provider := range plan.Components {
+		if err := ctx.Err(); err != nil {
+			return items, err
+		}
 		emit(provider, lifecycle.ProgressUpdate{Message: "Validating " + providerName(provider) + " configuration", State: lifecycle.ProgressActivity})
-		item, err := lifecycle.ValidateProvider(plan.PackagePath, provider, func(update lifecycle.ProgressUpdate) { emit(provider, update) })
+		item, err := validate(plan.PackagePath, provider, func(update lifecycle.ProgressUpdate) { emit(provider, update) })
 		if err != nil {
 			return items, err
 		}
@@ -563,7 +639,7 @@ func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecy
 		items[index] = result
 		emitDeploymentResult(result, emit)
 	}
-	if _, err := audit.ExportDeployment(plan.PackagePath, before, items, startedAt, time.Now().UTC()); err != nil {
+	if _, err := audit.ExportDeployment(plan.PackagePath, plan.Name, before, items, startedAt, time.Now().UTC()); err != nil {
 		return items, fmt.Errorf("record deployment audit: %w", err)
 	}
 	return items, nil

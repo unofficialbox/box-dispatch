@@ -9,11 +9,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/unofficialbox/box-dispatch/internal/checker"
+	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/engine"
 	"github.com/unofficialbox/box-dispatch/internal/model"
 )
 
 func main() {
+	if err := config.LoadDotEnv(""); err != nil {
+		fmt.Fprintf(os.Stderr, "could not load .env: %v\n", err)
+	}
 	if err := newRootCommand().Execute(); err != nil {
 		os.Exit(1)
 	}

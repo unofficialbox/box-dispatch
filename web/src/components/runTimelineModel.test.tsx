@@ -6,6 +6,22 @@ import { presentProviderProgress } from './runTimelineModel'
 import { latestActivityEvents } from './liveActivityModel'
 
 describe('presentProviderProgress', () => {
+  it('keeps Salesforce active while a managed package is still installing', () => {
+    const providers = presentProviderProgress([
+      { id: 'box', name: 'Box', configured: true, verified: true, ready: true },
+      { id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true },
+    ], {
+      id: 'deploy-1', action: 'deploy', status: 'running', providers: [{ name: 'box', status: 'present' }, { name: 'salesforce', status: 'needs deployment' }],
+    }, [
+      { sequence: 1, at: '2026-08-26T00:00:00Z', type: 'activity', provider: 'box', message: 'Box configuration applied', status: 'running', progressState: 'completed' },
+      { sequence: 2, at: '2026-08-26T00:00:01Z', type: 'activity', provider: 'salesforce', message: 'Applying Salesforce configuration', status: 'running', progressState: 'running' },
+      { sequence: 3, at: '2026-08-26T00:02:08Z', type: 'activity', provider: 'salesforce', component: 'Managed Package:Box for Salesforce 5.43', message: 'Salesforce reports in progress · 2m7s elapsed', status: 'running', progressState: 'running' },
+    ])
+
+    expect(providers.map((provider) => provider.state)).toEqual(['complete', 'active'])
+    expect(providers[1].components[0]).toMatchObject({ state: 'running', message: 'Salesforce reports in progress · 2m7s elapsed' })
+  })
+
   it('marks an interrupted component as failed when its provider fails', () => {
     const providers = presentProviderProgress([{ id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true }], {
       id: 'run-1', action: 'validate', status: 'failed', providers: [{ name: 'salesforce', status: 'failed' }],

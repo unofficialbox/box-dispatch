@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -52,11 +53,15 @@ func makeMockCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
-			return runMockWebApplication(cmd, port, !noOpen)
+			validationFailureProvider, _ := cmd.Flags().GetString("fail-validation-provider")
+			connectionFailureProvider, _ := cmd.Flags().GetString("fail-connection-provider")
+			return runMockWebApplication(cmd, port, !noOpen, validationFailureProvider, connectionFailureProvider)
 		},
 	}
 	cmd.Flags().Int("port", 8788, "loopback port for the mocked Dispatch web application")
 	cmd.Flags().Bool("no-open", false, "serve without opening a browser")
+	cmd.Flags().String("fail-validation-provider", "", "simulate stale authentication for a provider during validation")
+	cmd.Flags().String("fail-connection-provider", "", "simulate stale authentication during a provider connection check")
 	return cmd
 }
 
@@ -80,6 +85,26 @@ func combineDispatchHandlers(api, ui http.Handler) http.Handler {
 	})
 }
 
+func salesforceLoginRedirectHandler(api http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/OauthRedirect" {
+			http.NotFound(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+}
+
+func boxLoginRedirectHandler(api http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/callback" {
+			http.NotFound(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+}
+
 func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	listener, err := net.Listen("tcp", address)
@@ -88,7 +113,12 @@ func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 	}
 	defer listener.Close()
 
-	var api http.Handler = webapi.NewHandler(profileFromCommand(cmd))
+	var salesforceCallbackReady, boxCallbackReady atomic.Bool
+	var api http.Handler = webapi.NewHandlerWithOptions(webapi.ServerOptions{
+		Profile:                 profileFromCommand(cmd),
+		SalesforceCallbackReady: salesforceCallbackReady.Load,
+		BoxCallbackReady:        boxCallbackReady.Load,
+	})
 	recordPath, _ := cmd.Flags().GetString("record-api")
 	if strings.TrimSpace(recordPath) != "" {
 		recorder, recordErr := webapi.NewHTTPRecorder(recordPath)
@@ -103,6 +133,22 @@ func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 		Addr:              address,
 		Handler:           combineDispatchHandlers(api, webui.Handler()),
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if oauthListener, oauthErr := net.Listen("tcp", "127.0.0.1:1717"); oauthErr != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Salesforce login needs port 1717. Stop a Salesforce CLI login (or anything else using 1717) and restart Dispatch.\n")
+	} else {
+		defer oauthListener.Close()
+		salesforceCallbackReady.Store(true)
+		oauthServer := &http.Server{Handler: salesforceLoginRedirectHandler(api), ReadHeaderTimeout: 5 * time.Second}
+		go func() { _ = oauthServer.Serve(oauthListener) }()
+	}
+	if boxListener, boxErr := net.Listen("tcp", "127.0.0.1:4400"); boxErr != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Box login needs port 4400. Stop anything using 4400 and restart Dispatch.\n")
+	} else {
+		defer boxListener.Close()
+		boxCallbackReady.Store(true)
+		boxServer := &http.Server{Handler: boxLoginRedirectHandler(api), ReadHeaderTimeout: 5 * time.Second}
+		go func() { _ = boxServer.Serve(boxListener) }()
 	}
 	url := "http://" + address
 	fmt.Fprintf(cmd.OutOrStdout(), "Dispatch is running at %s\n", url)
@@ -119,7 +165,7 @@ func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 	return nil
 }
 
-func runMockWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
+func runMockWebApplication(cmd *cobra.Command, port int, openBrowser bool, validationFailureProvider, connectionFailureProvider string) error {
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -127,7 +173,10 @@ func runMockWebApplication(cmd *cobra.Command, port int, openBrowser bool) error
 	}
 	defer listener.Close()
 	server := &http.Server{
-		Addr: address, Handler: combineDispatchHandlers(webapi.NewMockHandler(), webui.Handler()), ReadHeaderTimeout: 5 * time.Second,
+		Addr: address, Handler: combineDispatchHandlers(webapi.NewMockHandlerWithOptions(webapi.MockOptions{
+			ValidationFailureProvider: strings.ToLower(strings.TrimSpace(validationFailureProvider)),
+			ConnectionFailureProvider: strings.ToLower(strings.TrimSpace(connectionFailureProvider)),
+		}), webui.Handler()), ReadHeaderTimeout: 5 * time.Second,
 	}
 	url := "http://" + address
 	fmt.Fprintf(cmd.OutOrStdout(), "Mock Dispatch is running at %s (no provider calls)\n", url)

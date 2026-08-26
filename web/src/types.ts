@@ -1,4 +1,4 @@
-export type Phase = 'Choose' | 'Connect' | 'Configure' | 'Review' | 'Deploy'
+export type Phase = 'Choose' | 'Connect' | 'Configure' | 'Review' | 'Deploy' | 'Summary'
 
 export type ProviderSummary = { name: string; status: string }
 
@@ -20,6 +20,7 @@ export type PlanComponent = {
 
 export type DeploymentPlan = {
   exists: boolean
+  name: string
   templateId: string
   template: string
   repository: string
@@ -35,9 +36,21 @@ export function readinessLabel(ready: boolean): Readiness {
 
 export type DispatchRun = {
   id: string
+  deployment?: string
+  changeCount?: number
   action: 'validate' | 'deploy'
   status: 'queued' | 'running' | 'completed' | 'failed'
   providers: ProviderSummary[]
+  resources?: ResourceReference[]
+}
+
+export type ResourceReference = {
+  provider: string
+  component: string
+  kind: string
+  name: string
+  id: string
+  url?: string
 }
 
 export type RunDiagnostic = {
@@ -62,6 +75,17 @@ export type RunEvent = {
   total?: number
 }
 
+export type ValidationFileChange = {
+  component: string
+  path: string
+  kind: 'add' | 'update'
+  before?: string
+  after?: string
+  previewable: boolean
+}
+
+export type ValidationChanges = { files: ValidationFileChange[] }
+
 export type SalesforceConnectionOption = {
   id?: string
   alias: string
@@ -85,12 +109,15 @@ export type SalesforceRESTInput = {
 
 export type ScratchOrgJob = {
   id: string
-  status: 'queued' | 'creating' | 'active' | 'failed'
+  status: 'queued' | 'creating' | 'preparing' | 'active' | 'failed'
   message: string
   alias?: string
   username?: string
   orgId?: string
   expirationDate?: string
+  packageStatus?: 'checking' | 'installing' | 'complete' | 'failed' | 'skipped'
+  packageMessage?: string
+  packageRequestId?: string
 }
 
 export type BoxConnectionOption = {
@@ -128,6 +155,7 @@ export type ConnectionSummary = {
   restConfigured?: boolean
   devHubConfigured?: boolean
   oauthConfigured?: boolean
+  launchUrl?: string
   orgs?: SalesforceConnectionOption[]
   connections?: BoxConnectionOption[]
 }

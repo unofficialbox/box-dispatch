@@ -1,5 +1,6 @@
 import { readinessLabel, type ConnectionSummary, type PlanComponent } from '../types'
 import { DetailList, DetailsRail } from './DetailsRail'
+import { ProviderLogo } from './ProviderLogo'
 
 export function ConnectionDetailsPanel({ component, connection, onEdit }: { component: PlanComponent; connection?: ConnectionSummary; onEdit: () => void }) {
   const rows: Array<[string, string]> = [
@@ -9,8 +10,8 @@ export function ConnectionDetailsPanel({ component, connection, onEdit }: { comp
   ]
   if (connection?.expiresAt) rows.push(['Expires', connection.expiresAt])
   return <DetailsRail title={`${component.name} connection`}>
-    <span className={`detail-provider-mark ${component.id}`}>{component.id === 'box' ? 'B' : 'SF'}</span>
+    <ProviderLogo provider={component.id} size="standard"/>
     <DetailList rows={rows}/>
-    <box-button label={`Edit ${component.name} connection`} tone="secondary" onClick={onEdit}></box-button>
+    <box-button label={`Edit ${component.name} connection`} tone="neutral" onClick={onEdit}></box-button>
   </DetailsRail>
 }
