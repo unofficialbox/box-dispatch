@@ -12,6 +12,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 )
 
 func TestValidationRunStreamsSafeProgressAndCompletes(t *testing.T) {
@@ -37,6 +38,59 @@ func TestValidationRunStreamsSafeProgressAndCompletes(t *testing.T) {
 	response, ok := runs.response(run.ID)
 	if !ok || response.Status != runCompleted || len(response.Providers) != 1 || response.Providers[0].Status != string(lifecycle.StatusPresent) {
 		t.Fatalf("response = %#v, found=%t", response, ok)
+	}
+}
+
+func TestValidationAuthenticatesEveryProviderBeforeComponentChecks(t *testing.T) {
+	var order []string
+	plan := config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"box", "salesforce"}}
+	items, err := validatePlanRunWith(context.Background(), plan, func(_ string, _ lifecycle.ProgressUpdate) {}, func(_ context.Context, provider string) error {
+		order = append(order, "authenticate:"+provider)
+		return nil
+	}, func(_ string, provider string, _ lifecycle.Reporter) (lifecycle.Item, error) {
+		order = append(order, "validate:"+provider)
+		return lifecycle.Item{Provider: provider, Status: lifecycle.StatusPresent}, nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"authenticate:box", "authenticate:salesforce", "validate:box", "validate:salesforce"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestValidationStopsBeforeComponentChecksWhenAuthenticationFails(t *testing.T) {
+	var validated bool
+	var updates []lifecycle.ProgressUpdate
+	plan := config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"box", "salesforce"}}
+	items, err := validatePlanRunWith(context.Background(), plan, func(_ string, update lifecycle.ProgressUpdate) {
+		updates = append(updates, update)
+	}, func(_ context.Context, provider string) error {
+		if provider == "salesforce" {
+			return errors.New("session is stale")
+		}
+		return nil
+	}, func(_ string, provider string, _ lifecycle.Reporter) (lifecycle.Item, error) {
+		validated = true
+		return lifecycle.Item{Provider: provider, Status: lifecycle.StatusPresent}, nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated {
+		t.Fatal("component validation ran before every provider was authenticated")
+	}
+	if len(items) != 1 || items[0].Provider != "salesforce" || items[0].Status != lifecycle.StatusFailed {
+		t.Fatalf("items = %#v", items)
+	}
+	if len(updates) != 4 || updates[0].Component != "Authentication" || updates[1].State != lifecycle.ProgressCompleted || updates[3].State != lifecycle.ProgressFailed {
+		t.Fatalf("updates = %#v", updates)
 	}
 }
 
@@ -103,6 +157,27 @@ func TestRunEndpointsProvideSSEAndRequireCompletedValidationForDeploy(t *testing
 	}
 }
 
+func TestValidationChangesEndpointReturnsFileByFilePreviews(t *testing.T) {
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		return []lifecycle.Item{{
+			Provider: "salesforce", Status: lifecycle.StatusMissing,
+			Changes: []salesforceapi.MetadataFileDiff{{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "<enabled>false</enabled>", After: "<enabled>true</enabled>", Previewable: true}},
+		}}, nil
+	}
+	runs := newRunManagerWithExecutors(validate, nil, time.Now)
+	run, err := runs.startValidation(config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"salesforce"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, runs, run.ID)
+	handler := NewHandlerWithOptions(ServerOptions{Runs: runs})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/runs/"+run.ID+"/changes", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"component":"Settings:Communities"`) || !strings.Contains(response.Body.String(), `"previewable":true`) {
+		t.Fatalf("changes = %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestDeploymentRequiresSuccessfulValidation(t *testing.T) {
 	runs := newRunManagerWithExecutors(nil, nil, time.Now)
 	if _, err := runs.startDeployment("unknown"); err == nil || !strings.Contains(err.Error(), "not found") {
@@ -163,6 +238,51 @@ func TestEmitDeploymentResultDoesNotReportFailedProviderAsApplied(t *testing.T) 
 	}
 }
 
+func TestRunningDeploymentDoesNotReuseValidationSuccessAsProviderCompletion(t *testing.T) {
+	run := &deploymentRun{
+		action: runActionDeploy,
+		status: runRunning,
+		items: []lifecycle.Item{
+			{Provider: "box", Status: lifecycle.StatusMissing, Deployable: true},
+			{Provider: "salesforce", Status: lifecycle.StatusMissing, Deployable: true},
+		},
+		events: []runEvent{
+			{Provider: "box", ProgressState: lifecycle.ProgressCompleted, Message: "Box configuration applied"},
+			{Provider: "salesforce", ProgressState: lifecycle.ProgressRunning, Message: "Applying Salesforce configuration"},
+			{Provider: "salesforce", Component: "Managed Package:Box for Salesforce 5.43", ProgressState: lifecycle.ProgressRunning, Message: "Salesforce reports in progress"},
+		},
+	}
+
+	response := summarizeRun(run)
+	if len(response.Providers) != 2 || response.Providers[0].Status != string(lifecycle.StatusPresent) || response.Providers[1].Status != string(lifecycle.StatusPending) {
+		t.Fatalf("providers = %#v", response.Providers)
+	}
+}
+
+func TestSummarizeRunIncludesDeployedResources(t *testing.T) {
+	run := &deploymentRun{
+		action: runActionDeploy,
+		status: runCompleted,
+		items: []lifecycle.Item{{
+			Provider: "salesforce",
+			Status:   lifecycle.StatusPresent,
+			Resources: []lifecycle.ResourceReference{{
+				Provider:  "salesforce",
+				Component: "Salesforce Experience",
+				Kind:      "experience_site",
+				Name:      "CLM Experience",
+				ID:        "0DB1",
+				URL:       "https://example.my.site.com/clm",
+			}},
+		}},
+	}
+
+	response := summarizeRun(run)
+	if len(response.Resources) != 1 || response.Resources[0].Kind != "experience_site" || response.Resources[0].URL != "https://example.my.site.com/clm" {
+		t.Fatalf("resources = %#v", response.Resources)
+	}
+}
+
 func TestRunHistorySurvivesRestartAndInterruptedRunIsMarkedFailed(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC) }
 	store := &testRunStore{runs: []persistedRun{{
@@ -190,6 +310,25 @@ func TestRestoredValidationCannotApplyWithoutItsLivePackage(t *testing.T) {
 	}}})
 	if _, err := runs.startDeployment("web-previous-0002"); err == nil || !strings.Contains(err.Error(), "rerun validation") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCompletedValidationRestoresItsPlanItemsAndChangePreviews(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC) }
+	plan := config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"salesforce"}}
+	items := []lifecycle.Item{{Provider: "salesforce", Status: lifecycle.StatusMissing, Changes: []salesforceapi.MetadataFileDiff{{Path: "settings/Communities.settings-meta.xml", Previewable: true}}}}
+	runs := newRunManagerWithStore(nil, nil, now, &testRunStore{runs: []persistedRun{{
+		ID: "web-previous-0003", Action: runActionValidate, Status: runCompleted, CreatedAt: now(), Plan: plan, Items: items,
+	}}})
+	changes, ok := runs.changes("web-previous-0003")
+	if !ok || len(changes.Files) != 1 || changes.Files[0].Path != "settings/Communities.settings-meta.xml" {
+		t.Fatalf("changes = %#v, found=%t", changes, ok)
+	}
+	runs.deploy = func(_ context.Context, _ config.SolutionPlan, items []lifecycle.Item, _ func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		return items, nil
+	}
+	if _, err := runs.startDeployment("web-previous-0003"); err != nil {
+		t.Fatalf("restored validation could not start deployment: %v", err)
 	}
 }
 
@@ -251,6 +390,18 @@ func TestSafeDiagnosticExplainsInvalidSalesforceSessionWithoutCallingItExpiredOr
 	}
 	if strings.Contains(strings.ToLower(diagnostic.Summary), "org is expired") {
 		t.Fatalf("session failure was misclassified as an expired org: %#v", diagnostic)
+	}
+}
+
+func TestSafeDiagnosticDoesNotRepeatProviderDetailInsideDiagnostic(t *testing.T) {
+	providerDetail := "Salesforce did not return exactly one deployment user for admin@example.com"
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider:   "salesforce",
+		Detail:     "Unable to inspect Salesforce permission-set assignments: " + providerDetail,
+		Diagnostic: providerDetail,
+	})
+	if strings.Count(diagnostic.TechnicalDetail, providerDetail) != 1 {
+		t.Fatalf("technical detail repeated the provider error: %q", diagnostic.TechnicalDetail)
 	}
 }
 

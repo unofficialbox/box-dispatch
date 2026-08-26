@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
+import { ProviderLogo } from '../components/ProviderLogo'
 import { readinessLabel, type ConnectionSummary, type DeploymentPlan } from '../types'
 
 type ProviderID = 'box' | 'salesforce'
@@ -13,6 +14,7 @@ type Props = {
   plan: DeploymentPlan
   connections: ConnectionSummary[]
   notice: string
+  checkingConnections: boolean
   componentSelections: Record<string, string[]>
   onToggleProvider: (provider: ProviderID, included: boolean) => void
   onToggleComponent: (provider: ProviderID, component: string, included: boolean) => void
@@ -21,23 +23,23 @@ type Props = {
   onNext: () => void
 }
 
-export function ConfigurePage({ plan, connections, notice, componentSelections, onToggleProvider, onToggleComponent, onStrategyChange, onBack, onNext }: Props) {
+export function ConfigurePage({ plan, connections, notice, checkingConnections, componentSelections, onToggleProvider, onToggleComponent, onStrategyChange, onBack, onNext }: Props) {
   const [selectedProviderID, setSelectedProviderID] = useState<ProviderID>('box')
   const salesforceIncluded = plan.components.some((component) => component.id === 'salesforce')
   const selectedConnection = connections.find((connection) => connection.name === (selectedProviderID === 'box' ? 'Box' : 'Salesforce'))
   const selectedComponents = componentSelections[selectedProviderID] ?? []
   const selectedTitle = selectedProviderID === 'box' ? 'Box content' : 'Salesforce metadata'
   return <section className="configure-stage" aria-label="Configure deployment">
-    <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose how Dispatch should apply the selected provider components.</p></div></header>
+    <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose a strategy, providers, and components.</p></div></header>
     <box-split-view className="configure-workspace" label="Deployment configuration and selected provider details" ratio={0.66}>
       <div slot="primary">
         <section className="strategy-section" aria-labelledby="strategy-title"><h3 id="strategy-title">Deployment strategy</h3><div className="strategy-picker" role="radiogroup" aria-label="Deployment strategy"><button type="button" role="radio" aria-checked={plan.strategy === 'reuse'} className={plan.strategy === 'reuse' ? 'selected' : ''} onClick={() => onStrategyChange('reuse')}><strong>Reuse existing</strong><span>Keep matching configuration and apply only what is missing.</span></button><button type="button" role="radio" aria-checked={plan.strategy === 'create_new'} className={plan.strategy === 'create_new' ? 'selected' : ''} onClick={() => onStrategyChange('create_new')}><strong>Create new</strong><span>Create a new named configuration set for this deployment.</span></button></div></section>
         <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/><ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback={salesforceIncluded ? 'Selected for this deployment' : 'Not included in this deployment'} connection={connections.find((connection) => connection.name === 'Salesforce')} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/></div>
         <ComponentScope provider={selectedProviderID} title={selectedTitle} included={selectedProviderID === 'box' || salesforceIncluded} selectedComponents={selectedComponents} onToggle={onToggleComponent}/>
       </div>
-      <DetailsRail title={`${selectedTitle} details`}><span className={`detail-provider-mark ${selectedProviderID}`}>{selectedProviderID === 'box' ? 'B' : 'SF'}</span><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', readinessLabel(Boolean(selectedConnection?.verified))], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
+      <DetailsRail title={`${selectedTitle} details`}><ProviderLogo provider={selectedProviderID} size="standard"/><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', readinessLabel(Boolean(selectedConnection?.verified))], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
     </box-split-view>
-    <footer className="configuration-footer"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label="Back" tone="secondary" onClick={onBack}></box-button><box-button label="Review plan" tone="primary" onClick={onNext}></box-button></div></footer>
+    <footer className="configuration-footer"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label="Back" tone="neutral" onClick={onBack}></box-button><box-button label={checkingConnections ? 'Checking connections…' : 'Review plan'} tone="primary" disabled={checkingConnections} onClick={onNext}></box-button></div></footer>
   </section>
 }
 
@@ -51,7 +53,7 @@ function ProviderConfiguration({ id, title, description, fallback, connection, i
     return () => switchElement.removeEventListener('checked-changed', handleChange)
   }, [id, onToggle, required])
 
-  return <box-card className={`configuration-card ${included ? 'included' : 'excluded'} ${selected ? 'selected' : ''}`}><article className="configuration-provider" role="button" tabIndex={0} aria-pressed={selected} onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}><div className={`configuration-mark ${id}`} aria-hidden="true">{id === 'box' ? 'B' : 'SF'}</div><div className="configuration-copy"><h3>{title}</h3><p>{description}</p><ConnectionDetails connection={connection} fallback={fallback}/></div><box-switch ref={ref} checked={included} disabled={required} label={required ? 'Required' : included ? 'Included' : 'Not included'} description={required ? 'Always included' : 'Toggle provider scope'} onClick={(event) => event.stopPropagation()}></box-switch></article></box-card>
+  return <box-card className={`configuration-card ${included ? 'included' : 'excluded'} ${selected ? 'selected' : ''}`}><article className="configuration-provider"><button className="configuration-select" type="button" aria-pressed={selected} onClick={onSelect}><ProviderLogo provider={id} size="standard"/><span className="configuration-copy"><strong>{title}</strong><span>{description}</span><ConnectionDetails connection={connection} fallback={fallback}/></span></button><box-switch ref={ref} checked={included} disabled={required} label={included ? 'Included' : 'Not included'} description={required ? 'Required' : 'Optional'}></box-switch></article></box-card>
 }
 
 function ComponentScope({ provider, title, included, selectedComponents, onToggle }: { provider: ProviderID; title: string; included: boolean; selectedComponents: string[]; onToggle: (provider: ProviderID, component: string, included: boolean) => void }) {

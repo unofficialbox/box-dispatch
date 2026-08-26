@@ -47,34 +47,86 @@ func (c AuthConfig) Selection() string {
 // than letting Connect and Deploy use different credentials.
 func ResolveAuth() (AuthConfig, error) {
 	settings, settingsErr := shellstate.LoadConnectionSettings()
-	if settingsErr == nil && settings.HasBoxCCG() && prefersCCG(settings) {
-		return AuthConfig{
-			Method:       AuthCCG,
-			ClientID:     settings.BoxCCGClientID,
-			ClientSecret: settings.BoxCCGClientSecret,
-			SubjectType:  settings.BoxCCGSubjectType,
-			SubjectID:    settings.BoxCCGSubjectID,
-		}, nil
+	if settingsErr == nil {
+		settings = settings.HydrateBoxConnections()
+		if app, ok := settings.SelectedBoxConnection(); ok {
+			if strings.TrimSpace(app.RefreshToken) != "" {
+				clientID, clientSecret := BoxOAuthApp()
+				return AuthConfig{
+					Method: AuthOAuth2, ClientID: firstNonEmpty(app.ClientID, clientID),
+					ClientSecret: firstNonEmpty(app.ClientSecret, clientSecret), RefreshToken: app.RefreshToken,
+				}, nil
+			}
+			if boxAppHasCCG(app) {
+				return AuthConfig{
+					Method: AuthCCG, ClientID: app.ClientID, ClientSecret: app.ClientSecret,
+					SubjectType: app.SubjectType, SubjectID: app.SubjectID,
+				}, nil
+			}
+		}
+		if settings.HasBoxCCG() {
+			return AuthConfig{
+				Method:       AuthCCG,
+				ClientID:     settings.BoxCCGClientID,
+				ClientSecret: settings.BoxCCGClientSecret,
+				SubjectType:  settings.BoxCCGSubjectType,
+				SubjectID:    settings.BoxCCGSubjectID,
+			}, nil
+		}
 	}
 
-	clientID := strings.TrimSpace(os.Getenv("BOX_CLIENT_ID"))
-	clientSecret := strings.TrimSpace(os.Getenv("BOX_CLIENT_SECRET"))
+	clientID, clientSecret := BoxOAuthApp()
 	refreshToken := strings.TrimSpace(os.Getenv("BOX_REFRESH_TOKEN"))
 	if clientID != "" && clientSecret != "" && refreshToken != "" {
 		return AuthConfig{Method: AuthOAuth2, ClientID: clientID, ClientSecret: clientSecret, RefreshToken: refreshToken}, nil
 	}
 
-	if settingsErr == nil && settings.BoxDefaultConnection != "" && settings.BoxDefaultConnection != DispatchCCGName {
-		return AuthConfig{}, fmt.Errorf("Box CLI connection %q is no longer supported; configure BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN, or select a Box CCG app", settings.BoxDefaultConnection)
+	if settingsErr == nil && settings.BoxDefaultConnection != "" && settings.BoxDefaultConnection != DispatchCCGName && settings.BoxDefaultConnection != DispatchOAuthName {
+		return AuthConfig{}, fmt.Errorf("Box CLI connection %q is no longer supported; log in with Box or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN", settings.BoxDefaultConnection)
 	}
-	if settingsErr == nil && settings.HasBoxCCG() {
-		return AuthConfig{}, fmt.Errorf("the saved Box CCG app is not selected; select it again or configure OAuth2 refresh-token credentials")
-	}
-	return AuthConfig{}, fmt.Errorf("no Box authentication configured: add a CCG app in Dispatch or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN")
+	return AuthConfig{}, fmt.Errorf("no Box authentication configured: log in with Box, or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN")
 }
 
-func prefersCCG(settings config.ConnectionSettings) bool {
-	return settings.BoxDefaultConnection == "" || settings.BoxDefaultConnection == DispatchCCGName
+func persistRotatedBoxRefresh(refreshToken string) {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return
+	}
+	app, ok := settings.SelectedBoxConnection()
+	if !ok || app.RefreshToken == "" {
+		return
+	}
+	app.RefreshToken = refreshToken
+	_ = shellstate.SaveConnectionSettings(settings.UpsertBoxConnection(app, true))
+}
+
+// InvalidateSelectedOAuthConnection clears only the verified snapshot after
+// Box rejects a stored refresh token. The connection remains available in the
+// browser so the user can reconnect it instead of recreating its alias.
+func InvalidateSelectedOAuthConnection() {
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return
+	}
+	app, ok := settings.SelectedBoxConnection()
+	if !ok || strings.TrimSpace(app.RefreshToken) == "" {
+		return
+	}
+	_ = shellstate.SaveConnectionSettings(settings.MarkSelectedBoxUnverified())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func boxAppHasCCG(app config.BoxAppConnection) bool {
+	return strings.TrimSpace(app.ClientID) != "" && strings.TrimSpace(app.ClientSecret) != "" &&
+		strings.TrimSpace(app.SubjectType) != "" && strings.TrimSpace(app.SubjectID) != ""
 }
 
 // HasLegacyCLISelection reports an old persisted Box CLI environment. The
@@ -82,7 +134,7 @@ func prefersCCG(settings config.ConnectionSettings) bool {
 // than collapsing it into a generic "credentials missing" state.
 func HasLegacyCLISelection() bool {
 	settings, err := shellstate.LoadConnectionSettings()
-	return err == nil && settings.BoxDefaultConnection != "" && settings.BoxDefaultConnection != DispatchCCGName
+	return err == nil && settings.BoxDefaultConnection != "" && settings.BoxDefaultConnection != DispatchCCGName && settings.BoxDefaultConnection != DispatchOAuthName
 }
 
 // AccessToken mints a short-lived access token from a supported configuration.
@@ -91,7 +143,14 @@ func (c AuthConfig) AccessToken(ctx context.Context) (string, error) {
 	case AuthCCG:
 		return CCGToken(ctx, c.ClientID, c.ClientSecret, c.SubjectType, c.SubjectID)
 	case AuthOAuth2:
-		return OAuthToken(ctx, c.ClientID, c.ClientSecret, c.RefreshToken)
+		token, err := RefreshOAuthToken(ctx, c.ClientID, c.ClientSecret, c.RefreshToken)
+		if err != nil {
+			return "", err
+		}
+		if token.RefreshToken != "" && token.RefreshToken != c.RefreshToken {
+			persistRotatedBoxRefresh(token.RefreshToken)
+		}
+		return token.AccessToken, nil
 	default:
 		return "", fmt.Errorf("unsupported Box authentication method %q", c.Method)
 	}

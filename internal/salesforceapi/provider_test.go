@@ -31,6 +31,7 @@ func TestListInstalledPackagesUsesToolingAPI(t *testing.T) {
 
 func TestInstallPackageUsesToolingRequest(t *testing.T) {
 	polls := 0
+	updates := []PackageInstallProgress{}
 	server := newSalesforceRESTTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		path := "/services/data/v67.0/tooling/sobjects/PackageInstallRequest"
 		switch {
@@ -54,9 +55,14 @@ func TestInstallPackageUsesToolingRequest(t *testing.T) {
 	})
 	defer server.Close()
 
-	err := (&Client{HTTP: server.Client(), PollInterval: time.Millisecond}).InstallPackage(context.Background(), Credential{InstanceURL: server.URL, AccessToken: "token"}, "04tbox", "AdminsOnly")
+	err := (&Client{HTTP: server.Client(), PollInterval: time.Millisecond}).InstallPackageWithProgress(context.Background(), Credential{InstanceURL: server.URL, AccessToken: "token"}, "04tbox", "AdminsOnly", func(update PackageInstallProgress) {
+		updates = append(updates, update)
+	})
 	if err != nil || polls != 2 {
 		t.Fatalf("polls=%d err=%v", polls, err)
+	}
+	if len(updates) != 3 || updates[0].RequestID != "0Hf123" || updates[0].Status != "QUEUED" || updates[1].Status != "IN_PROGRESS" || updates[2].Status != "SUCCESS" {
+		t.Fatalf("updates = %#v", updates)
 	}
 }
 
@@ -126,6 +132,14 @@ func TestPermissionInventoryAndAssignmentUseRESTAPI(t *testing.T) {
 	}
 	if err := client.AssignPermissionSets(context.Background(), credential, inventory.UserID, []string{"CLM_Demo_Operator"}); err != nil || assignmentsCreated != 1 {
 		t.Fatalf("assignments=%d err=%v", assignmentsCreated, err)
+	}
+}
+
+func TestPermissionInventoryRejectsMissingDeploymentUsernameBeforeCallingSalesforce(t *testing.T) {
+	client := &Client{}
+	_, err := client.ReadPermissionInventory(context.Background(), Credential{InstanceURL: "https://example.com", AccessToken: "token"}, "  ")
+	if err == nil || !strings.Contains(err.Error(), "authenticated deployment username") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

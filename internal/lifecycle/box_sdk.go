@@ -35,8 +35,8 @@ type boxAPI interface {
 	uploadFile(context.Context, string, string) (string, error)
 	// uploadFileVersion replaces an existing same-named file with a new version.
 	uploadFileVersion(context.Context, string, string) (string, error)
-	metadataTemplateKeys(context.Context, []string) (map[string]bool, error)
-	createMetadataTemplate(context.Context, boxMetadataTemplate) error
+	metadataTemplateDisplayNames(context.Context) (map[string]string, error)
+	applyMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
 	createDocgenTemplate(context.Context, string) error
 	aiAgentNames(context.Context) (map[string]bool, error)
@@ -73,6 +73,7 @@ func newBoxSDK() (*boxSDK, error) {
 	accessToken, err := connection.AccessToken(context.Background())
 	if err != nil {
 		if boxOAuthSessionExpired(err) {
+			boxconn.InvalidateSelectedOAuthConnection()
 			return nil, fmt.Errorf("Box OAuth session has expired. Return to Connect and reconnect the selected Box account: %w", err)
 		}
 		return nil, err
@@ -259,20 +260,35 @@ func resolveUploadedFileID(ctx context.Context, files *schemas.Files, name strin
 	return "", fmt.Errorf("%w; follow-up lookup did not find the uploaded file", responseErr)
 }
 
-func (sdk *boxSDK) metadataTemplateKeys(ctx context.Context, _ []string) (map[string]bool, error) {
-	keys := map[string]bool{}
+func (sdk *boxSDK) metadataTemplateDisplayNames(ctx context.Context) (map[string]string, error) {
+	templates := map[string]string{}
 	for template, err := range sdk.client.MetadataTemplates.ListEnterprise(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
 		if template.TemplateKey != nil {
-			keys[*template.TemplateKey] = true
+			templates[*template.TemplateKey] = firstNonEmpty(pointerString(template.DisplayName), *template.TemplateKey)
 		}
 	}
-	return keys, nil
+	return templates, nil
 }
 
-func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
+func (sdk *boxSDK) applyMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
+	existing, err := sdk.metadataTemplateDisplayNames(ctx)
+	if err != nil {
+		return err
+	}
+	if displayName, found := existing[template.TemplateKey]; found {
+		if displayName == template.DisplayName {
+			return nil
+		}
+		_, err = sdk.client.MetadataTemplates.UpdateSchema(ctx, schemas.GetFileIdMetadataIdScopeEnterprise, template.TemplateKey, []schemas.UpdateSchemaRequest{{
+			Op:   schemas.PutIdSchemaOpEditTemplate,
+			Data: map[string]any{"displayName": template.DisplayName},
+		}})
+		return err
+	}
+
 	fields := make([]schemas.PostSchemaFields, 0, len(template.Fields))
 	for _, field := range template.Fields {
 		fieldType := schemas.CreateSchemaRequestFieldsType(field.Type)
@@ -287,10 +303,17 @@ func (sdk *boxSDK) createMetadataTemplate(ctx context.Context, template boxMetad
 		}
 		fields = append(fields, schemas.PostSchemaFields{Type: fieldType, Key: field.Key, DisplayName: field.DisplayName, Options: options})
 	}
-	_, err := sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
+	_, err = sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
 		Scope: "enterprise", TemplateKey: &template.TemplateKey, DisplayName: template.DisplayName, Fields: fields,
 	})
 	return err
+}
+
+func pointerString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (sdk *boxSDK) docgenTemplateFileIDs(ctx context.Context) (map[string]bool, error) {

@@ -28,6 +28,15 @@
           {"name": "box__Box_Sign_Admin", "label": "Box Sign"},
           {"name": "CLM_Box_Automate_Integration", "label": "CLM Box Automate Integration"},
           {"name": "CLM_Demo_Operator", "label": "CLM Demo Operator"}
+        ],
+        "seed_scripts": [
+          {
+            "path": "scripts/seed-clm-salesforce-sample-data.apex",
+            "label": "CLM sample contract records",
+            "object": "CLM_Contract__c",
+            "external_id_field": "Contract_ID__c",
+            "external_ids": ["CLM-SAMPLE-NST-001", "CLM-SAMPLE-NST-2024", "CLM-SAMPLE-NST-2025", "CLM-SAMPLE-ACM-001"]
+          }
         ]
       },
       "box": {

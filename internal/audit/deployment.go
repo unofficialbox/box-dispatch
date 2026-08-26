@@ -17,6 +17,7 @@ import (
 type DeploymentRecord struct {
 	SchemaVersion       string                                `json:"schema_version"`
 	DeploymentID        string                                `json:"deployment_id"`
+	Name                string                                `json:"name,omitempty"`
 	StartedAt           time.Time                             `json:"started_at"`
 	CompletedAt         time.Time                             `json:"completed_at"`
 	Duration            string                                `json:"duration"`
@@ -46,7 +47,7 @@ type ProviderRecord struct {
 	Resources      []lifecycle.ResourceReference `json:"resources,omitempty"`
 }
 
-func ExportDeployment(root string, before, after []lifecycle.Item, startedAt, completedAt time.Time) (string, error) {
+func ExportDeployment(root, name string, before, after []lifecycle.Item, startedAt, completedAt time.Time) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("package directory is required")
 	}
@@ -72,6 +73,7 @@ func ExportDeployment(root string, before, after []lifecycle.Item, startedAt, co
 	record := DeploymentRecord{
 		SchemaVersion:       "1.0",
 		DeploymentID:        id,
+		Name:                name,
 		StartedAt:           startedAt,
 		CompletedAt:         completedAt,
 		Duration:            completedAt.Sub(startedAt).Round(time.Millisecond).String(),

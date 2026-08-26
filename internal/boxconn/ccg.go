@@ -36,40 +36,62 @@ func CCGToken(ctx context.Context, clientID, clientSecret, subjectType, subjectI
 // caller owns the refresh token and must not log or persist it through this
 // package.
 func OAuthToken(ctx context.Context, clientID, clientSecret, refreshToken string) (string, error) {
+	token, err := RefreshOAuthToken(ctx, clientID, clientSecret, refreshToken)
+	if err != nil {
+		return "", err
+	}
+	return token.AccessToken, nil
+}
+
+func RefreshOAuthToken(ctx context.Context, clientID, clientSecret, refreshToken string) (TokenResponse, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
 	}
-	return tokenFromForm(ctx, form, "OAuth2")
+	return tokenResponseFromForm(ctx, form, "OAuth2")
+}
+
+type TokenResponse struct {
+	AccessToken  string
+	RefreshToken string
 }
 
 func tokenFromForm(ctx context.Context, form url.Values, authName string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, TokenURL, strings.NewReader(form.Encode()))
+	token, err := tokenResponseFromForm(ctx, form, authName)
 	if err != nil {
 		return "", err
+	}
+	return token.AccessToken, nil
+}
+
+func tokenResponseFromForm(ctx context.Context, form url.Values, authName string) (TokenResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, TokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return TokenResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request Box %s token: %w", authName, err)
+		return TokenResponse{}, fmt.Errorf("request Box %s token: %w", authName, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Box %s token request returned %s: %s", authName, resp.Status, tokenError(body))
+		return TokenResponse{}, fmt.Errorf("Box %s token request returned %s: %s", authName, resp.Status, tokenError(body))
 	}
 	var payload struct {
-		AccessToken string `json:"access_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", fmt.Errorf("parse Box %s token response: %w", authName, err)
+		return TokenResponse{}, fmt.Errorf("parse Box %s token response: %w", authName, err)
 	}
 	if payload.AccessToken == "" {
-		return "", fmt.Errorf("Box %s token response contained no access token", authName)
+		return TokenResponse{}, fmt.Errorf("Box %s token response contained no access token", authName)
 	}
-	return payload.AccessToken, nil
+	return TokenResponse{AccessToken: payload.AccessToken, RefreshToken: payload.RefreshToken}, nil
 }
 
 // CCGTokenFromSettings mints a token for the CCG app captured in settings.

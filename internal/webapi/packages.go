@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
@@ -58,12 +59,14 @@ type templateStore func() ([]packageTemplate, error)
 type packageAssembler func(packageTemplate, []string, string) (config.SolutionPlan, error)
 
 type packageAssemblyRequest struct {
+	Name       string   `json:"name"`
 	TemplateID string   `json:"templateId"`
 	Components []string `json:"components"`
 	Strategy   string   `json:"strategy,omitempty"`
 }
 
 func (r packageAssemblyRequest) normalized() packageAssemblyRequest {
+	r.Name = normalizeDeploymentName(r.Name)
 	r.TemplateID = strings.TrimSpace(r.TemplateID)
 	r.Strategy = strings.ToLower(strings.TrimSpace(r.Strategy))
 	if r.Strategy == "" {
@@ -76,6 +79,12 @@ func (r packageAssemblyRequest) normalized() packageAssemblyRequest {
 }
 
 func (r packageAssemblyRequest) validate() error {
+	if r.Name == "" {
+		return fmt.Errorf("enter a deployment name")
+	}
+	if utf8.RuneCountInString(r.Name) > 80 {
+		return fmt.Errorf("deployment name must be 80 characters or fewer")
+	}
 	if _, err := solution.NormalizeDeploymentStrategy(r.Strategy); err != nil || r.Strategy == solution.StrategyInherit {
 		return fmt.Errorf("choose reuse existing or create new")
 	}
@@ -96,6 +105,10 @@ func (r packageAssemblyRequest) validate() error {
 		seen[component] = true
 	}
 	return nil
+}
+
+func normalizeDeploymentName(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func loadPackageTemplates() ([]packageTemplate, error) {

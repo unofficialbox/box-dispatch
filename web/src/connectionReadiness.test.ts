@@ -4,7 +4,7 @@ import { refreshProviderReadiness } from './connectionReadiness'
 describe('refreshProviderReadiness', () => {
   it('updates the Box workflow state immediately after an OAuth connection refresh', () => {
     const plan = {
-      exists: true, templateId: 'clm', template: 'CLM deployment', repository: 'https://example.test/clm', strategy: 'reuse' as const,
+      exists: true, name: 'Northstar CLM rollout', templateId: 'clm', template: 'CLM deployment', repository: 'https://example.test/clm', strategy: 'reuse' as const,
       components: [
         { id: 'box', name: 'Box', configured: false, verified: false, ready: false },
         { id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true },

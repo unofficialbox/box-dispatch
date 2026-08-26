@@ -4,6 +4,7 @@ import type { ConnectionSummary, DeploymentPlan } from './types'
 
 const plan: DeploymentPlan = {
   exists: true,
+  name: 'Northstar CLM rollout',
   templateId: 'clm',
   template: 'CLM deployment',
   repository: 'https://example.test/clm',
@@ -31,6 +32,14 @@ describe('workflow resume phase', () => {
 
   it('returns Review only when every selected system is verified', () => {
     expect(resumeWorkflowPhase(plan, readyConnections)).toBe('Review')
+  })
+
+  it('returns to an active deployment after a browser refresh', () => {
+    expect(resumeWorkflowPhase(plan, readyConnections, { id: 'deploy-1', action: 'deploy', status: 'running', providers: [] })).toBe('Deploy')
+  })
+
+  it('opens Summary for the latest completed deployment', () => {
+    expect(resumeWorkflowPhase(plan, readyConnections, { id: 'deploy-1', action: 'deploy', status: 'completed', providers: [] })).toBe('Summary')
   })
 
   it('redirects an attempt to reach Review or Deploy to Connect when connections are missing', () => {

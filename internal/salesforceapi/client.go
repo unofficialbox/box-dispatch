@@ -29,10 +29,11 @@ func (c Credential) Valid() bool {
 }
 
 type OrgStatus struct {
-	Available bool   `json:"available"`
-	OrgID     string `json:"orgId,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Status    string `json:"status"`
+	Available   bool   `json:"available"`
+	OrgID       string `json:"orgId,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Status      string `json:"status"`
+	InstanceURL string `json:"instanceUrl,omitempty"`
 }
 
 type ScratchRequest struct {
@@ -50,6 +51,7 @@ type ScratchOrg struct {
 	OrgID          string `json:"orgId"`
 	InstanceURL    string `json:"instanceUrl"`
 	AccessToken    string `json:"-"`
+	RefreshToken   string `json:"-"`
 	Status         string `json:"status"`
 	ExpirationDate string `json:"expirationDate,omitempty"`
 }
@@ -60,51 +62,104 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, PollInterval: time.Second}
+	// CustomField and other high-cardinality Metadata API inventories routinely
+	// take several minutes before Salesforce returns response headers. Keep a
+	// bounded provider request while allowing the browser to report live work.
+	return &Client{HTTP: &http.Client{Timeout: 10 * time.Minute}, PollInterval: time.Second}
 }
 
 func (c *Client) Check(ctx context.Context, credential Credential) (OrgStatus, error) {
 	if !credential.Valid() {
 		return OrgStatus{}, fmt.Errorf("Salesforce connection is incomplete")
 	}
-	var identity struct {
-		OrganizationID    string `json:"organization_id"`
-		PreferredUsername string `json:"preferred_username"`
+	identity, err := c.userInfo(ctx, credential)
+	if err == nil {
+		return OrgStatus{Available: true, OrgID: identity.OrganizationID, Username: identity.PreferredUsername, Status: "Ready", InstanceURL: identity.instanceHost()}, nil
 	}
-	if err := c.doJSON(ctx, credential, http.MethodGet, "/services/oauth2/userinfo", nil, &identity); err != nil {
-		return OrgStatus{Available: false, Status: "Unavailable"}, fmt.Errorf("Salesforce org is unavailable: %w", err)
+	// Scratch-org signup tokens often omit the identity scope, so userinfo 403s
+	// even when the org is live. REST versions plus Organization prove the token.
+	status, apiErr := c.checkRESTAvailability(ctx, credential)
+	if apiErr != nil {
+		return OrgStatus{Available: false, Status: "Unavailable"}, fmt.Errorf("Salesforce org is unavailable: %w", apiErr)
 	}
-	return OrgStatus{Available: true, OrgID: identity.OrganizationID, Username: identity.PreferredUsername, Status: "Active"}, nil
+	return status, nil
+}
+
+func (c *Client) checkRESTAvailability(ctx context.Context, credential Credential) (OrgStatus, error) {
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
+	if err != nil {
+		return OrgStatus{}, err
+	}
+	status := OrgStatus{Available: true, Status: "Ready", InstanceURL: credential.InstanceURL}
+	if orgID, orgErr := c.organizationID(ctx, credential, version); orgErr == nil {
+		status.OrgID = orgID
+	}
+	// Scratch-org signup tokens commonly omit the identity scope. A fresh
+	// scratch org has exactly one active System Administrator, so that unique
+	// record is still a safe deployment identity. Never guess when an
+	// established org has more than one candidate.
+	if username, usernameErr := c.uniqueStandardUsername(ctx, credential, version); usernameErr == nil {
+		status.Username = username
+	}
+	return status, nil
+}
+
+func (c *Client) organizationID(ctx context.Context, credential Credential, version string) (string, error) {
+	var result struct {
+		Records []struct {
+			ID string `json:"Id"`
+		} `json:"records"`
+	}
+	if err := c.query(ctx, credential, version, "SELECT Id FROM Organization", &result); err != nil {
+		return "", err
+	}
+	if len(result.Records) == 0 || strings.TrimSpace(result.Records[0].ID) == "" {
+		return "", fmt.Errorf("Salesforce returned no Organization record")
+	}
+	return result.Records[0].ID, nil
+}
+
+func (c *Client) uniqueStandardUsername(ctx context.Context, credential Credential, version string) (string, error) {
+	var result struct {
+		Records []struct {
+			Username string `json:"Username"`
+		} `json:"records"`
+	}
+	if err := c.query(ctx, credential, version, "SELECT Username FROM User WHERE IsActive=true AND UserType='Standard' AND Profile.Name='System Administrator' ORDER BY CreatedDate ASC LIMIT 2", &result); err != nil {
+		return "", err
+	}
+	if len(result.Records) != 1 || strings.TrimSpace(result.Records[0].Username) == "" {
+		return "", fmt.Errorf("Salesforce did not return exactly one active System Administrator")
+	}
+	return strings.TrimSpace(result.Records[0].Username), nil
 }
 
 func (c *Client) CreateScratch(ctx context.Context, devHub Credential, request ScratchRequest) (ScratchOrg, error) {
 	if !devHub.Valid() {
 		return ScratchOrg{}, fmt.Errorf("connect a Salesforce Dev Hub before creating a scratch org")
 	}
-	if strings.TrimSpace(devHub.ClientID) == "" {
-		return ScratchOrg{}, fmt.Errorf("the Salesforce Connected App client ID is required to authorize a new scratch org")
-	}
 	request = normalizeScratchRequest(request)
-	version, err := c.latestAPIVersion(ctx, devHub)
+	devHub = c.resolveCredential(ctx, devHub)
+	resolvedDevHub, version, err := c.resolveAPIVersion(ctx, devHub)
 	if err != nil {
 		return ScratchOrg{}, err
 	}
+	devHub = resolvedDevHub
 	payload := map[string]any{
-		"Alias": request.Alias, "OrgName": request.OrgName, "Edition": request.Edition,
-		"DurationDays": request.DurationDays, "ConnectedAppConsumerKey": devHub.ClientID,
-		"ConnectedAppCallbackUrl": request.CallbackURL,
+		"OrgName": request.OrgName, "Edition": request.Edition, "DurationDays": request.DurationDays,
+		"ConnectedAppConsumerKey": ScratchSignupClientID, "ConnectedAppCallbackUrl": request.CallbackURL,
 	}
 	var created struct {
-		ID      string   `json:"id"`
-		Success bool     `json:"success"`
-		Errors  []string `json:"errors"`
+		ID      string `json:"id"`
+		Success bool   `json:"success"`
+		Errors  []any  `json:"errors"`
 	}
-	path := "/services/data/" + version + "/sobjects/ScratchOrgInfo"
-	if err := c.doJSON(ctx, devHub, http.MethodPost, path, payload, &created); err != nil {
-		return ScratchOrg{}, fmt.Errorf("create Salesforce scratch org: %w", err)
+	api, err := c.createScratchOrgInfo(ctx, devHub, version, payload, &created)
+	if err != nil {
+		return ScratchOrg{}, interpretScratchCreateError(err)
 	}
 	if !created.Success || created.ID == "" {
-		return ScratchOrg{}, fmt.Errorf("Salesforce did not accept the scratch-org request: %s", strings.Join(created.Errors, "; "))
+		return ScratchOrg{}, fmt.Errorf("Salesforce did not accept the scratch-org request: %s", formatSalesforceErrors(created.Errors))
 	}
 
 	for {
@@ -113,17 +168,17 @@ func (c *Client) CreateScratch(ctx context.Context, devHub Credential, request S
 			return ScratchOrg{}, fmt.Errorf("wait for Salesforce scratch org: %w", ctx.Err())
 		case <-time.After(c.pollInterval()):
 		}
-		info, err := c.getScratchInfo(ctx, devHub, version, created.ID)
+		info, err := c.getScratchInfo(ctx, devHub, api, created.ID)
 		if err != nil {
 			return ScratchOrg{}, err
 		}
 		switch strings.ToLower(strings.TrimSpace(info.Status)) {
 		case "active":
-			token, instanceURL, err := c.exchangeAuthCode(ctx, devHub, info.LoginURL, request.CallbackURL, info.AuthCode)
+			token, err := c.exchangeScratchAuthCode(ctx, info.LoginURL, request.CallbackURL, info.AuthCode)
 			if err != nil {
-				return ScratchOrg{}, err
+				return ScratchOrg{}, fmt.Errorf("Salesforce created the scratch org, but Dispatch could not sign in: %w", err)
 			}
-			return ScratchOrg{ID: created.ID, Alias: request.Alias, Username: info.SignupUsername, OrgID: info.ScratchOrg, InstanceURL: instanceURL, AccessToken: token, Status: info.Status, ExpirationDate: info.ExpirationDate}, nil
+			return ScratchOrg{ID: created.ID, Alias: request.Alias, Username: info.SignupUsername, OrgID: info.ScratchOrg, InstanceURL: token.InstanceURL, AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, Status: info.Status, ExpirationDate: info.ExpirationDate}, nil
 		case "error":
 			return ScratchOrg{}, fmt.Errorf("Salesforce scratch-org creation failed: %s", firstNonEmpty(info.ErrorCode, "unknown Salesforce error"))
 		}
@@ -140,24 +195,209 @@ type scratchInfo struct {
 	ErrorCode      string `json:"ErrorCode"`
 }
 
-func (c *Client) getScratchInfo(ctx context.Context, credential Credential, version, id string) (scratchInfo, error) {
+func (c *Client) getScratchInfo(ctx context.Context, credential Credential, api scratchOrgAPI, id string) (scratchInfo, error) {
 	var info scratchInfo
-	path := "/services/data/" + version + "/sobjects/ScratchOrgInfo/" + url.PathEscape(id)
-	if err := c.doJSON(ctx, credential, http.MethodGet, path, nil, &info); err != nil {
+	if err := c.doJSON(ctx, credential, http.MethodGet, api.path(id), nil, &info); err != nil {
 		return info, fmt.Errorf("read Salesforce scratch-org status: %w", err)
 	}
 	return info, nil
 }
 
+type scratchOrgAPI struct {
+	version string
+	tooling bool
+}
+
+func (api scratchOrgAPI) path(id string) string {
+	path := "/services/data/" + api.version + "/sobjects/ScratchOrgInfo"
+	if api.tooling {
+		path = "/services/data/" + api.version + "/tooling/sobjects/ScratchOrgInfo"
+	}
+	if strings.TrimSpace(id) != "" {
+		path += "/" + url.PathEscape(id)
+	}
+	return path
+}
+
+func (c *Client) createScratchOrgInfo(ctx context.Context, credential Credential, version string, payload any, created any) (scratchOrgAPI, error) {
+	// Salesforce CLI uses the REST sObject API. Tooling often 404s even when
+	// Dev Hub is enabled and the user is a System Administrator.
+	candidates := []scratchOrgAPI{{version: version}, {version: version, tooling: true}}
+	var lastErr error
+	for _, api := range candidates {
+		err := c.doJSON(ctx, credential, http.MethodPost, api.path(""), payload, created)
+		if err == nil {
+			return api, nil
+		}
+		lastErr = err
+		if !missingSalesforceSchema(err) {
+			return scratchOrgAPI{}, err
+		}
+	}
+	return scratchOrgAPI{}, lastErr
+}
+
+func (c *Client) HasDevHub(ctx context.Context, credential Credential) (bool, error) {
+	if !credential.Valid() {
+		return false, fmt.Errorf("connect a Salesforce Dev Hub before creating a scratch org")
+	}
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
+	if err != nil {
+		return false, err
+	}
+	flagged, read, queryErr := c.readOrganizationIsDevHub(ctx, credential, version)
+	if read {
+		return flagged, nil
+	}
+	for _, api := range []scratchOrgAPI{{version: version}, {version: version, tooling: true}} {
+		if describeErr := c.doJSON(ctx, credential, http.MethodGet, api.path("")+"/describe", nil, &struct{}{}); describeErr == nil {
+			return true, nil
+		} else if !missingSalesforceSchema(describeErr) {
+			return false, describeErr
+		}
+	}
+	if queryErr != nil && !missingSalesforceSchema(queryErr) {
+		return false, fmt.Errorf("could not confirm Salesforce Dev Hub status: %w", queryErr)
+	}
+	return false, nil
+}
+
+func missingSalesforceSchema(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "INVALID_FIELD") || strings.Contains(message, "NOT_FOUND")
+}
+
+func (c *Client) readOrganizationIsDevHub(ctx context.Context, credential Credential, version string) (bool, bool, error) {
+	var result struct {
+		Records []struct {
+			IsDevHub bool `json:"IsDevHub"`
+		} `json:"records"`
+	}
+	queryErr := c.query(ctx, credential, version, "SELECT IsDevHub FROM Organization", &result)
+	if queryErr == nil && len(result.Records) > 0 {
+		return result.Records[0].IsDevHub, true, nil
+	}
+	toolingPath := "/services/data/" + version + "/tooling/query?q=" + url.QueryEscape("SELECT IsDevHub FROM Organization")
+	toolingErr := c.doJSON(ctx, credential, http.MethodGet, toolingPath, nil, &result)
+	if toolingErr == nil && len(result.Records) > 0 {
+		return result.Records[0].IsDevHub, true, nil
+	}
+	if queryErr != nil {
+		return false, false, queryErr
+	}
+	if toolingErr != nil {
+		return false, false, toolingErr
+	}
+	return false, false, fmt.Errorf("Salesforce returned no Organization record")
+}
+
+func interpretScratchCreateError(err error) error {
+	message := err.Error()
+	if strings.Contains(message, "NOT_FOUND") {
+		return fmt.Errorf("create Salesforce scratch org: Salesforce could not start scratch-org signup with this login. Confirm this user can create scratch orgs in the Dev Hub: %s", message)
+	}
+	return fmt.Errorf("create Salesforce scratch org: %w", err)
+}
+
+type userInfo struct {
+	OrganizationID    string `json:"organization_id"`
+	PreferredUsername string `json:"preferred_username"`
+	URLs              struct {
+		Rest         string `json:"rest"`
+		ToolingRest  string `json:"tooling_rest"`
+		CustomDomain string `json:"custom_domain"`
+	} `json:"urls"`
+}
+
+func (info userInfo) instanceHost() string {
+	return firstSalesforceAPIHost(info.URLs.Rest, info.URLs.ToolingRest, info.URLs.CustomDomain)
+}
+
+func (c *Client) userInfo(ctx context.Context, credential Credential) (userInfo, error) {
+	var identity userInfo
+	err := c.doJSON(ctx, credential, http.MethodGet, "/services/oauth2/userinfo", nil, &identity)
+	return identity, err
+}
+
+func (c *Client) resolveCredential(ctx context.Context, credential Credential) Credential {
+	identity, err := c.userInfo(ctx, credential)
+	if err != nil {
+		return credential
+	}
+	if host := identity.instanceHost(); host != "" {
+		credential.InstanceURL = host
+	}
+	return credential
+}
+
+func firstSalesforceAPIHost(values ...string) string {
+	for _, raw := range values {
+		host := instanceHost(raw)
+		if host != "" && !isSalesforceUIHost(host) {
+			return host
+		}
+	}
+	return ""
+}
+
+func instanceHost(values ...string) string {
+	for _, raw := range values {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		if parsed.Scheme != "https" && parsed.Scheme != "http" {
+			continue
+		}
+		return parsed.Scheme + "://" + parsed.Host
+	}
+	return ""
+}
+
+func isSalesforceUIHost(raw string) bool {
+	host := strings.ToLower(raw)
+	return strings.Contains(host, "lightning.force.com") || strings.Contains(host, "salesforce-setup.com") || strings.Contains(host, "file.force.com") || strings.Contains(host, "visualforce.com")
+}
+
+func formatSalesforceErrors(errors []any) string {
+	parts := make([]string, 0, len(errors))
+	for _, item := range errors {
+		switch typed := item.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				parts = append(parts, typed)
+			}
+		default:
+			data, err := json.Marshal(typed)
+			if err == nil && len(data) > 0 && string(data) != "null" {
+				parts = append(parts, string(data))
+			}
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
 func (c *Client) latestAPIVersion(ctx context.Context, credential Credential) (string, error) {
+	_, version, err := c.resolveAPIVersion(ctx, credential)
+	return version, err
+}
+
+func (c *Client) resolveAPIVersion(ctx context.Context, credential Credential) (Credential, string, error) {
 	var versions []struct {
 		Version string `json:"version"`
 	}
-	if err := c.doJSON(ctx, credential, http.MethodGet, "/services/data/", nil, &versions); err != nil {
-		return "", fmt.Errorf("discover Salesforce REST API version: %w", err)
+	resolvedURL, err := c.doJSONRedirects(ctx, credential, http.MethodGet, "/services/data/", nil, &versions, 3)
+	if err != nil {
+		return credential, "", fmt.Errorf("discover Salesforce REST API version: %w", err)
+	}
+	if strings.TrimSpace(resolvedURL) != "" {
+		credential.InstanceURL = resolvedURL
 	}
 	if len(versions) == 0 {
-		return "", fmt.Errorf("Salesforce returned no REST API versions")
+		return credential, "", fmt.Errorf("Salesforce returned no REST API versions")
 	}
 	slices.SortFunc(versions, func(a, b struct {
 		Version string `json:"version"`
@@ -172,66 +412,142 @@ func (c *Client) latestAPIVersion(ctx context.Context, credential Credential) (s
 		}
 		return 0
 	})
-	return "v" + versions[len(versions)-1].Version, nil
+	return credential, "v" + versions[len(versions)-1].Version, nil
 }
 
-func (c *Client) exchangeAuthCode(ctx context.Context, credential Credential, loginURL, callbackURL, code string) (string, string, error) {
+func (c *Client) exchangeScratchAuthCode(ctx context.Context, loginURL, callbackURL, code string) (TokenResponse, error) {
 	if strings.TrimSpace(code) == "" {
-		return "", "", fmt.Errorf("Salesforce activated the scratch org but did not return an authorization code")
+		return TokenResponse{}, fmt.Errorf("Salesforce activated the scratch org but did not return an authorization code")
 	}
-	base := strings.TrimRight(firstNonEmpty(loginURL, credential.InstanceURL), "/")
-	values := url.Values{"grant_type": {"authorization_code"}, "client_id": {credential.ClientID}, "redirect_uri": {callbackURL}, "code": {code}}
-	if credential.ClientSecret != "" {
-		values.Set("client_secret", credential.ClientSecret)
+	var lastErr error
+	for _, tokenURL := range scratchTokenLoginURLs(loginURL) {
+		token, err := c.ExchangeAuthorizationCode(ctx, AuthorizationCodeRequest{
+			LoginURL: tokenURL, ClientID: ScratchSignupClientID, RedirectURL: callbackURL, Code: code,
+		})
+		if err == nil {
+			return token, nil
+		}
+		lastErr = err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/services/oauth2/token", strings.NewReader(values.Encode()))
-	if err != nil {
-		return "", "", err
+	return TokenResponse{}, lastErr
+}
+
+func scratchTokenLoginURLs(loginURL string) []string {
+	urls := []string{strings.TrimSpace(loginURL)}
+	if _, err := NormalizeLoginURL(loginURL); err != nil {
+		return urls
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := c.httpClient().Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("authorize new Salesforce scratch org: %w", err)
+	for _, fallback := range []string{DefaultProductionLogin, DefaultSandboxLogin} {
+		if !sameInstanceURL(fallback, loginURL) {
+			urls = append(urls, fallback)
+		}
 	}
-	defer response.Body.Close()
-	var result struct {
-		AccessToken string `json:"access_token"`
-		InstanceURL string `json:"instance_url"`
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-	}
-	if err := decodeResponse(response, &result); err != nil {
-		return "", "", fmt.Errorf("authorize new Salesforce scratch org: %w", err)
-	}
-	if result.AccessToken == "" {
-		return "", "", fmt.Errorf("authorize new Salesforce scratch org: %s", firstNonEmpty(result.Description, result.Error))
-	}
-	return result.AccessToken, result.InstanceURL, nil
+	return urls
 }
 
 func (c *Client) doJSON(ctx context.Context, credential Credential, method, path string, body any, out any) error {
+	_, err := c.doJSONRedirects(ctx, credential, method, path, body, out, 3)
+	return err
+}
+
+func (c *Client) doJSONRedirects(ctx context.Context, credential Credential, method, path string, body any, out any, remaining int) (string, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return "", err
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(credential.InstanceURL, "/")+path, reader)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+credential.AccessToken)
+	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	response, err := c.httpClient().Do(req)
+	response, err := c.jsonRequestClient().Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer response.Body.Close()
-	return decodeResponse(response, out)
+	if remaining > 0 && isHTTPRedirect(response.StatusCode) {
+		if host := instanceHost(response.Header.Get("Location")); host != "" && !sameInstanceURL(host, credential.InstanceURL) {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+			credential.InstanceURL = host
+			return c.doJSONRedirects(ctx, credential, method, path, body, out, remaining-1)
+		}
+	}
+	resolvedURL := credential.InstanceURL
+	if response.Request != nil && response.Request.URL != nil {
+		resolvedURL = firstNonEmpty(instanceHost(response.Request.URL.String()), resolvedURL)
+	}
+	return resolvedURL, decodeResponse(response, out)
+}
+
+func (c *Client) jsonRequestClient() *http.Client {
+	base := c.httpClient()
+	cloned := *base
+	cloned.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	return &cloned
+}
+
+func (c *Client) jsonClient(method string) *http.Client {
+	base := c.httpClient()
+	if !keepsRequestBodyOnRedirect(method) {
+		return base
+	}
+	cloned := *base
+	parent := cloned.CheckRedirect
+	cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) == 0 {
+			return nil
+		}
+		if req.Method != via[0].Method {
+			// net/http changes 301/302/303 POST redirects to GET before it
+			// invokes CheckRedirect. Salesforce can redirect API endpoints, but
+			// the receiving Metadata and REST endpoints still require the body.
+			// Restore the original request instead of accepting an empty GET.
+			req.Method = via[0].Method
+			if via[0].GetBody == nil {
+				return http.ErrUseLastResponse
+			}
+			body, err := via[0].GetBody()
+			if err != nil {
+				return err
+			}
+			req.Body = body
+			req.GetBody = via[0].GetBody
+			req.ContentLength = via[0].ContentLength
+		}
+		if parent != nil {
+			return parent(req, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &cloned
+}
+
+func keepsRequestBodyOnRedirect(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
+}
+
+func isHTTPRedirect(status int) bool {
+	return status == http.StatusMovedPermanently || status == http.StatusFound || status == http.StatusTemporaryRedirect || status == http.StatusPermanentRedirect
+}
+
+func sameInstanceURL(left, right string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(left), "/"), strings.TrimRight(strings.TrimSpace(right), "/"))
 }
 
 func decodeResponse(response *http.Response, out any) error {
@@ -246,6 +562,13 @@ func decodeResponse(response *http.Response, out any) error {
 		}
 		if json.Unmarshal(data, &errors) == nil && len(errors) > 0 {
 			return fmt.Errorf("%s: %s", errors[0].ErrorCode, errors[0].Message)
+		}
+		var oauth struct {
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		if json.Unmarshal(data, &oauth) == nil && (oauth.Error != "" || oauth.Description != "") {
+			return fmt.Errorf("%s", firstNonEmpty(oauth.Description, oauth.Error))
 		}
 		return fmt.Errorf("HTTP %d from Salesforce", response.StatusCode)
 	}
@@ -273,7 +596,7 @@ func normalizeScratchRequest(request ScratchRequest) ScratchRequest {
 	}
 	request.CallbackURL = strings.TrimSpace(request.CallbackURL)
 	if request.CallbackURL == "" {
-		request.CallbackURL = "http://localhost:1717/OauthRedirect"
+		request.CallbackURL = ScratchSignupCallbackURL
 	}
 	return request
 }

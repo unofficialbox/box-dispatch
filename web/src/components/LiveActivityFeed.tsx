@@ -14,7 +14,7 @@ export function LiveActivityFeed({ providers }: { providers: ProviderProgress[] 
   }, [visibleEvents.length, lastEventSequence])
   if (events.length === 0) return null
   return <section className="live-activity-feed" aria-label="Recent validation activity" aria-live="polite">
-    <header><div><h3>Live activity</h3><p>Latest provider and component updates.</p></div><span>{events.length} update{events.length === 1 ? '' : 's'}</span></header>
+    <header><div><h3>Live activity</h3><p>Latest provider and component updates.</p></div></header>
     <div className="live-activity-log" ref={logRef} tabIndex={0} aria-label="Live validation log"><ol>{visibleEvents.map((event) => <li className={eventState(event)} key={event.sequence}>
       <span className="activity-indicator">
         {isWorking(event) && <box-spinner aria-label="Working" label="" size="small" />}

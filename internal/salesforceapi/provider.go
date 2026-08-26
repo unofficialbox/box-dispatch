@@ -18,6 +18,17 @@ type InstalledPackage struct {
 	VersionNumber string
 }
 
+// PackageInstallProgress is the latest state Salesforce returned for an
+// asynchronous managed-package install request.
+type PackageInstallProgress struct {
+	RequestID string
+	Status    string
+	Polls     int
+	Elapsed   time.Duration
+}
+
+type PackageInstallProgressFunc func(PackageInstallProgress)
+
 type PermissionInventory struct {
 	UserID   string
 	Username string
@@ -26,7 +37,7 @@ type PermissionInventory struct {
 }
 
 func (c *Client) ListInstalledPackages(ctx context.Context, credential Credential) ([]InstalledPackage, error) {
-	version, err := c.latestAPIVersion(ctx, credential)
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +75,10 @@ func (c *Client) ListInstalledPackages(ctx context.Context, credential Credentia
 }
 
 func (c *Client) InstallPackage(ctx context.Context, credential Credential, versionID, securityType string) error {
+	return c.InstallPackageWithProgress(ctx, credential, versionID, securityType, nil)
+}
+
+func (c *Client) InstallPackageWithProgress(ctx context.Context, credential Credential, versionID, securityType string, progress PackageInstallProgressFunc) error {
 	versionID = strings.TrimSpace(versionID)
 	if versionID == "" {
 		return fmt.Errorf("Salesforce package version ID is required")
@@ -72,7 +87,7 @@ func (c *Client) InstallPackage(ctx context.Context, credential Credential, vers
 	if err != nil {
 		return err
 	}
-	version, err := c.latestAPIVersion(ctx, credential)
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
 	if err != nil {
 		return err
 	}
@@ -89,6 +104,11 @@ func (c *Client) InstallPackage(ctx context.Context, credential Credential, vers
 	if !created.Success || created.ID == "" {
 		return fmt.Errorf("Salesforce did not accept the managed-package install request: %s", strings.Join(created.Errors, "; "))
 	}
+	startedAt := time.Now()
+	if progress != nil {
+		progress(PackageInstallProgress{RequestID: created.ID, Status: "QUEUED"})
+	}
+	polls := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -105,6 +125,10 @@ func (c *Client) InstallPackage(ctx context.Context, credential Credential, vers
 		}
 		if err := c.doJSON(ctx, credential, http.MethodGet, path+"/"+url.PathEscape(created.ID), nil, &status); err != nil {
 			return fmt.Errorf("read Salesforce managed-package install status: %w", err)
+		}
+		polls++
+		if progress != nil {
+			progress(PackageInstallProgress{RequestID: created.ID, Status: status.Status, Polls: polls, Elapsed: time.Since(startedAt)})
 		}
 		switch strings.ToUpper(strings.TrimSpace(status.Status)) {
 		case "SUCCESS":
@@ -137,7 +161,11 @@ func toolingPackageSecurityType(value string) (string, error) {
 }
 
 func (c *Client) ReadPermissionInventory(ctx context.Context, credential Credential, username string) (PermissionInventory, error) {
-	version, err := c.latestAPIVersion(ctx, credential)
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return PermissionInventory{}, fmt.Errorf("Salesforce did not return the authenticated deployment username; reconnect the selected org and retry")
+	}
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
 	if err != nil {
 		return PermissionInventory{}, err
 	}
@@ -182,7 +210,7 @@ func (c *Client) ReadPermissionInventory(ctx context.Context, credential Credent
 }
 
 func (c *Client) AssignPermissionSets(ctx context.Context, credential Credential, userID string, names []string) error {
-	version, err := c.latestAPIVersion(ctx, credential)
+	credential, version, err := c.resolveAPIVersion(ctx, credential)
 	if err != nil {
 		return err
 	}
