@@ -1,3 +1,5 @@
+![Box Dispatch — configure, validate, and deploy Box-backed solution stacks](assets/banner.png)
+
 # box-dispatch
 
 Box Dispatch is a browser-first workspace for configuring, validating, and deploying
