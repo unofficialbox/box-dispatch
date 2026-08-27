@@ -20,6 +20,7 @@ const (
 	stateDirName          = ".dispatch"
 	connectionSettingsBCL = "connection-settings.bcl"
 	solutionPlanBCL       = "solution-plan.bcl"
+	deploymentDefaultsBCL = "deployment-defaults.bcl"
 	// Legacy JSON files (under the old .windlass state dir) read once for
 	// forward migration to BCL.
 	legacyStateDirName     = ".windlass"
@@ -29,6 +30,7 @@ const (
 	stateProvider         = "box-dispatch"
 	connectionSettingsCtx = "connection-settings"
 	solutionPlanContext   = "solution-plan"
+	deploymentDefaultsCtx = "deployment-defaults"
 )
 
 func stateDir() string { return filepath.Join(config.Paths().Root, stateDirName) }
@@ -71,6 +73,23 @@ func LoadSolutionPlan() (config.SolutionPlan, error) {
 func SaveSolutionPlan(plan config.SolutionPlan) error {
 	if err := writeState(statePath(solutionPlanBCL), solutionPlanContext, plan); err != nil {
 		return fmt.Errorf("write solution plan: %w", err)
+	}
+	return nil
+}
+
+// LoadDeploymentDefaults reads workspace-wide defaults for new deployments.
+func LoadDeploymentDefaults() (config.DeploymentDefaults, error) {
+	var defaults config.DeploymentDefaults
+	if err := readState(statePath(deploymentDefaultsBCL), "", &defaults); err != nil {
+		return defaults, fmt.Errorf("read deployment defaults: %w", err)
+	}
+	return defaults, nil
+}
+
+// SaveDeploymentDefaults writes workspace-wide defaults as BCL.
+func SaveDeploymentDefaults(defaults config.DeploymentDefaults) error {
+	if err := writeState(statePath(deploymentDefaultsBCL), deploymentDefaultsCtx, defaults); err != nil {
+		return fmt.Errorf("write deployment defaults: %w", err)
 	}
 	return nil
 }

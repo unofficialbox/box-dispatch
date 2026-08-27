@@ -52,6 +52,30 @@ it redacts credential-shaped JSON fields and omits callback query strings.
   process, then opens the browser. Vite proxies `/api` to `127.0.0.1:8787` only during
   frontend development; no token or client secret is available to browser code.
 
+## Operator workflow
+
+The browser workspace guides operators through:
+
+1. Start from workspace defaults, name the deployment, and override its solution or provider set when needed.
+2. Connect and verify Box and Salesforce.
+3. Configure deployment strategy and supported components.
+4. Validate provider state and deployment prerequisites.
+5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
+
+The browser is the only interactive user experience. The executable has no full-screen
+terminal mode, prompts, keyboard-driven terminal navigation, or terminal presentation
+dependencies.
+
+## Security boundaries
+
+- The browser receives no provider credentials or raw provider responses.
+- The Go service remains loopback-only and returns `Cache-Control: no-store`.
+- OAuth and token refresh are owned by the Go service; credentials never enter browser state.
+- Connection selections, deployment plans, and workspace defaults are stored as owner-only BCL documents under `.dispatch/`.
+- Deployment and cleanup operate on recorded immutable resource IDs.
+- Unsupported or private provider APIs are excluded and tracked in [`PUBLIC_API_GAPS.md`](PUBLIC_API_GAPS.md).
+- Generated solution packages use BCL as their portable contract; see [`../BCL_ARTIFACT_CONTRACT.md`](../BCL_ARTIFACT_CONTRACT.md).
+
 ## Current local API
 
 Run the complete browser application and local API on the loopback interface:
@@ -94,6 +118,8 @@ credentials from `.env`:
 | `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |
 | `PUT /api/plan` | save a supported template/provider draft to BCL | package path and all deployment execution |
+| `GET /api/defaults` | owner-only workspace defaults used to initialize new deployments | credentials, readiness, and prior deployment identity |
+| `PUT /api/defaults` | save the default solution, strategy, and supported provider set | deployment execution, connection selection, and arbitrary repositories |
 | `GET /api/templates` | BCL-configured solution quickstarts and safe display copy | repository source URLs, local paths, credentials |
 | `POST /api/packages` | assemble an allowlisted template into a server-chosen local workspace, then save its BCL plan | arbitrary repositories or destinations, package path, raw Git output |
 | `GET /api/runs` | recent browser-run summaries, persisted across local API restarts | package paths, raw diagnostics, provider output |

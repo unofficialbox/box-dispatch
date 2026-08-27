@@ -5,20 +5,23 @@ import { BoxConnectionDrawer, DiagnosticsDrawer, SalesforceConnectionDrawer } fr
 import { DeploymentHeader } from './components/DeploymentHeader'
 import { DeploymentConfirmationDialog } from './components/DeploymentConfirmationDialog'
 import { ValidationChangesDrawer } from './components/ValidationChangesDrawer'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar, type AppView } from './components/Sidebar'
 import { ChoosePage } from './pages/ChoosePage'
 import { ConnectPage } from './pages/ConnectPage'
 import { ConfigurePage } from './pages/ConfigurePage'
 import { DeployPage } from './pages/DeployPage'
 import { OverviewPage } from './pages/OverviewPage'
+import { HistoryPage } from './pages/HistoryPage'
 import { ReviewPage } from './pages/ReviewPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SummaryPage } from './pages/SummaryPage'
-import type { BoxOAuthJob, ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun, Phase, RunDiagnostic, RunEvent, SalesforceOAuthJob, ScratchOrgJob, SolutionTemplate, ValidationFileChange, ValidationChanges } from './types'
+import type { BoxOAuthJob, ConnectionSummary, DeploymentDefaults, DeploymentPlan, DeploymentSummary, DispatchRun, Phase, RunDiagnostic, RunEvent, SalesforceOAuthJob, ScratchOrgJob, SolutionTemplate, ValidationFileChange, ValidationChanges } from './types'
 import { refreshProviderReadiness } from './connectionReadiness'
 import { scratchOrgRequest } from './scratchOrg'
 import { connectionsReadyForPlan, guardedWorkflowPhase, resumeWorkflowPhase } from './workflowResume'
 
 const fallbackPlan: DeploymentPlan = { exists: false, name: '', templateId: 'clm', template: 'CLM deployment', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }, { id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true }] }
+const fallbackDeploymentDefaults: DeploymentDefaults = { templateId: 'clm', template: 'Contract Lifecycle Management', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: ['box', 'salesforce'] }
 const fallbackTemplates: SolutionTemplate[] = [
   { id: 'clm', name: 'Contract Lifecycle Management', sector: 'Legal operations', description: 'Content-centric contract workflows with Box and intelligent agents.' },
   { id: 'lifesciences', name: 'Life Sciences', sector: 'Regulated content', description: 'Accelerate document-heavy life sciences processes and insight.' },
@@ -26,10 +29,19 @@ const fallbackTemplates: SolutionTemplate[] = [
   { id: 'new', name: 'Create a New Solution', sector: 'Starter', description: 'Begin with the Box Dispatch reference architecture and shape your own solution.' },
 ]
 
+const viewFromHash = (): AppView => {
+  const hash = window.location.hash.toLowerCase()
+  if (hash === '#history') return 'history'
+  if (hash === '#settings') return 'settings'
+  if (hash === '#workspace') return 'workflow'
+  return 'overview'
+}
+
 function App() {
-  const [screen, setScreen] = useState<'overview' | 'workflow'>('overview')
+  const [screen, setScreen] = useState<AppView>(viewFromHash)
   const [activePhase, setActivePhase] = useState<Phase>('Review')
   const [plan, setPlan] = useState<DeploymentPlan>(fallbackPlan)
+  const [deploymentDefaults, setDeploymentDefaults] = useState<DeploymentDefaults>(fallbackDeploymentDefaults)
   const [deploymentName, setDeploymentName] = useState('')
   const [templates, setTemplates] = useState<SolutionTemplate[]>(fallbackTemplates)
   const [selectedTemplateID, setSelectedTemplateID] = useState('clm')
@@ -68,12 +80,34 @@ function App() {
   const activeRunID = run && (run.status === 'queued' || run.status === 'running') ? run.id : null
   const packagePreparing = scratchJob?.status === 'preparing' && (scratchJob.packageStatus === 'checking' || scratchJob.packageStatus === 'installing')
 
+  const navigateTo = (view: AppView) => {
+    const hash = view === 'overview' ? '' : view === 'workflow' ? '#workspace' : `#${view}`
+    const nextURL = `${window.location.pathname}${window.location.search}${hash}`
+    window.history.pushState(null, '', nextURL)
+    setScreen(view)
+  }
+
+  useEffect(() => {
+    const syncView = () => setScreen(viewFromHash())
+    window.addEventListener('hashchange', syncView)
+    window.addEventListener('popstate', syncView)
+    return () => {
+      window.removeEventListener('hashchange', syncView)
+      window.removeEventListener('popstate', syncView)
+    }
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
-    void Promise.allSettled([fetchJSON<DeploymentPlan>('/api/plan', controller.signal), fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal), fetchJSON<ConnectionSummary[]>('/api/connections', controller.signal), fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal), fetchJSON<DispatchRun[]>('/api/runs', controller.signal), fetchJSON<ScratchOrgJob>('/api/salesforce/scratch-orgs/latest', controller.signal)]).then(([planResult, templatesResult, connectionsResult, deploymentsResult, runsResult, scratchResult]) => {
+    void Promise.allSettled([fetchJSON<DeploymentPlan>('/api/plan', controller.signal), fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal), fetchJSON<DeploymentDefaults>('/api/defaults', controller.signal), fetchJSON<ConnectionSummary[]>('/api/connections', controller.signal), fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal), fetchJSON<DispatchRun[]>('/api/runs', controller.signal), fetchJSON<ScratchOrgJob>('/api/salesforce/scratch-orgs/latest', controller.signal)]).then(([planResult, templatesResult, defaultsResult, connectionsResult, deploymentsResult, runsResult, scratchResult]) => {
       if (templatesResult.status === 'fulfilled' && templatesResult.value.length > 0) {
         setTemplates(templatesResult.value)
         setSelectedTemplateID((current) => templatesResult.value.some((template) => template.id === current) ? current : templatesResult.value[0].id)
+      }
+      if (defaultsResult.status === 'fulfilled') {
+        setDeploymentDefaults(defaultsResult.value)
+        setSelectedTemplateID(defaultsResult.value.templateId)
+        setSelectedComponents(defaultsResult.value.components)
       }
       if (planResult.status === 'fulfilled' && planResult.value.exists) {
         setPlan(planResult.value)
@@ -312,28 +346,6 @@ function App() {
       setBoxConnectionLoading(false)
     }
   }
-  const verifyBoxConnection = async () => {
-    setBoxConnectionError('')
-    setBoxConnectionLoading(true)
-    try {
-      const response = await fetch('/api/connections/box/check', { method: 'POST' })
-      if (!response.ok) throw new Error(await responseError(response, 'Box connection could not be verified.'))
-      const selection = await response.json() as ConnectionSummary
-      setConnections((current) => [...current.filter((connection) => connection.name !== 'Box'), selection])
-      setPlan((current) => ({ ...current, components: current.components.map((component) => component.id === 'box' ? { ...component, configured: true, verified: selection.verified, ready: selection.verified } : component) }))
-      setNotice(`${selection.alias || 'Box'} is ready.`)
-      showToast(`${selection.alias || 'Box'} is ready.`)
-      return true
-    } catch (error: unknown) {
-      const message = error instanceof TypeError
-        ? 'Dispatch’s local service is unavailable. Reopen Dispatch or wait for it to restart, then try again.'
-        : error instanceof Error ? error.message : 'Box connection could not be verified.'
-      showToast(message, 'error')
-      return false
-    } finally {
-      setBoxConnectionLoading(false)
-    }
-  }
   const refreshBoxConnection = async () => {
     const response = await fetch('/api/connections')
     if (!response.ok) throw new Error('Box connection state could not be refreshed.')
@@ -502,12 +514,12 @@ function App() {
     const timer = window.setTimeout(() => { void poll() }, 250)
     return () => { stopped = true; window.clearTimeout(timer) }
   }, [scratchJobID, scratchJobStatus])
-  const beginNewDeployment = () => { setScreen('workflow'); setRun(null); setRunEvents([]); setDeploymentName(''); setActivePhase('Choose'); setNotice('Name the deployment, then confirm the solution and systems.') }
+  const beginNewDeployment = () => { navigateTo('workflow'); setRun(null); setRunEvents([]); setDeploymentName(''); setSelectedTemplateID(deploymentDefaults.templateId); setSelectedComponents(deploymentDefaults.components); setActivePhase('Choose'); setNotice('Name the deployment, then confirm the solution and systems.') }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
   const assemblePackage = () => {
     if (!deploymentName.trim()) { setNotice('Enter a deployment name to continue.'); return }
     setAssembling(true); setNotice('Preparing the selected package…')
-    void fetch('/api/packages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deploymentName.trim(), templateId: selectedTemplateID, components: selectedComponents }) }).then(async (response) => {
+    void fetch('/api/packages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deploymentName.trim(), templateId: selectedTemplateID, components: selectedComponents, strategy: deploymentDefaults.strategy }) }).then(async (response) => {
       if (!response.ok) throw new Error((await response.json().catch(() => ({ error: '' })) as { error?: string }).error || 'Package could not be assembled.')
       return (await response.json()) as DeploymentPlan
     }).then((nextPlan) => {
@@ -522,6 +534,16 @@ function App() {
     const response = await fetch('/api/plan', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: currentPlan.name, templateId: currentPlan.templateId, template: currentPlan.template, repository: currentPlan.repository, components: currentPlan.components.map((component) => component.id), strategy: currentPlan.strategy }) })
     if (!response.ok) throw new Error(await responseError(response, 'Plan could not be saved.'))
     return await response.json() as DeploymentPlan
+  }
+  const saveDeploymentDefaults = async (nextDefaults: Pick<DeploymentDefaults, 'templateId' | 'strategy' | 'components'>) => {
+    const response = await fetch('/api/defaults', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nextDefaults) })
+    if (!response.ok) throw new Error(await responseError(response, 'Deployment defaults could not be saved.'))
+    const saved = await response.json() as DeploymentDefaults
+    setDeploymentDefaults(saved)
+    setSelectedTemplateID(saved.templateId)
+    setSelectedComponents(saved.components)
+    showToast('Deployment defaults saved.')
+    return saved
   }
   const checkSelectedConnections = async (currentPlan: DeploymentPlan) => {
     let failedCheck: Error | null = null
@@ -559,7 +581,7 @@ function App() {
     const message = error instanceof TypeError
       ? 'Dispatch’s local service is unavailable. Reopen Dispatch or wait for it to restart, then try again.'
       : error instanceof Error ? error.message : 'Live authentication could not be verified.'
-    setScreen('workflow')
+    navigateTo('workflow')
     setActivePhase('Connect')
     setNotice(message)
     showToast(message, 'error')
@@ -585,7 +607,7 @@ function App() {
       planSaved = true
       setPlan(savedPlan)
       await checkSelectedConnections(savedPlan)
-      setScreen('workflow')
+      navigateTo('workflow')
       setActivePhase('Review')
       setNotice('Authentication is current. Review the plan, then validate.')
     } catch (error: unknown) {
@@ -604,7 +626,7 @@ function App() {
       return
     }
     const nextPhase = guardedWorkflowPhase(phase, plan, connections)
-    setScreen('workflow')
+    navigateTo('workflow')
     setActivePhase(nextPhase)
     if (nextPhase !== phase) {
       setNotice('Connect and verify every selected system before validation.')
@@ -616,7 +638,16 @@ function App() {
   }
   const continueSavedDeployment = () => setWorkflowPhase(resumeWorkflowPhase(plan, connections, run))
 
-  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => setScreen('overview')} onNewDeployment={beginNewDeployment}/><main id="workspace" className="workspace">{screen === 'overview' ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection}/> : <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} checkingConnections={checkingConnections} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={() => setDeploymentConfirmationOpen(true)} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onOverview={() => setScreen('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {changesRunID && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} onClose={() => setChangesRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onVerify={verifyBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</div>
+  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} checkingConnections={checkingConnections} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={() => setDeploymentConfirmationOpen(true)} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
+  const content = screen === 'overview'
+    ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
+    : screen === 'history'
+      ? <HistoryPage deployments={deployments}/>
+      : screen === 'settings'
+        ? <SettingsPage defaults={deploymentDefaults} connections={connections} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
+        : workflow
+
+  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><main id="workspace" className="workspace">{content}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {changesRunID && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} onClose={() => setChangesRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</div>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {

@@ -244,6 +244,14 @@ func listSalesforceTargets() ([]salesforceorg.Target, error) {
 	return salesforceorg.ListTargets()
 }
 
+func recoverSalesforceScratchAccess(ctx context.Context, orgID, username, instanceURL string) (salesforceorg.ScratchAccess, error) {
+	return salesforceorg.RecoverScratchAccess(ctx, orgID, username, instanceURL)
+}
+
+func openSalesforceScratch(ctx context.Context, target, returnPath string) (string, error) {
+	return salesforceorg.OpenScratchURL(ctx, target, returnPath)
+}
+
 func presentSalesforceOptions(settings config.ConnectionSettings, targets []salesforceorg.Target) []salesforceConnectionOption {
 	options := make([]salesforceConnectionOption, 0, len(targets))
 	for _, target := range targets {
@@ -318,4 +326,12 @@ func loadPlan() (config.SolutionPlan, error) {
 
 func savePlan(plan config.SolutionPlan) error {
 	return shellstate.SaveSolutionPlan(plan)
+}
+
+func loadDeploymentDefaults() (config.DeploymentDefaults, error) {
+	return shellstate.LoadDeploymentDefaults()
+}
+
+func saveDeploymentDefaults(defaults config.DeploymentDefaults) error {
+	return shellstate.SaveDeploymentDefaults(defaults)
 }

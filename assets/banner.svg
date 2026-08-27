@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Box Dispatch banner — isometric system hub</title>
+  <desc id="desc">An isometric Box Dispatch hub routes a package to documents, CRM records, analytics insights, and AI agents.</desc>
+  <defs>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.6" fill="#16335d"/></pattern>
+    <linearGradient id="platformTop" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1774ea"/><stop offset="1" stop-color="#064aa6"/></linearGradient>
+    <linearGradient id="packageFront" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#1679ee"/><stop offset="1" stop-color="#0750b3"/></linearGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1200" height="300" fill="#07172d"/><rect width="1200" height="300" fill="url(#dots)"/><rect width="1200" height="5" fill="#0866d9"/>
+  <text x="54" y="64" font-family="Helvetica Neue,Arial,sans-serif" font-size="30" font-weight="800"><tspan fill="#fffefa">B</tspan><tspan fill="#5c9df2">/</tspan></text>
+  <text x="56" y="114" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700" letter-spacing="2" fill="#5c9df2">CONFIGURE · VALIDATE · DEPLOY</text>
+  <text x="52" y="194" font-family="Helvetica Neue,Arial,sans-serif" font-size="62" font-weight="800" letter-spacing="-1"><tspan fill="#fffefa">BOX DISPATCH</tspan><tspan fill="#ff6658">.</tspan></text>
+  <text x="56" y="238" font-family="Georgia,Times New Roman,serif" font-size="19" fill="#9fb0c6">Route every part of the solution with confidence.</text>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#0d376b" stroke-width="11" opacity=".9">
+      <path d="M894 137C836 137 833 75 774 75"/><path d="M966 137c58 0 61-62 120-62"/>
+      <path d="M894 165c-58 0-61 61-120 61"/><path d="M966 165c58 0 61 61 120 61"/>
+    </g>
+    <g stroke="#f7fbff" stroke-width="3" filter="url(#softGlow)">
+      <path d="M894 137C836 137 833 75 774 75"/><path d="M966 137c58 0 61-62 120-62"/>
+      <path d="M894 165c-58 0-61 61-120 61"/><path d="M966 165c58 0 61 61 120 61"/>
+    </g>
+    <g stroke="#1782ff" stroke-width="2">
+      <path d="M894 137C836 137 833 75 774 75"/><path d="M966 137c58 0 61-62 120-62"/>
+      <path d="M894 165c-58 0-61 61-120 61"/><path d="M966 165c58 0 61 61 120 61"/>
+    </g>
+  </g>
+
+  <g transform="translate(864 111)">
+    <path d="m0 26 66-26 66 26-66 27z" fill="url(#platformTop)" stroke="#dcecff" stroke-width="2"/>
+    <path d="m0 26 66 27v25L0 51z" fill="#073b84" stroke="#9dc8ff" stroke-width="2"/>
+    <path d="m132 26-66 27v25l66-27z" fill="#052b62" stroke="#75b2ff" stroke-width="2"/>
+    <ellipse cx="66" cy="27" rx="27" ry="13" fill="none" stroke="#fffefa" stroke-width="4"/>
+    <ellipse cx="66" cy="27" rx="16" ry="7" fill="#0b172a" stroke="#8fbcf7" stroke-width="3"/>
+    <circle cx="66" cy="27" r="5" fill="#ff6658"/>
+  </g>
+
+  <g transform="translate(902 51)">
+    <path d="m0 18 28-13 28 13-28 13z" fill="#e9f3ff" stroke="#fffefa" stroke-width="2"/>
+    <path d="m0 18 28 13v43L0 61z" fill="url(#packageFront)" stroke="#dcecff" stroke-width="2"/>
+    <path d="m56 18-28 13v43l28-13z" fill="#06449b" stroke="#a7cfff" stroke-width="2"/>
+    <path d="M17 11 43 23M28 5v26" fill="none" stroke="#5c9df2" stroke-width="5"/>
+    <path d="M10 43h10M10 50h13M10 57h9" stroke="#fffefa" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle">
+    <g transform="translate(704 38)">
+      <path d="m0 18 54-18 54 18-54 19z" fill="#10294b" stroke="#7bb6ff" stroke-width="1.5"/>
+      <path d="m0 18 54 19v14L0 32z" fill="#0a397a" stroke="#5c9df2"/><path d="m108 18-54 19v14l54-19z" fill="#062a5e" stroke="#5c9df2"/>
+      <ellipse cx="54" cy="19" rx="24" ry="7" fill="#04142b" opacity=".72"/>
+      <g stroke-linejoin="round">
+        <path d="M34-5h28l9 9v36H34z" fill="#09234a" stroke="#75b2ff" stroke-width="2"/>
+        <path d="M42-10h27l9 9v37H42z" fill="#e9f3ff" stroke="#fffefa" stroke-width="2"/>
+        <path d="M69-10v10h9" fill="#bcdcff" stroke="#5c9df2" stroke-width="2"/>
+        <path d="M49 11h21M49 18h21M49 25h15" fill="none" stroke="#0866d9" stroke-width="2.5" stroke-linecap="round"/>
+      </g>
+      <text x="54" y="80" fill="#7fb7fa" font-size="8">UNSTRUCTURED DATA</text>
+    </g>
+    <g transform="translate(1032 38)">
+      <path d="m0 18 54-18 54 18-54 19z" fill="#10294b" stroke="#7bb6ff" stroke-width="1.5"/>
+      <path d="m0 18 54 19v14L0 32z" fill="#0a397a" stroke="#5c9df2"/><path d="m108 18-54 19v14l54-19z" fill="#062a5e" stroke="#5c9df2"/>
+      <ellipse cx="54" cy="19" rx="25" ry="7" fill="#04142b" opacity=".72"/>
+      <g stroke-linejoin="round">
+        <path d="M30-3h48v38H30z" fill="#09234a" stroke="#75b2ff" stroke-width="2"/>
+        <path d="m30-3 7-7h48l-7 7z" fill="#d9ebff" stroke="#fffefa" stroke-width="2"/>
+        <path d="m78-3 7-7v37l-7 8z" fill="#063b84" stroke="#75b2ff" stroke-width="2"/>
+        <circle cx="43" cy="10" r="6" fill="#8fbcf7"/>
+        <path d="M35 28c1.8-9 14.2-9 16 0" fill="none" stroke="#8fbcf7" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M57 8h13M57 15h13M57 22h10" fill="none" stroke="#fffefa" stroke-width="2.5" stroke-linecap="round"/>
+      </g>
+      <text x="54" y="80" fill="#7fb7fa" font-size="8">STRUCTURED DATA</text>
+    </g>
+    <g transform="translate(704 202)">
+      <path d="m0 18 54-18 54 18-54 19z" fill="#10294b" stroke="#7bb6ff" stroke-width="1.5"/>
+      <path d="m0 18 54 19v14L0 32z" fill="#7b2b33" stroke="#ff776b"/><path d="m108 18-54 19v14l54-19z" fill="#4d1e29" stroke="#ff776b"/>
+      <ellipse cx="54" cy="19" rx="25" ry="7" fill="#1c0d1a" opacity=".7"/>
+      <g stroke-linejoin="round">
+        <path d="M29-8h50v40H29z" fill="#171a31" stroke="#ff8a80" stroke-width="2"/>
+        <path d="m29-8 7-6h50l-7 6z" fill="#ffe7e4" stroke="#fffefa" stroke-width="2"/>
+        <path d="m79-8 7-6v39l-7 7z" fill="#6f2832" stroke="#ff8a80" stroke-width="2"/>
+        <path d="M37 24V0M37 24h34M42 18l8-9 7 5L69 1" fill="none" stroke="#fffefa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="42" cy="18" r="2" fill="#ff6658"/><circle cx="50" cy="9" r="2" fill="#ff6658"/><circle cx="57" cy="14" r="2" fill="#ff6658"/><circle cx="69" cy="1" r="2" fill="#ff6658"/>
+      </g>
+      <text x="54" y="80" fill="#ff9f98" font-size="8">INSIGHTS</text>
+    </g>
+    <g transform="translate(1032 202)">
+      <path d="m0 18 54-18 54 18-54 19z" fill="#10294b" stroke="#7bb6ff" stroke-width="1.5"/>
+      <path d="m0 18 54 19v14L0 32z" fill="#087467" stroke="#3fe1c7"/><path d="m108 18-54 19v14l54-19z" fill="#064d46" stroke="#3fe1c7"/>
+      <ellipse cx="54" cy="19" rx="24" ry="7" fill="#031d20" opacity=".72"/>
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <path d="m54-13 16 9v19l-16 9-16-9V-4z" fill="#0b3440" stroke="#67edd9" stroke-width="2"/>
+        <circle cx="54" cy="6" r="6" fill="#e8fffb" stroke="#fffefa" stroke-width="2"/>
+        <path d="M48 1 39-7M60 1l9-8M54 12v13" fill="none" stroke="#fffefa" stroke-width="2.5"/>
+        <circle cx="36" cy="-10" r="5" fill="#0b3440" stroke="#67edd9" stroke-width="2"/>
+        <circle cx="72" cy="-10" r="5" fill="#0b3440" stroke="#67edd9" stroke-width="2"/>
+        <circle cx="54" cy="29" r="5" fill="#0b3440" stroke="#67edd9" stroke-width="2"/>
+        <path d="m52 3 2-5 2 5 5 2-5 2-2 5-2-5-5-2z" fill="#01a88d" stroke="none"/>
+      </g>
+      <text x="54" y="80" fill="#67edd9" font-size="8">AGENT ORCHESTRATION</text>
+    </g>
+  </g>
+</svg>

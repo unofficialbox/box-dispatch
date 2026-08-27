@@ -191,3 +191,43 @@ func assemblePackage(template packageTemplate, components []string, strategy str
 		Components: append([]string(nil), components...), Strategy: strategy, PackagePath: destination,
 	}, nil
 }
+
+func packageTemplateByID(templates []packageTemplate, id string) (packageTemplate, bool) {
+	for _, template := range templates {
+		if template.ID == id {
+			return template, true
+		}
+	}
+	return packageTemplate{}, false
+}
+
+func resolveDeploymentDefaults(defaults config.DeploymentDefaults, plan config.SolutionPlan, templates []packageTemplate) config.DeploymentDefaults {
+	if defaults.TemplateID == "" && plan.TemplateID != "" {
+		defaults = config.DeploymentDefaults{TemplateID: plan.TemplateID, Template: plan.Template, Repository: plan.Repository, Components: append([]string(nil), plan.Components...), Strategy: plan.Strategy}
+	}
+	if defaults.TemplateID == "" {
+		selected := templates[0]
+		for _, template := range templates {
+			if template.ID != "new" {
+				selected = template
+				break
+			}
+		}
+		defaults = config.DeploymentDefaults{TemplateID: selected.ID, Template: selected.Name, Repository: selected.repository, Components: []string{"box", "salesforce"}, Strategy: solution.StrategyReuse}
+	}
+	if selected, ok := packageTemplateByID(templates, defaults.TemplateID); ok {
+		defaults.Template = selected.Name
+		defaults.Repository = selected.repository
+	}
+	if defaults.Strategy == "" {
+		defaults.Strategy = solution.StrategyReuse
+	}
+	if len(defaults.Components) == 0 {
+		defaults.Components = []string{"box"}
+	}
+	return defaults
+}
+
+func presentDeploymentDefaults(defaults config.DeploymentDefaults) deploymentDefaultsResponse {
+	return deploymentDefaultsResponse{TemplateID: defaults.TemplateID, Template: defaults.Template, Repository: defaults.Repository, Strategy: defaults.Strategy, Components: append([]string(nil), defaults.Components...)}
+}

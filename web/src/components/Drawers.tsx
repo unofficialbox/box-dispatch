@@ -107,13 +107,26 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
     <section className="drawer-content salesforce-environments">
       {error && <div className="drawer-inline-error" role="alert"><strong>Salesforce connection needs attention</strong><p>{error}</p></div>}
       {orgs.length > 0 && <section className="saved-connection-summary salesforce-current-org" aria-label="Connected Salesforce orgs">
-        <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="salesforce" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.username || 'Salesforce org'}</h3></div><RemoveConnectionButton label="Remove selected Salesforce org" disabled={loading || !selected?.id} onPress={() => { if (selected?.id) void onRemove(selected.id) }}/></header>
+        <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="salesforce" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.username || 'Salesforce org'}</h3></div></header>
         {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.username || selected.alias || 'the selected Salesforce user'}</span></div>}
         {selected && <dl className="selected-environment-details">
           <div><dt>Org ID</dt><dd>{selected.orgId || 'Not reported'}</dd></div>
           <div><dt>Org type</dt><dd>{selected.kind || 'Org'}</dd></div>
         </dl>}
         <div className="saved-connection-actions"><DrawerButton label="Open org" disabled={loading || !connection?.launchUrl} onPress={onOpen}/></div>
+      </section>}
+      {orgs.length > 0 && <section className="drawer-section connected-environments saved-environments-section" aria-label="Saved Salesforce environments">
+        <div><h3>Saved environments</h3><p>Select the org Dispatch should use or remove one you no longer need.</p></div>
+        <ul className="connection-option-list">
+          {orgs.map((org) => <li key={org.id || `${org.alias}-${org.username}`} className={org.selected ? 'selected' : ''}>
+            <button type="button" className="connection-option-main" aria-pressed={org.selected} disabled={loading || org.selected || org.devHub || !org.id} onClick={() => { if (org.id) void onSelect(org.id) }}>
+              <span className={`connection-state-dot ${org.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
+              <span className="connection-option-copy"><strong>{org.alias || org.username || 'Salesforce org'}</strong><small>{[org.kind, org.username, org.orgId].filter(Boolean).join(' · ')}</small></span>
+              <span className="connection-option-badge">{org.selected ? 'Selected' : org.devHub ? 'Dev Hub' : 'Use org'}</span>
+            </button>
+            <RemoveConnectionButton label={`Remove ${org.alias || org.username || 'Salesforce org'}`} disabled={loading || !org.id} onPress={() => { if (org.id) void onRemove(org.id) }}/>
+          </li>)}
+        </ul>
       </section>}
       <section className="drawer-section connection-add-section">
         <div><h3>Add a Salesforce environment</h3><p>Use an existing org or create a temporary org for this deployment.</p></div>
@@ -130,19 +143,6 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
         </div>
         <box-select ref={loginHostRef} label="Sign-in endpoint" value={loginHost} options={[{ label: 'Production', value: 'production' }, { label: 'Sandbox', value: 'sandbox' }]} required></box-select>
         {oauthJob?.status === 'pending' && <p className="scratch-job scratch-job-queued" role="status" aria-live="polite">{oauthJob.message}</p>}
-        {orgs.length > 0 && <div className="connected-environments">
-          <h4>Connected environments</h4>
-          <ul className="connection-option-list">
-            {orgs.map((org) => <li key={org.id || `${org.alias}-${org.username}`} className={org.selected ? 'selected' : ''}>
-              <button type="button" className="connection-option-main" aria-pressed={org.selected} disabled={loading || org.selected || org.devHub || !org.id} onClick={() => { if (org.id) void onSelect(org.id) }}>
-                <span className={`connection-state-dot ${org.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
-                <span className="connection-option-copy"><strong>{org.alias || org.username || 'Salesforce org'}</strong><small>{[org.kind, org.username, org.orgId].filter(Boolean).join(' · ')}</small></span>
-                <span className="connection-option-badge">{org.selected ? 'Selected' : org.devHub ? 'Dev Hub' : 'Use org'}</span>
-              </button>
-              <RemoveConnectionButton label={`Remove ${org.alias || org.username || 'Salesforce org'}`} disabled={loading || !org.id} onPress={() => { if (org.id) void onRemove(org.id) }}/>
-            </li>)}
-          </ul>
-        </div>}
       </section>}
       {addMode === 'scratch' && <section className="drawer-section connection-mode-panel scratch-org-section">
         <div><h3>Create a scratch org</h3><p>{canCreateScratch ? 'Dispatch creates, selects, and verifies a 30-day org from your Dev Hub.' : 'Connect a Dev Hub before creating a scratch org.'}</p></div>
@@ -161,34 +161,51 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
   </box-drawer>
 }
 
-export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLogin, onSelect, onRemove, onVerify, onOpen, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: BoxOAuthJob | null; onLogin: () => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onVerify: () => Promise<boolean>; onOpen: () => void; onClose: () => void }) {
+export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLogin, onSelect, onRemove, onOpen, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: BoxOAuthJob | null; onLogin: () => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onOpen: () => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
   const closeDrawer = () => (drawerRef.current as DrawerElement | null)?.close()
   const apps = connection?.connections ?? []
   const selected = apps.find((app) => app.selected) ?? apps[0]
-  const appSelectRef = useValueChanged((value) => { if (value && value !== selected?.id) void onSelect(value) })
+  const [addingConnection, setAddingConnection] = useState(apps.length === 0)
   const loggingIn = oauthJob?.status === 'pending'
   const canLogin = Boolean(connection?.oauthConfigured)
-  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Connect Box" position="right" size="large" busy={loading}>
-    <section className="drawer-content box-connection-form">
+  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Box connections" position="right" size="large" busy={loading}>
+    <section className="drawer-content box-environments">
       {error && <div className="drawer-inline-error" role="alert"><strong>Box connection needs attention</strong><p>{error}</p></div>}
-      {apps.length > 0 && <section className="saved-connection-summary" aria-label="Connected Box users">
-        <h3>Connected users</h3>
-        <div className="saved-connection-picker">
-          <box-select ref={appSelectRef} label="Box connection" value={selected?.id ?? ''} options={apps.map((app) => ({ label: app.alias || app.identity || 'Box', value: app.id ?? '' }))}></box-select>
-          <RemoveConnectionButton label="Remove Box connection" disabled={loading || !selected?.id} onPress={() => { if (selected?.id) void onRemove(selected.id) }}/>
-        </div>
-        {selected && <p>Connected as {selected.identity || selected.alias || 'the selected Box user'}.</p>}
-        <div className="saved-connection-actions"><DrawerButton label="Open" disabled={loading || !connection?.launchUrl} onPress={onOpen}/><DrawerButton label={loading ? 'Checking…' : 'Check availability'} tone="primary" disabled={loading} onPress={() => { void onVerify() }}/></div>
+      {apps.length > 0 && <section className="saved-connection-summary selected-environment-summary" aria-label="Selected Box environment">
+        <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="box" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.identity || 'Box account'}</h3></div></header>
+        {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.identity || selected.alias || 'the selected Box user'}</span></div>}
+        {selected && <dl className="selected-environment-details">
+          <div><dt>Account type</dt><dd>{selected.subjectType || 'User'}</dd></div>
+          <div><dt>Authentication</dt><dd>{connection?.authType || 'Box OAuth'}</dd></div>
+        </dl>}
+        <div className="saved-connection-actions"><DrawerButton label="Open" disabled={loading || !connection?.launchUrl} onPress={onOpen}/></div>
       </section>}
-      <section className="drawer-section">
-        <h3>Log in with Box</h3>
-        {!canLogin && <p>Set BOX_CLIENT_ID and BOX_CLIENT_SECRET in .env, then restart Dispatch.</p>}
-        <div className="drawer-button-row">
-          <DrawerButton label={loggingIn ? 'Waiting for Box…' : apps.length > 0 ? 'Add another Box user' : 'Log in with Box'} tone="primary" disabled={loading || loggingIn || !canLogin} onPress={() => { void onLogin() }}/>
+      {apps.length > 0 && <section className="drawer-section connected-environments saved-environments-section" aria-label="Saved Box connections">
+        <div><h3>Saved connections</h3><p>Select the Box account Dispatch should use or remove one you no longer need.</p></div>
+        <ul className="connection-option-list">
+          {apps.map((app) => <li key={app.id || `${app.alias}-${app.identity}`} className={app.selected ? 'selected' : ''}>
+            <button type="button" className="connection-option-main" aria-pressed={app.selected} disabled={loading || app.selected || !app.id} onClick={() => { if (app.id) void onSelect(app.id) }}>
+              <span className={`connection-state-dot ${app.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
+              <span className="connection-option-copy"><strong>{app.alias || app.identity || 'Box account'}</strong><small>{[app.identity, app.subjectType, app.clientIdHint].filter(Boolean).join(' · ')}</small></span>
+              <span className="connection-option-badge">{app.selected ? 'Selected' : 'Use account'}</span>
+            </button>
+            <RemoveConnectionButton label={`Remove ${app.alias || app.identity || 'Box connection'}`} disabled={loading || !app.id} onPress={() => { if (app.id) void onRemove(app.id) }}/>
+          </li>)}
+        </ul>
+      </section>}
+      <section className="drawer-section connection-add-section">
+        <div><h3>Add a Box environment</h3><p>Connect another Box user and choose which account Dispatch should use.</p></div>
+        <div className="connection-mode-picker connection-mode-picker--single" role="group" aria-label="Box connection type">
+          <button type="button" className={`connection-mode-card ${addingConnection ? 'selected' : ''}`} aria-pressed={addingConnection} disabled={loading} onClick={() => setAddingConnection(!addingConnection)}><span className="connection-mode-icon">＋</span><span><strong>Box user</strong><small>Connect with Box OAuth.</small></span></button>
         </div>
-        {oauthJob && oauthJob.status !== 'failed' && <p className={`scratch-job scratch-job-${oauthJob.status === 'pending' ? 'queued' : oauthJob.status}`} role="status" aria-live="polite">{oauthJob.message}</p>}
       </section>
+      {addingConnection && <section className="drawer-section connection-mode-panel">
+        <div><h3>Connect a Box user</h3><p>Sign in to Box, then select the account Dispatch should use from the saved connections below.</p></div>
+        {!canLogin && <p>Set BOX_CLIENT_ID and BOX_CLIENT_SECRET in .env, then restart Dispatch.</p>}
+        <div className="drawer-button-row"><DrawerButton label={loggingIn ? 'Waiting for Box…' : 'Connect Box user'} tone="primary" disabled={loading || loggingIn || !canLogin} onPress={() => { void onLogin() }}/></div>
+        {oauthJob && oauthJob.status !== 'failed' && <p className={`scratch-job scratch-job-${oauthJob.status === 'pending' ? 'queued' : oauthJob.status}`} role="status" aria-live="polite">{oauthJob.message}</p>}
+      </section>}
     </section>
     <footer slot="footer" className="drawer-actions"><DrawerButton label="Close" onPress={closeDrawer}/></footer>
   </box-drawer>

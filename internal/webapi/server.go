@@ -41,12 +41,16 @@ type ServerOptions struct {
 	SalesforcePackagePrepare salesforcePackagePrepare
 	SalesforceOAuth          salesforceOAuthExchange
 	SalesforceRefresh        salesforceTokenRefresh
+	SalesforceScratchAccess  salesforceScratchAccess
+	SalesforceScratchOpen    salesforceScratchOpen
 	SalesforceExperiencePath salesforceExperiencePath
 	BoxOAuth                 boxOAuthExchange
 	SalesforceCallbackReady  func() bool
 	BoxCallbackReady         func() bool
 	PlanStore                planStore
 	PlanSaver                planSaver
+	DefaultsStore            deploymentDefaultsStore
+	DefaultsSaver            deploymentDefaultsSaver
 	Templates                templateStore
 	PackageAssembler         packageAssembler
 	Runs                     *runManager
@@ -97,6 +101,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	if options.SalesforceRefresh == nil {
 		options.SalesforceRefresh = salesforceClient.RefreshAccessToken
 	}
+	if options.SalesforceScratchAccess == nil {
+		options.SalesforceScratchAccess = recoverSalesforceScratchAccess
+	}
+	if options.SalesforceScratchOpen == nil {
+		options.SalesforceScratchOpen = openSalesforceScratch
+	}
 	if options.SalesforceExperiencePath == nil {
 		options.SalesforceExperiencePath = salesforceClient.ExperienceEmployeePath
 	}
@@ -108,6 +118,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.PlanSaver == nil {
 		options.PlanSaver = savePlan
+	}
+	if options.DefaultsStore == nil {
+		options.DefaultsStore = loadDeploymentDefaults
+	}
+	if options.DefaultsSaver == nil {
+		options.DefaultsSaver = saveDeploymentDefaults
 	}
 	if options.Templates == nil {
 		options.Templates = loadPackageTemplates
@@ -230,7 +246,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, "connect a Salesforce org before checking availability")
 			return
 		}
-		if strings.EqualFold(settings.SalesforceOrgType, "scratch") && settings.SalesforceExpirationDate != "" {
+		scratchConnection := isSalesforceScratchConnection(settings)
+		if scratchConnection && settings.SalesforceExpirationDate != "" {
 			expiresAt, parseErr := time.Parse("2006-01-02", settings.SalesforceExpirationDate)
 			if parseErr == nil && expiresAt.Before(options.Now().UTC().Truncate(24*time.Hour)) {
 				settings = settings.InvalidateSelectedSalesforceVerification("Expired")
@@ -300,7 +317,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, "connect a Salesforce org before opening Salesforce")
 			return
 		}
-		if strings.EqualFold(settings.SalesforceOrgType, "scratch") && settings.SalesforceExpirationDate != "" {
+		scratchConnection := isSalesforceScratchConnection(settings)
+		if scratchConnection && settings.SalesforceExpirationDate != "" {
 			expiresAt, parseErr := time.Parse("2006-01-02", settings.SalesforceExpirationDate)
 			if parseErr == nil && expiresAt.Before(options.Now().UTC().Truncate(24*time.Hour)) {
 				settings = settings.InvalidateSelectedSalesforceVerification("Expired")
@@ -310,7 +328,25 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			}
 		}
 		credential := targetCredential(settings)
-		if settings.SalesforceRefreshToken != "" {
+		scratchTarget := ""
+		if scratchConnection && settings.SalesforceRefreshToken == "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			recovered, target, recoverErr := recoverSelectedScratchAccess(ctx, options.SalesforceScratchAccess, settings)
+			if recoverErr != nil {
+				settings = settings.InvalidateSelectedSalesforceVerification("Reconnect required")
+				_ = options.ConnectionSaver(settings)
+				writeError(w, http.StatusUnauthorized, "Salesforce could not renew the selected scratch-org session. Reconnect the org, then try again.")
+				return
+			}
+			settings = recovered
+			scratchTarget = target
+			credential = targetCredential(settings)
+			if err := options.ConnectionSaver(settings); err != nil {
+				writeError(w, http.StatusInternalServerError, "Salesforce renewed the scratch-org session, but Dispatch could not save it")
+				return
+			}
+		} else if settings.SalesforceRefreshToken != "" {
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 			defer cancel()
 			refreshed, refreshErr := refreshSalesforceAccess(ctx, options.SalesforceRefresh, settings, credential)
@@ -347,7 +383,14 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 				return
 			}
 		}
-		launchURL, err := salesforceFrontDoorURL(credential, returnPath)
+		launchURL := ""
+		if scratchTarget != "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			launchURL, err = options.SalesforceScratchOpen(ctx, scratchTarget, returnPath)
+		} else {
+			launchURL, err = salesforceFrontDoorURL(credential, returnPath)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "the selected Salesforce org is not ready to open")
 			return
@@ -795,6 +838,59 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, presentPlan(plan, settings))
 	})
+	mux.HandleFunc("GET /api/defaults", func(w http.ResponseWriter, _ *http.Request) {
+		defaults, err := options.DefaultsStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "deployment defaults are unavailable")
+			return
+		}
+		plan, err := options.PlanStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "saved plan is unavailable")
+			return
+		}
+		templates, err := options.Templates()
+		if err != nil || len(templates) == 0 {
+			writeError(w, http.StatusInternalServerError, "solution quickstarts are unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentDeploymentDefaults(resolveDeploymentDefaults(defaults, plan, templates)))
+	})
+	mux.HandleFunc("PUT /api/defaults", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input deploymentDefaultsUpdate
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "deployment defaults must be valid JSON with supported fields")
+			return
+		}
+		if err := ensureEndOfJSON(decoder); err != nil {
+			writeError(w, http.StatusBadRequest, "deployment defaults must contain one JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		templates, err := options.Templates()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "solution quickstarts are unavailable")
+			return
+		}
+		selected, ok := packageTemplateByID(templates, input.TemplateID)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "choose an available solution quickstart")
+			return
+		}
+		defaults := config.DeploymentDefaults{TemplateID: selected.ID, Template: selected.Name, Repository: selected.repository, Components: input.Components, Strategy: input.Strategy}
+		if err := options.DefaultsSaver(defaults); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not save deployment defaults")
+			return
+		}
+		writeJSON(w, http.StatusOK, presentDeploymentDefaults(defaults))
+	})
 	mux.HandleFunc("PUT /api/plan", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var input planUpdate
@@ -1012,6 +1108,8 @@ type connectionSummary struct {
 
 type planStore func() (config.SolutionPlan, error)
 type planSaver func(config.SolutionPlan) error
+type deploymentDefaultsStore func() (config.DeploymentDefaults, error)
+type deploymentDefaultsSaver func(config.DeploymentDefaults) error
 
 type planResponse struct {
 	Exists     bool            `json:"exists"`
@@ -1021,6 +1119,37 @@ type planResponse struct {
 	Repository string          `json:"repository,omitempty"`
 	Strategy   string          `json:"strategy"`
 	Components []planComponent `json:"components"`
+}
+
+type deploymentDefaultsResponse struct {
+	TemplateID string   `json:"templateId"`
+	Template   string   `json:"template"`
+	Repository string   `json:"repository"`
+	Strategy   string   `json:"strategy"`
+	Components []string `json:"components"`
+}
+
+type deploymentDefaultsUpdate struct {
+	TemplateID string   `json:"templateId"`
+	Strategy   string   `json:"strategy"`
+	Components []string `json:"components"`
+}
+
+func (d deploymentDefaultsUpdate) normalized() deploymentDefaultsUpdate {
+	d.TemplateID = strings.TrimSpace(d.TemplateID)
+	d.Strategy = strings.ToLower(strings.TrimSpace(d.Strategy))
+	if d.Strategy == "" {
+		d.Strategy = solution.StrategyReuse
+	}
+	for index, component := range d.Components {
+		d.Components[index] = strings.ToLower(strings.TrimSpace(component))
+	}
+	return d
+}
+
+func (d deploymentDefaultsUpdate) validate() error {
+	request := packageAssemblyRequest{Name: "Deployment defaults", TemplateID: d.TemplateID, Components: d.Components, Strategy: d.Strategy}
+	return request.validate()
 }
 
 type planComponent struct {
