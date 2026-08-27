@@ -67,6 +67,55 @@ func TestParseTargetsReturnsOnlyAliasedConnectedOrgs(t *testing.T) {
 	}
 }
 
+func TestFindScratchTargetMatchesSavedOrgIDBeforeHost(t *testing.T) {
+	output := []byte(`{"result":{"scratchOrgs":[{"alias":"other","orgId":"00D0","instanceUrl":"https://other.scratch.my.salesforce.com"},{"alias":"dispatch","username":"scratch@example.com","orgId":"00D1","instanceUrl":"https://dispatch.scratch.my.salesforce.com","expirationDate":"2026-09-25"}]}}`)
+	target, err := findScratchTarget(output, "00D1", "", "https://stale.scratch.my.salesforce.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Alias != "dispatch" || target.Username != "scratch@example.com" || target.ExpirationDate != "2026-09-25" {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestFindScratchTargetUsesUniqueInstanceHostForLegacyConnection(t *testing.T) {
+	output := []byte(`{"result":{"scratchOrgs":[{"alias":"dispatch","orgId":"00D1","instanceUrl":"https://dispatch.scratch.my.salesforce.com"}]}}`)
+	target, err := findScratchTarget(output, "", "", "https://dispatch.scratch.my.salesforce.com/path")
+	if err != nil || target.Alias != "dispatch" {
+		t.Fatalf("target = %#v, err = %v", target, err)
+	}
+}
+
+func TestParseScratchAccessRequiresCurrentToken(t *testing.T) {
+	output := []byte(`{"result":{"id":"00D1","username":"scratch@example.com","alias":"dispatch","instanceUrl":"https://dispatch.scratch.my.salesforce.com","accessToken":"fresh-token","expirationDate":"2026-09-25"}}`)
+	access, err := parseScratchAccess(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access.AccessToken != "fresh-token" || access.OrgID != "00D1" || access.Alias != "dispatch" {
+		t.Fatalf("access = %#v", access)
+	}
+	if _, err := parseScratchAccess([]byte(`{"result":{"id":"00D1"}}`)); err == nil {
+		t.Fatal("missing access token was accepted")
+	}
+}
+
+func TestParseScratchLaunchURLAcceptsOnlySalesforceOTPFrontDoor(t *testing.T) {
+	launchURL, err := parseScratchLaunchURL([]byte(`{"result":{"url":"https://dispatch.scratch.my.salesforce.com/secur/frontdoor.jsp?otp=one-time-code&startURL=%2Flightning%2Fpage%2Fhome&cshc=hash"}}`))
+	if err != nil || !strings.Contains(launchURL, "otp=one-time-code") {
+		t.Fatalf("launchURL = %q, err = %v", launchURL, err)
+	}
+	for _, output := range []string{
+		`{"result":{"url":"https://evil.example/secur/frontdoor.jsp?otp=code"}}`,
+		`{"result":{"url":"https://dispatch.scratch.my.salesforce.com/secur/frontdoor.jsp"}}`,
+		`{"result":{"url":"https://dispatch.scratch.my.salesforce.com/lightning/page/home?otp=code"}}`,
+	} {
+		if _, err := parseScratchLaunchURL([]byte(output)); err == nil {
+			t.Fatalf("unsafe launch URL was accepted: %s", output)
+		}
+	}
+}
+
 func TestScratchCreateArgsTargetsSelectedDevHub(t *testing.T) {
 	args := strings.Join(scratchCreateArgs("box-dispatch-test", "devhub"), " ")
 	for _, want := range []string{"--target-dev-hub devhub", "--alias box-dispatch-test", "--duration-days 30", "--set-default"} {

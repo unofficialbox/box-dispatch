@@ -12,3 +12,13 @@ type SolutionPlan struct {
 	Strategy    string   `json:"strategy,omitempty"`
 	PackagePath string   `json:"package_path,omitempty"`
 }
+
+// DeploymentDefaults are the workspace-wide starting choices for new browser
+// deployments. Individual plans copy these values and may override them.
+type DeploymentDefaults struct {
+	Components []string `json:"components"`
+	TemplateID string   `json:"template_id"`
+	Template   string   `json:"template"`
+	Repository string   `json:"repository"`
+	Strategy   string   `json:"strategy,omitempty"`
+}

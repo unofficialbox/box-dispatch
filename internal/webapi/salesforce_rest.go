@@ -13,6 +13,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -20,6 +21,8 @@ type salesforceCheck func(context.Context, salesforceapi.Credential) (salesforce
 type salesforceDevHubCheck func(context.Context, salesforceapi.Credential) (bool, error)
 type salesforceScratchCreate func(context.Context, salesforceapi.Credential, salesforceapi.ScratchRequest) (salesforceapi.ScratchOrg, error)
 type salesforcePackagePrepare func(context.Context, config.SolutionPlan, salesforceapi.Credential, func(scratchPackageProgress)) (string, error)
+type salesforceScratchAccess func(context.Context, string, string, string) (salesforceorg.ScratchAccess, error)
+type salesforceScratchOpen func(context.Context, string, string) (string, error)
 
 type scratchPackageProgress struct {
 	Status    string
@@ -98,6 +101,36 @@ func targetCredential(settings config.ConnectionSettings) salesforceapi.Credenti
 		clientID, clientSecret = salesforceOAuthClient(settings, org)
 	}
 	return salesforceapi.Credential{InstanceURL: settings.SalesforceInstanceURL, AccessToken: settings.SalesforceAccessToken, ClientID: clientID, ClientSecret: clientSecret}
+}
+
+func isSalesforceScratchConnection(settings config.ConnectionSettings) bool {
+	if strings.EqualFold(strings.TrimSpace(settings.SalesforceOrgType), "scratch") {
+		return true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(settings.SalesforceInstanceURL))
+	return err == nil && strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".scratch.my.salesforce.com")
+}
+
+func recoverSelectedScratchAccess(ctx context.Context, recover salesforceScratchAccess, settings config.ConnectionSettings) (config.ConnectionSettings, string, error) {
+	if recover == nil {
+		return settings, "", fmt.Errorf("Salesforce scratch-org session recovery is unavailable")
+	}
+	settings = settings.HydrateSalesforceOrgs()
+	org, ok := settings.SelectedSalesforceOrg()
+	if !ok {
+		return settings, "", fmt.Errorf("select a Salesforce scratch org")
+	}
+	access, err := recover(ctx, org.OrgID, org.Username, org.InstanceURL)
+	if err != nil {
+		return settings, "", err
+	}
+	org.Username = firstNonEmpty(access.Username, org.Username)
+	org.OrgID = firstNonEmpty(access.OrgID, org.OrgID)
+	org.OrgType = "scratch"
+	org.InstanceURL = firstNonEmpty(access.InstanceURL, org.InstanceURL)
+	org.AccessToken = access.AccessToken
+	org.ExpirationDate = firstNonEmpty(access.ExpirationDate, org.ExpirationDate)
+	return settings.UpsertSalesforceOrg(org, true), access.Target, nil
 }
 
 func salesforceOAuthClient(settings config.ConnectionSettings, org config.SalesforceOrgConnection) (string, string) {

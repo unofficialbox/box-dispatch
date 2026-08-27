@@ -28,6 +28,7 @@ type MockOptions struct {
 func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 	var mu sync.Mutex
 	plan := config.SolutionPlan{}
+	defaults := config.DeploymentDefaults{TemplateID: "clm", Template: "Contract Lifecycle Management", Repository: "https://github.com/unofficialbox/box-bedrock-for-clm", Strategy: "reuse", Components: []string{"box", "salesforce"}}
 	settings := mockConnectionSettings()
 	deployments := []audit.DeploymentRecord{}
 	validate := func(ctx context.Context, plan config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
@@ -122,6 +123,17 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 		PlanSaver: func(next config.SolutionPlan) error {
 			mu.Lock()
 			plan = next
+			mu.Unlock()
+			return nil
+		},
+		DefaultsStore: func() (config.DeploymentDefaults, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return defaults, nil
+		},
+		DefaultsSaver: func(next config.DeploymentDefaults) error {
+			mu.Lock()
+			defaults = next
 			mu.Unlock()
 			return nil
 		},

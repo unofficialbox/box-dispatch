@@ -1202,6 +1202,72 @@ func TestSalesforceOpenRefreshesSelectedOrgAndRedirectsThroughFrontDoor(t *testi
 	}
 }
 
+func TestSalesforceOpenRecoversLegacyScratchSessionBeforeRedirect(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertSalesforceOrg(config.SalesforceOrgConnection{
+		ID: "legacy-scratch", Alias: "Connected Salesforce org", OrgID: "00Dscratch",
+		InstanceURL: "https://legacy.scratch.my.salesforce.com", AccessToken: "stale-token", OrgType: "persistent",
+	}, true)
+	recovered := false
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		SalesforceScratchAccess: func(_ context.Context, orgID, username, instanceURL string) (salesforceorg.ScratchAccess, error) {
+			recovered = true
+			if orgID != "00Dscratch" || username != "" || instanceURL != "https://legacy.scratch.my.salesforce.com" {
+				t.Fatalf("recovery lookup = %q %q %q", orgID, username, instanceURL)
+			}
+			return salesforceorg.ScratchAccess{
+				Target: "dispatch-scratch",
+				Alias:  "dispatch-scratch", Username: "scratch@example.com", OrgID: "00Dscratch",
+				InstanceURL: "https://current.scratch.my.salesforce.com", AccessToken: "fresh-token", ExpirationDate: "2026-09-25",
+			}, nil
+		},
+		SalesforceScratchOpen: func(_ context.Context, target, returnPath string) (string, error) {
+			if target != "dispatch-scratch" || returnPath != "/lightning/page/home" {
+				t.Fatalf("scratch open = %q %q", target, returnPath)
+			}
+			return "https://current.scratch.my.salesforce.com/secur/frontdoor.jsp?otp=one-time-code&startURL=%2Flightning%2Fpage%2Fhome", nil
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/connections/salesforce/open", nil))
+	if response.Code != http.StatusSeeOther || !recovered {
+		t.Fatalf("open = %d recovered=%t body=%s", response.Code, recovered, response.Body.String())
+	}
+	location, err := url.Parse(response.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Host != "current.scratch.my.salesforce.com" || location.Query().Get("otp") != "one-time-code" || location.Query().Get("startURL") != "/lightning/page/home" {
+		t.Fatalf("front-door location = %q", location.String())
+	}
+	selected, ok := settings.SelectedSalesforceOrg()
+	if !ok || selected.OrgType != "scratch" || selected.Username != "scratch@example.com" || selected.ExpirationDate != "2026-09-25" || selected.AccessToken != "fresh-token" {
+		t.Fatalf("saved scratch org = %#v", selected)
+	}
+}
+
+func TestSalesforceOpenDoesNotSendStaleScratchSessionToLogin(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertSalesforceOrg(config.SalesforceOrgConnection{
+		ID: "legacy-scratch", OrgID: "00Dscratch", InstanceURL: "https://legacy.scratch.my.salesforce.com",
+		AccessToken: "stale-token", OrgType: "persistent",
+	}, true)
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		SalesforceScratchAccess: func(context.Context, string, string, string) (salesforceorg.ScratchAccess, error) {
+			return salesforceorg.ScratchAccess{}, errors.New("not authenticated locally")
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/connections/salesforce/open", nil))
+	if response.Code != http.StatusUnauthorized || response.Header().Get("Location") != "" || !strings.Contains(response.Body.String(), "Reconnect the org") {
+		t.Fatalf("open = %d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+}
+
 func TestSalesforceOpenUsesKnownDestinationPaths(t *testing.T) {
 	settings := config.ConnectionSettings{}
 	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{
@@ -1313,6 +1379,56 @@ func TestPlanUpdatePersistsOnlySupportedDraftFields(t *testing.T) {
 	}
 	if saved.PackagePath != "/kept-on-server" || saved.Name != "Northstar CLM rollout" || saved.TemplateID != "clm" || saved.Template != "Contract Lifecycle Management" || saved.Repository != "https://example.test/clm" || strings.Join(saved.Components, ",") != "box,salesforce" {
 		t.Fatalf("saved = %#v", saved)
+	}
+}
+
+func TestDeploymentDefaultsDeriveFromSavedPlanAndCanBeUpdated(t *testing.T) {
+	var saved config.DeploymentDefaults
+	templates := func() ([]packageTemplate, error) {
+		return []packageTemplate{
+			{ID: "clm", Name: "Contract Lifecycle Management", repository: "https://example.test/clm"},
+			{ID: "lifesciences", Name: "Life Sciences", repository: "https://example.test/lifesciences"},
+		}, nil
+	}
+	handler := NewHandlerWithOptions(ServerOptions{
+		PlanStore: func() (config.SolutionPlan, error) {
+			return config.SolutionPlan{TemplateID: "clm", Template: "Contract Lifecycle Management", Repository: "https://example.test/clm", Strategy: "reuse", Components: []string{"box", "salesforce"}}, nil
+		},
+		DefaultsStore: func() (config.DeploymentDefaults, error) { return config.DeploymentDefaults{}, nil },
+		DefaultsSaver: func(defaults config.DeploymentDefaults) error { saved = defaults; return nil },
+		Templates:     templates,
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/defaults", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"templateId":"clm"`) || !strings.Contains(response.Body.String(), `"components":["box","salesforce"]`) {
+		t.Fatalf("get defaults = %d %s", response.Code, response.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/api/defaults", strings.NewReader(`{"templateId":"lifesciences","strategy":"create_new","components":["box"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("put defaults = %d %s", response.Code, response.Body.String())
+	}
+	if saved.TemplateID != "lifesciences" || saved.Template != "Life Sciences" || saved.Repository != "https://example.test/lifesciences" || saved.Strategy != "create_new" || strings.Join(saved.Components, ",") != "box" {
+		t.Fatalf("saved defaults = %#v", saved)
+	}
+}
+
+func TestDeploymentDefaultsRejectUnsupportedProviders(t *testing.T) {
+	handler := NewHandlerWithOptions(ServerOptions{
+		DefaultsStore: func() (config.DeploymentDefaults, error) { return config.DeploymentDefaults{}, nil },
+		Templates: func() ([]packageTemplate, error) {
+			return []packageTemplate{{ID: "clm", Name: "CLM", repository: "https://example.test/clm"}}, nil
+		},
+	})
+	request := httptest.NewRequest(http.MethodPut, "/api/defaults", strings.NewReader(`{"templateId":"clm","strategy":"reuse","components":["box","databricks"]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "not available") {
+		t.Fatalf("response = %d %s", response.Code, response.Body.String())
 	}
 }
 

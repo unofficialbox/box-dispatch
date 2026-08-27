@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -52,6 +53,27 @@ type Target struct {
 	Status          string `json:"status"`
 	ExpirationDate  string `json:"expirationDate"`
 	DevHubID        string `json:"devHubId"`
+}
+
+// ScratchAccess is a current CLI-owned scratch-org session recovered for a
+// legacy Dispatch connection. It stays inside the local Go process and is
+// never returned by the browser-facing connection APIs.
+type ScratchAccess struct {
+	Target         string
+	Alias          string
+	Username       string
+	OrgID          string
+	InstanceURL    string
+	AccessToken    string
+	ExpirationDate string
+}
+
+type scratchTarget struct {
+	Alias          string `json:"alias"`
+	Username       string `json:"username"`
+	OrgID          string `json:"orgId"`
+	InstanceURL    string `json:"instanceUrl"`
+	ExpirationDate string `json:"expirationDate"`
 }
 
 func (t Target) IsScratch() bool {
@@ -242,6 +264,154 @@ func ListTargets() ([]Target, error) {
 		return nil, NewFailure("Salesforce returned an unreadable authenticated-org inventory. Update the Salesforce CLI and retry.", output, parseErr)
 	}
 	return targets, nil
+}
+
+// RecoverScratchAccess retrieves a current access token only for a scratch org
+// already authenticated by the local Salesforce CLI. Dispatch-created scratch
+// orgs use their stored OAuth refresh token and do not enter this legacy path.
+func RecoverScratchAccess(ctx context.Context, orgID, username, instanceURL string) (ScratchAccess, error) {
+	output, runErr := exec.CommandContext(ctx, "sf", "org", "list", "--json").CombinedOutput()
+	if runErr != nil {
+		return ScratchAccess{}, NewFailure("Unable to recover the saved Salesforce scratch-org session.", output, runErr)
+	}
+	target, err := findScratchTarget(output, orgID, username, instanceURL)
+	if err != nil {
+		return ScratchAccess{}, &Failure{Summary: "The selected scratch org is not authenticated locally. Reconnect it, then try again.", Diagnostic: err.Error()}
+	}
+	identifier := firstPopulated(target.Alias, target.Username)
+	output, runErr = exec.CommandContext(ctx, "sf", "org", "display", "--target-org", identifier, "--json").CombinedOutput()
+	if runErr != nil {
+		return ScratchAccess{}, NewFailure("Unable to renew the saved Salesforce scratch-org session.", output, runErr)
+	}
+	access, err := parseScratchAccess(output)
+	if err != nil {
+		return ScratchAccess{}, NewFailure("Salesforce returned an unreadable scratch-org session.", output, err)
+	}
+	access.Alias = firstPopulated(access.Alias, target.Alias)
+	access.Target = identifier
+	access.Username = firstPopulated(access.Username, target.Username)
+	access.OrgID = firstPopulated(access.OrgID, target.OrgID)
+	access.InstanceURL = firstPopulated(access.InstanceURL, target.InstanceURL)
+	access.ExpirationDate = firstPopulated(access.ExpirationDate, target.ExpirationDate)
+	return access, nil
+}
+
+// OpenScratchURL asks the Salesforce CLI for a one-time front-door URL. CLI-
+// managed scratch sessions use this OTP launch rather than a reusable API
+// access token for browser login.
+func OpenScratchURL(ctx context.Context, target, returnPath string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", fmt.Errorf("Salesforce scratch-org target is unavailable")
+	}
+	args := []string{"org", "open", "--target-org", target, "--url-only", "--json"}
+	if returnPath = strings.TrimSpace(returnPath); returnPath != "" {
+		args = append(args, "--path", returnPath)
+	}
+	output, runErr := exec.CommandContext(ctx, "sf", args...).CombinedOutput()
+	if runErr != nil {
+		return "", NewFailure("Unable to open the saved Salesforce scratch org.", output, runErr)
+	}
+	launchURL, err := parseScratchLaunchURL(output)
+	if err != nil {
+		return "", &Failure{Summary: "Salesforce returned an invalid scratch-org launch URL.", Diagnostic: err.Error()}
+	}
+	return launchURL, nil
+}
+
+func findScratchTarget(output []byte, orgID, username, instanceURL string) (scratchTarget, error) {
+	var payload struct {
+		Result struct {
+			ScratchOrgs []scratchTarget `json:"scratchOrgs"`
+		} `json:"result"`
+	}
+	if err := decodeJSON(output, &payload); err != nil {
+		return scratchTarget{}, err
+	}
+	wantedHost := normalizedHost(instanceURL)
+	for _, candidate := range payload.Result.ScratchOrgs {
+		if strings.TrimSpace(orgID) != "" && strings.EqualFold(strings.TrimSpace(candidate.OrgID), strings.TrimSpace(orgID)) {
+			return candidate, nil
+		}
+	}
+	for _, candidate := range payload.Result.ScratchOrgs {
+		if strings.TrimSpace(username) != "" && strings.EqualFold(strings.TrimSpace(candidate.Username), strings.TrimSpace(username)) {
+			return candidate, nil
+		}
+	}
+	var hostMatch scratchTarget
+	matches := 0
+	for _, candidate := range payload.Result.ScratchOrgs {
+		if wantedHost != "" && normalizedHost(candidate.InstanceURL) == wantedHost {
+			hostMatch = candidate
+			matches++
+		}
+	}
+	if matches == 1 {
+		return hostMatch, nil
+	}
+	return scratchTarget{}, fmt.Errorf("no unique authenticated scratch org matched the saved connection")
+}
+
+func parseScratchAccess(output []byte) (ScratchAccess, error) {
+	var payload struct {
+		Result struct {
+			Alias          string `json:"alias"`
+			Username       string `json:"username"`
+			OrgID          string `json:"id"`
+			InstanceURL    string `json:"instanceUrl"`
+			AccessToken    string `json:"accessToken"`
+			ExpirationDate string `json:"expirationDate"`
+		} `json:"result"`
+	}
+	if err := decodeJSON(output, &payload); err != nil {
+		return ScratchAccess{}, err
+	}
+	if strings.TrimSpace(payload.Result.AccessToken) == "" {
+		return ScratchAccess{}, fmt.Errorf("Salesforce CLI did not return an access token")
+	}
+	return ScratchAccess{
+		Alias: payload.Result.Alias, Username: payload.Result.Username, OrgID: payload.Result.OrgID,
+		InstanceURL: payload.Result.InstanceURL, AccessToken: payload.Result.AccessToken,
+		ExpirationDate: payload.Result.ExpirationDate,
+	}, nil
+}
+
+func parseScratchLaunchURL(output []byte) (string, error) {
+	var payload struct {
+		Result struct {
+			URL string `json:"url"`
+		} `json:"result"`
+	}
+	if err := decodeJSON(output, &payload); err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(strings.TrimSpace(payload.Result.URL))
+	if err != nil || parsed.Scheme != "https" || parsed.Path != "/secur/frontdoor.jsp" || strings.TrimSpace(parsed.Query().Get("otp")) == "" {
+		return "", fmt.Errorf("Salesforce CLI did not return a valid one-time front-door URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if !strings.HasSuffix(host, ".salesforce.com") && !strings.HasSuffix(host, ".force.com") {
+		return "", fmt.Errorf("Salesforce CLI returned a launch URL on an unexpected host")
+	}
+	return parsed.String(), nil
+}
+
+func normalizedHost(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
+func firstPopulated(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // ParseTargets extracts the aliased non-scratch and scratch org records from

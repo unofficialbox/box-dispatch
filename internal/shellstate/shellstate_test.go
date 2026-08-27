@@ -94,6 +94,27 @@ func TestSolutionPlanRoundTripAsBCL(t *testing.T) {
 	}
 }
 
+func TestDeploymentDefaultsRoundTripAsBCL(t *testing.T) {
+	isolateRoot(t)
+	want := config.DeploymentDefaults{
+		Components: []string{"box", "salesforce"},
+		TemplateID: "clm",
+		Template:   "Contract Lifecycle Management",
+		Repository: "https://github.com/unofficialbox/box-bedrock-for-clm",
+		Strategy:   "reuse",
+	}
+	if err := SaveDeploymentDefaults(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadDeploymentDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", got, want)
+	}
+}
+
 func TestLoadMigratesLegacyJSON(t *testing.T) {
 	root := isolateRoot(t)
 	// Only a legacy JSON file (under the old .windlass dir) exists; no .bcl yet.

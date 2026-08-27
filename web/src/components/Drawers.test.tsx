@@ -54,7 +54,7 @@ describe('connection drawers', () => {
     expect(container.querySelector('box-select[label="Salesforce environment"]')).toBeNull()
   })
 
-  it('lists connected Salesforce environments below the connection actions', () => {
+  it('lists every saved Salesforce environment without opening an add flow', () => {
     const onSelect = vi.fn(resolveTrue)
     const { container } = render(<SalesforceConnectionDrawer
       connection={{
@@ -69,10 +69,11 @@ describe('connection drawers', () => {
       onOpen={vi.fn()} onCreateScratch={vi.fn()} onClose={vi.fn()}
     />)
 
-    fireEvent.click(container.querySelector('button.connection-mode-card:first-child')!)
-    const actions = container.querySelector('.connection-mode-panel .drawer-button-row')!
-    const list = container.querySelector('.connected-environments')!
-    expect(actions.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const summary = container.querySelector('.saved-connection-summary')!
+    const list = container.querySelector('.saved-environments-section')!
+    expect(summary.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(list.textContent).toContain('Current')
+    expect(list.textContent).toContain('Production')
     const production = Array.from(container.querySelectorAll<HTMLButtonElement>('.connection-option-main')).find((button) => button.textContent?.includes('Production'))
     fireEvent.click(production!)
     expect(onSelect).toHaveBeenCalledWith('org-2')
@@ -87,7 +88,7 @@ describe('connection drawers', () => {
         connections: [{ id: 'box-1', alias: 'Production', status: 'Ready', selected: true, identity: 'user@example.com' }],
       }}
       loading={false} error="" oauthJob={null}
-      onLogin={resolveTrue} onSelect={resolveTrue} onRemove={resolveTrue} onVerify={resolveTrue}
+      onLogin={resolveTrue} onSelect={resolveTrue} onRemove={resolveTrue}
       onOpen={onOpen} onClose={vi.fn()}
     />)
 
@@ -95,5 +96,31 @@ describe('connection drawers', () => {
     expect(button).toBeTruthy()
     fireEvent.click(button!)
     expect(onOpen).toHaveBeenCalledOnce()
+  })
+
+  it('uses the same selected-environment and saved-list model for Box', () => {
+    const onSelect = vi.fn(resolveTrue)
+    const { container } = render(<BoxConnectionDrawer
+      connection={{
+        name: 'Box', configured: true, verified: true, oauthConfigured: true, authType: 'Box OAuth',
+        launchUrl: 'https://app.box.com/',
+        connections: [
+          { id: 'box-1', alias: 'Production', status: 'Ready', selected: true, identity: 'owner@example.com', subjectType: 'User' },
+          { id: 'box-2', alias: 'Sandbox', status: 'Not ready', selected: false, identity: 'demo@example.com', subjectType: 'User' },
+        ],
+      }}
+      loading={false} error="" oauthJob={null}
+      onLogin={resolveTrue} onSelect={onSelect} onRemove={resolveTrue}
+      onOpen={vi.fn()} onClose={vi.fn()}
+    />)
+
+    expect(container.querySelector('box-select[label="Box connection"]')).toBeNull()
+    expect(container.querySelector('box-button[label="Check availability"]')).toBeNull()
+    expect(container.querySelector('.selected-environment-details')?.textContent).toContain('Box OAuth')
+    expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Production')
+    expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Sandbox')
+    const sandbox = Array.from(container.querySelectorAll<HTMLButtonElement>('.connection-option-main')).find((button) => button.textContent?.includes('Sandbox'))
+    fireEvent.click(sandbox!)
+    expect(onSelect).toHaveBeenCalledWith('box-2')
   })
 })

@@ -35,3 +35,9 @@ surface, is tracked in [`PUBLIC_API_GAPS.md`](PUBLIC_API_GAPS.md).
 
 Reconsider a nondeployable capability only when a documented public API satisfies
 the lifecycle acceptance criteria in that gap document.
+
+## 4. Add providers only with a complete lifecycle
+
+Databricks and Amazon Bedrock AgentCore remain visible in the browser as unavailable roadmap
+providers. Enable them only after Dispatch can configure, validate, deploy, diagnose, and
+audit their supported public lifecycle without exposing credentials to browser code.

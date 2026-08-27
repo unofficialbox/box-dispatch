@@ -28,6 +28,14 @@ export type DeploymentPlan = {
   components: PlanComponent[]
 }
 
+export type DeploymentDefaults = {
+  templateId: string
+  template: string
+  repository: string
+  strategy: 'reuse' | 'create_new'
+  components: string[]
+}
+
 export type Readiness = 'Ready' | 'Not ready'
 
 export function readinessLabel(ready: boolean): Readiness {
