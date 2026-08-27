@@ -1,4 +1,4 @@
-![Box Dispatch — configure, validate, and deploy Box-backed solution stacks](assets/banner.png)
+![Box Dispatch — configure, validate, and deploy Box-backed solution stacks](assets/banner.svg)
 
 # box-dispatch
 
@@ -10,6 +10,8 @@ and audit records.
 The browser guides operators through choosing a solution, connecting Box and Salesforce,
 configuring the deployment, validating provider state, applying changes, and reviewing
 deployment history.
+
+![Box Dispatch overview showing deployment status, connection readiness, recent deployments, and selected environments](docs/screenshots/overview.png)
 
 ## Prerequisites
 
