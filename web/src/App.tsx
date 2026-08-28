@@ -31,10 +31,20 @@ const fallbackTemplates: SolutionTemplate[] = [
 
 const viewFromHash = (): AppView => {
   const hash = window.location.hash.toLowerCase()
-  if (hash === '#history') return 'history'
+  if (hash === '#history' || hash.startsWith('#history/')) return 'history'
   if (hash === '#settings') return 'settings'
   if (hash === '#workspace') return 'workflow'
   return 'overview'
+}
+
+const historyDeploymentIDFromHash = () => {
+  const prefix = '#history/'
+  if (!window.location.hash.toLowerCase().startsWith(prefix)) return null
+  try {
+    return decodeURIComponent(window.location.hash.slice(prefix.length)) || null
+  } catch {
+    return null
+  }
 }
 
 function App() {
@@ -57,6 +67,7 @@ function App() {
   const [salesforceConnectionError, setSalesforceConnectionError] = useState('')
   const [connections, setConnections] = useState<ConnectionSummary[]>([])
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([])
+  const [historyDeploymentID, setHistoryDeploymentID] = useState<string | null>(historyDeploymentIDFromHash)
   const [scratchJob, setScratchJob] = useState<ScratchOrgJob | null>(null)
   const [oauthJob, setOauthJob] = useState<SalesforceOAuthJob | null>(null)
   const [boxOauthJob, setBoxOauthJob] = useState<BoxOAuthJob | null>(null)
@@ -85,10 +96,21 @@ function App() {
     const nextURL = `${window.location.pathname}${window.location.search}${hash}`
     window.history.pushState(null, '', nextURL)
     setScreen(view)
+    if (view === 'history') setHistoryDeploymentID(null)
+  }
+
+  const openHistoricalDeployment = (deploymentID: string) => {
+    const nextURL = `${window.location.pathname}${window.location.search}#history/${encodeURIComponent(deploymentID)}`
+    window.history.pushState(null, '', nextURL)
+    setHistoryDeploymentID(deploymentID)
+    setScreen('history')
   }
 
   useEffect(() => {
-    const syncView = () => setScreen(viewFromHash())
+    const syncView = () => {
+      setScreen(viewFromHash())
+      setHistoryDeploymentID(historyDeploymentIDFromHash())
+    }
     window.addEventListener('hashchange', syncView)
     window.addEventListener('popstate', syncView)
     return () => {
@@ -642,7 +664,7 @@ function App() {
   const content = screen === 'overview'
     ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
     : screen === 'history'
-      ? <HistoryPage deployments={deployments}/>
+      ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onOpenDeployment={openHistoricalDeployment} onCloseDeployment={() => navigateTo('history')}/>
       : screen === 'settings'
         ? <SettingsPage defaults={deploymentDefaults} connections={connections} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
         : workflow
