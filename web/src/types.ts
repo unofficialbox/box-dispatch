@@ -10,6 +10,20 @@ export type DeploymentSummary = {
   providers: ProviderSummary[]
 }
 
+export type DeploymentProviderDetail = ProviderSummary & {
+  deployedCount: number
+  presentCount: number
+  remainingCount: number
+  manualItemCount: number
+}
+
+export type DeploymentDetail = Omit<DeploymentSummary, 'providers'> & {
+  startedAt: string
+  duration: string
+  runId?: string
+  providers: DeploymentProviderDetail[]
+}
+
 export type PlanComponent = {
   id: string
   name: string

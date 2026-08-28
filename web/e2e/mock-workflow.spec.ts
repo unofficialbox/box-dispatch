@@ -148,6 +148,21 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await page.getByRole('button', { name: 'Overview', exact: true }).click()
   await expect(page.getByText('Northstar CLM rollout').first()).toBeVisible()
+
+  await page.getByRole('button', { name: 'Deployment history' }).click()
+  await expect(page.getByRole('heading', { name: 'Deployment history' })).toBeVisible()
+  await expect(page.getByLabel('Search')).toBeVisible()
+  await expect(page.getByLabel('System')).toBeVisible()
+  await expect(page.getByLabel('Result')).toBeVisible()
+  await expect(page.getByLabel('Strategy')).toBeVisible()
+  await page.getByLabel('Result').selectOption('complete')
+  await expect(page.getByRole('button', { name: 'View summary for Northstar CLM rollout' })).toBeVisible()
+  await page.getByRole('button', { name: 'View summary for Northstar CLM rollout' }).click()
+  await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Provider summary' })).toBeVisible()
+  await expect(page.getByText('The immutable audit record for this run.')).toBeVisible()
+  await page.getByRole('button', { name: 'Back to deployment history' }).click()
+  await expect(page.getByRole('heading', { name: 'Deployment history' })).toBeVisible()
 })
 
 test('keeps the primary workflow usable on a mobile viewport', async ({ page }) => {
