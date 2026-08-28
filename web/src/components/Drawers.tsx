@@ -110,6 +110,7 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
         <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="salesforce" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.username || 'Salesforce org'}</h3></div></header>
         {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.username || selected.alias || 'the selected Salesforce user'}</span></div>}
         {selected && <dl className="selected-environment-details">
+          <div><dt>My Domain</dt><dd>{selected.domain || 'Not reported'}</dd></div>
           <div><dt>Org ID</dt><dd>{selected.orgId || 'Not reported'}</dd></div>
           <div><dt>Org type</dt><dd>{selected.kind || 'Org'}</dd></div>
         </dl>}
@@ -121,7 +122,7 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
           {orgs.map((org) => <li key={org.id || `${org.alias}-${org.username}`} className={org.selected ? 'selected' : ''}>
             <button type="button" className="connection-option-main" aria-pressed={org.selected} disabled={loading || org.selected || org.devHub || !org.id} onClick={() => { if (org.id) void onSelect(org.id) }}>
               <span className={`connection-state-dot ${org.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
-              <span className="connection-option-copy"><strong>{org.alias || org.username || 'Salesforce org'}</strong><small>{[org.kind, org.username, org.orgId].filter(Boolean).join(' · ')}</small></span>
+              <span className="connection-option-copy"><strong>{org.alias || org.username || 'Salesforce org'}</strong><small>{[org.domain, org.kind, org.username, org.orgId].filter(Boolean).join(' · ')}</small></span>
               <span className="connection-option-badge">{org.selected ? 'Selected' : org.devHub ? 'Dev Hub' : 'Use org'}</span>
             </button>
             <RemoveConnectionButton label={`Remove ${org.alias || org.username || 'Salesforce org'}`} disabled={loading || !org.id} onPress={() => { if (org.id) void onRemove(org.id) }}/>
@@ -176,6 +177,7 @@ export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLo
         <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="box" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.identity || 'Box account'}</h3></div></header>
         {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.identity || selected.alias || 'the selected Box user'}</span></div>}
         {selected && <dl className="selected-environment-details">
+          <div><dt>Box subdomain</dt><dd>{selected.domain || 'Not reported'}</dd></div>
           <div><dt>Account type</dt><dd>{selected.subjectType || 'User'}</dd></div>
           <div><dt>Authentication</dt><dd>{connection?.authType || 'Box OAuth'}</dd></div>
         </dl>}
@@ -187,7 +189,7 @@ export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLo
           {apps.map((app) => <li key={app.id || `${app.alias}-${app.identity}`} className={app.selected ? 'selected' : ''}>
             <button type="button" className="connection-option-main" aria-pressed={app.selected} disabled={loading || app.selected || !app.id} onClick={() => { if (app.id) void onSelect(app.id) }}>
               <span className={`connection-state-dot ${app.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
-              <span className="connection-option-copy"><strong>{app.alias || app.identity || 'Box account'}</strong><small>{[app.identity, app.subjectType, app.clientIdHint].filter(Boolean).join(' · ')}</small></span>
+              <span className="connection-option-copy"><strong>{app.alias || app.identity || 'Box account'}</strong><small>{[app.domain, app.identity, app.subjectType, app.clientIdHint].filter(Boolean).join(' · ')}</small></span>
               <span className="connection-option-badge">{app.selected ? 'Selected' : 'Use account'}</span>
             </button>
             <RemoveConnectionButton label={`Remove ${app.alias || app.identity || 'Box connection'}`} disabled={loading || !app.id} onPress={() => { if (app.id) void onRemove(app.id) }}/>

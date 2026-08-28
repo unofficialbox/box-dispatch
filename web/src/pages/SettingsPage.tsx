@@ -54,7 +54,7 @@ function BoxConnections({ connection, busy, onManage, onRemove }: { connection: 
     {records.length ? records.map((record) => {
       const name = record.alias || record.identity || 'Box connection'
       const id = record.id
-      return <ProviderConnectionRow key={id || `${record.alias}-${record.identity}`} primary={name} details={[`${record.identity || record.subjectType || 'Box account'}${record.clientIdHint ? ` · ${record.clientIdHint}` : ''}`]} selected={record.selected} ready={record.status?.trim().toLowerCase() === 'ready'} removeLabel={`Remove ${name}`} removeDisabled={busy || !id} onRemove={id ? () => { void onRemove(id) } : undefined}/>
+      return <ProviderConnectionRow key={id || `${record.alias}-${record.identity}`} primary={name} details={[record.domain || '', `${record.identity || record.subjectType || 'Box account'}${record.clientIdHint ? ` · ${record.clientIdHint}` : ''}`].filter(Boolean)} selected={record.selected} ready={record.status?.trim().toLowerCase() === 'ready'} removeLabel={`Remove ${name}`} removeDisabled={busy || !id} onRemove={id ? () => { void onRemove(id) } : undefined}/>
     }) : <EmptyProviderConnection provider="Box"/>}
   </ProviderConnectionPanel>
 }
@@ -66,7 +66,7 @@ function SalesforceConnections({ connection, busy, onManage, onRemove }: { conne
       const details = [record.kind || 'Org', record.orgId ? `Org ID ${record.orgId}` : '', record.expiresAt ? `Expires ${record.expiresAt}` : ''].filter(Boolean).join(' · ')
       const name = record.alias || record.username || 'Salesforce org'
       const id = record.id
-      return <ProviderConnectionRow key={id || `${record.alias}-${record.orgId}`} primary={name} details={[record.username || details, record.username ? details : ''].filter(Boolean)} selected={record.selected} ready={record.status?.trim().toLowerCase() === 'ready'} removeLabel={`Remove ${name}`} removeDisabled={busy || !id} onRemove={id ? () => { void onRemove(id) } : undefined}/>
+      return <ProviderConnectionRow key={id || `${record.alias}-${record.orgId}`} primary={name} details={[record.domain || '', record.username || details, record.username ? details : ''].filter(Boolean)} selected={record.selected} ready={record.status?.trim().toLowerCase() === 'ready'} removeLabel={`Remove ${name}`} removeDisabled={busy || !id} onRemove={id ? () => { void onRemove(id) } : undefined}/>
     }) : <EmptyProviderConnection provider="Salesforce"/>}
   </ProviderConnectionPanel>
 }

@@ -12,7 +12,6 @@ export function DeployPage({ plan, run, events, notice, onApply, onDiagnostics, 
   const currentProvider = providers.find((provider) => provider.state === 'active' || provider.state === 'failed')
   const latestEvent = events.at(-1)
   const authenticationFailed = events.some((event) => event.component === 'Authentication' && event.progressState === 'failed')
-  const hasSalesforceChanges = (run?.changeCount ?? 0) > 0
   const statusCopy = status === 'In progress' ? 'Provider progress updates automatically.' : status === 'Complete' ? 'All selected systems finished successfully.' : authenticationFailed ? 'Authentication failed before configuration validation began.' : 'The run stopped before every selected system completed.'
   const detailCopy = state === 'failed' && authenticationFailed ? `${currentProvider?.name ?? 'A provider'} authentication failed. Reconnect it before retrying.` : latestEvent?.message || 'Waiting for provider activity.'
 
@@ -22,7 +21,7 @@ export function DeployPage({ plan, run, events, notice, onApply, onDiagnostics, 
       <div className="run-overall-progress"><box-progress-bar label={`${completedProviders} of ${providers.length} systems complete`} value={completedProviders} max={providers.length}></box-progress-bar></div>
       <RunTimeline providers={providers}/>
       {notice && <p className="notice" role="status">{notice}</p>}
-      <footer className="action-row"><div className="stage-navigation">{run?.action === 'validate' && run.status === 'completed' && hasSalesforceChanges && <box-button label="View file changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button>}{run?.action === 'validate' && run.status === 'completed' && <box-button label="Continue to deployment" tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <box-button label="View diagnostic guidance" tone="primary" onClick={() => onDiagnostics(run.id)}></box-button>}</div></footer>
+      <footer className="action-row"><div className="stage-navigation">{run?.action === 'validate' && run.status === 'completed' && <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button>}{run?.action === 'validate' && run.status === 'completed' && <box-button label="Continue to deployment" tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <box-button label="View diagnostic guidance" tone="primary" onClick={() => onDiagnostics(run.id)}></box-button>}</div></footer>
     </section>
     <DetailsRail title="Run details" description={detailCopy}><DetailList rows={[["Deployment", plan.name], ["Status", status], ['Run ID', run?.id || 'Preparing'], ['Current system', currentProvider?.name || (state === 'completed' ? 'All systems complete' : 'Waiting')], ['Completed', `${completedProviders} of ${providers.length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
   </section>

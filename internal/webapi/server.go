@@ -173,7 +173,23 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		for _, record := range records {
 			if record.DeploymentID == id {
-				writeJSON(w, http.StatusOK, detailDeployment(record))
+				settings, _ := options.ConnectionStore()
+				writeJSON(w, http.StatusOK, detailDeployment(record, settings))
+				return
+			}
+		}
+		writeError(w, http.StatusNotFound, "deployment was not found")
+	})
+	mux.HandleFunc("GET /api/deployments/{id}/changes", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		records, err := options.DeploymentStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "deployment history is unavailable")
+			return
+		}
+		for _, record := range records {
+			if record.DeploymentID == id {
+				writeJSON(w, http.StatusOK, runChangesResponse{Files: record.FileChanges()})
 				return
 			}
 		}
@@ -1066,10 +1082,12 @@ type deploymentSummary struct {
 
 type deploymentDetail struct {
 	deploymentSummary
-	StartedAt time.Time        `json:"startedAt"`
-	Duration  string           `json:"duration"`
-	RunID     string           `json:"runId,omitempty"`
-	Providers []providerDetail `json:"providers"`
+	StartedAt       time.Time        `json:"startedAt"`
+	Duration        string           `json:"duration"`
+	RunID           string           `json:"runId,omitempty"`
+	ChangesRecorded bool             `json:"changesRecorded"`
+	ChangeCount     int              `json:"changeCount"`
+	Providers       []providerDetail `json:"providers"`
 }
 
 type providerSummary struct {
@@ -1078,12 +1096,15 @@ type providerSummary struct {
 }
 
 type providerDetail struct {
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	DeployedCount   int    `json:"deployedCount"`
-	PresentCount    int    `json:"presentCount"`
-	RemainingCount  int    `json:"remainingCount"`
-	ManualItemCount int    `json:"manualItemCount"`
+	Name               string   `json:"name"`
+	Status             string   `json:"status"`
+	DeployedCount      int      `json:"deployedCount"`
+	PresentCount       int      `json:"presentCount"`
+	RemainingCount     int      `json:"remainingCount"`
+	ManualItemCount    int      `json:"manualItemCount"`
+	DeployedComponents []string `json:"deployedComponents"`
+	EnvironmentID      string   `json:"environmentId,omitempty"`
+	LaunchURL          string   `json:"launchUrl,omitempty"`
 }
 
 type connectionSummary struct {
@@ -1286,21 +1307,58 @@ func summarizeDeployment(record audit.DeploymentRecord) deploymentSummary {
 	}
 }
 
-func detailDeployment(record audit.DeploymentRecord) deploymentDetail {
+func detailDeployment(record audit.DeploymentRecord, settings config.ConnectionSettings) deploymentDetail {
 	summary := summarizeDeployment(record)
 	providers := make([]providerDetail, 0, len(record.Providers))
 	for _, provider := range record.Providers {
+		environmentID, launchURL := deploymentEnvironment(provider, settings)
 		providers = append(providers, providerDetail{
 			Name: provider.Provider, Status: string(provider.StatusAfter),
 			DeployedCount: len(provider.Deployed), PresentCount: len(provider.PresentAfter),
-			RemainingCount:  len(provider.Remaining),
-			ManualItemCount: len(provider.AdapterPending) + len(provider.Experimental),
+			RemainingCount:     len(provider.Remaining),
+			ManualItemCount:    len(provider.AdapterPending) + len(provider.Experimental),
+			DeployedComponents: append([]string(nil), provider.Deployed...),
+			EnvironmentID:      environmentID, LaunchURL: launchURL,
 		})
 	}
 	return deploymentDetail{
 		deploymentSummary: summary, StartedAt: record.StartedAt,
-		Duration: record.Duration, RunID: record.RunID, Providers: providers,
+		Duration: record.Duration, RunID: record.RunID, ChangesRecorded: record.ChangesRecorded,
+		ChangeCount: len(record.FileChanges()), Providers: providers,
 	}
+}
+
+func deploymentEnvironment(provider audit.ProviderRecord, settings config.ConnectionSettings) (string, string) {
+	switch strings.ToLower(provider.Provider) {
+	case "box":
+		if strings.TrimSpace(provider.EnvironmentID) != "" {
+			return provider.EnvironmentID, "https://app.box.com/"
+		}
+		if selected, ok := settings.SelectedBoxConnection(); ok {
+			return selected.Enterprise, "https://app.box.com/"
+		}
+	case "salesforce":
+		environmentID := strings.TrimSpace(provider.EnvironmentID)
+		for _, resource := range provider.Resources {
+			if resource.Kind != "organization" || strings.TrimSpace(resource.ID) == "" {
+				continue
+			}
+			if environmentID == "" {
+				environmentID = resource.ID
+			}
+			launchURL := strings.TrimSpace(resource.URL)
+			if selected, ok := settings.SelectedSalesforceOrg(); ok && selected.OrgID == environmentID {
+				launchURL = "/api/connections/salesforce/open"
+			}
+			return environmentID, launchURL
+		}
+		if environmentID != "" {
+			if selected, ok := settings.SelectedSalesforceOrg(); ok && selected.OrgID == environmentID {
+				return environmentID, "/api/connections/salesforce/open"
+			}
+		}
+	}
+	return "", ""
 }
 
 func connectionSummaries(settings config.ConnectionSettings) []connectionSummary {

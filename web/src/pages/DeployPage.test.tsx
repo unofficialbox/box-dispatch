@@ -53,7 +53,7 @@ describe('DeployPage', () => {
     const changeEvents: RunEvent[] = [{ sequence: 1, at: '2026-08-25T12:00:00Z', type: 'activity', provider: 'salesforce', component: 'Settings:Communities', message: 'Configuration differs; will be updated', status: 'running', progressState: 'completed' }]
     const { container } = render(<DeployPage plan={plan} run={completedValidation} events={changeEvents} notice="" onApply={vi.fn()} onDiagnostics={vi.fn()} onViewChanges={onViewChanges} />)
 
-    const button = container.querySelector<HTMLElement>('box-button[label="View file changes"]')
+    const button = container.querySelector<HTMLElement>('box-button[label="Review changes"]')
     expect(button).toBeTruthy()
     button?.click()
     expect(onViewChanges).toHaveBeenCalledWith('validate-1')

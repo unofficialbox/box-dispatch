@@ -747,14 +747,24 @@ func TestSalesforceAvailabilityCheckClearsStaleVerificationAfterRefreshFailure(t
 }
 
 func TestDeploymentDetailCountsWithoutDiagnostics(t *testing.T) {
+	settings := config.ConnectionSettings{}
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "box-1", Alias: "Production Box", Enterprise: "5105484"}, true)
+	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{ID: "sf-1", Alias: "CLM Scratch", OrgID: "00D123", InstanceURL: "https://scratch.example.my.salesforce.com", AccessToken: "private-token"}, true)
 	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
 		DeploymentStore: func() ([]audit.DeploymentRecord, error) {
 			return []audit.DeploymentRecord{{
 				DeploymentID: "run-42", SourcePath: "/private/audit.json", PackageRoot: "/private/package",
+				ChangesRecorded: true,
 				Providers: []audit.ProviderRecord{{
-					Provider: "box", StatusAfter: lifecycle.StatusMissing, Detail: "secret-adjacent diagnostic",
+					Provider: "box", EnvironmentID: "recorded-eid", StatusAfter: lifecycle.StatusMissing, Detail: "secret-adjacent diagnostic",
 					Deployed: []string{"one"}, PresentAfter: []string{"one", "two"}, Remaining: []string{"three"},
 					AdapterPending: []string{"four"}, Experimental: []string{"five"},
+				}, {
+					Provider: "salesforce", StatusAfter: lifecycle.StatusPresent,
+					Deployed: []string{"UIBundle:clmreactapp"}, PresentAfter: []string{"UIBundle:clmreactapp"},
+					Changes:   []salesforceapi.MetadataFileDiff{{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}},
+					Resources: []lifecycle.ResourceReference{{Provider: "salesforce", Component: "Salesforce org", Kind: "organization", ID: "00D123", URL: "https://scratch.example.my.salesforce.com"}},
 				}},
 			}}, nil
 		},
@@ -780,6 +790,36 @@ func TestDeploymentDetailCountsWithoutDiagnostics(t *testing.T) {
 	if provider.DeployedCount != 1 || provider.PresentCount != 2 || provider.RemainingCount != 1 || provider.ManualItemCount != 2 {
 		t.Fatalf("provider detail = %#v", provider)
 	}
+	if len(provider.DeployedComponents) != 1 || provider.DeployedComponents[0] != "one" || provider.EnvironmentID != "recorded-eid" || provider.LaunchURL != "https://app.box.com/" {
+		t.Fatalf("box deployment details = %#v", provider)
+	}
+	salesforce := detail.Providers[1]
+	if salesforce.EnvironmentID != "00D123" || salesforce.LaunchURL != "/api/connections/salesforce/open" || len(salesforce.DeployedComponents) != 1 {
+		t.Fatalf("salesforce deployment details = %#v", salesforce)
+	}
+	if !detail.ChangesRecorded || detail.ChangeCount != 1 {
+		t.Fatalf("deployment change summary = %#v", detail)
+	}
+}
+
+func TestDeploymentChangesReturnsPersistedValidationSnapshot(t *testing.T) {
+	want := salesforceapi.MetadataFileDiff{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
+	handler := NewHandlerWithOptions(ServerOptions{DeploymentStore: func() ([]audit.DeploymentRecord, error) {
+		return []audit.DeploymentRecord{{DeploymentID: "run-42", ChangesRecorded: true, Providers: []audit.ProviderRecord{{Provider: "salesforce", Changes: []salesforceapi.MetadataFileDiff{want}}}}}, nil
+	}})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/deployments/run-42/changes", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var changes runChangesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Files) != 1 || changes.Files[0] != want {
+		t.Fatalf("changes = %#v", changes.Files)
+	}
 }
 
 func TestConnectionsRedactCredentials(t *testing.T) {
@@ -788,7 +828,11 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 			return config.ConnectionSettings{
 				SalesforceAlias: "scratch-org", SalesforceOrgStatus: "Active", SalesforceExpirationDate: "2026-09-20",
 				BoxCCGAlias: "Legal Box", BoxCCGClientID: "client-id", BoxCCGClientSecret: "private-secret", BoxCCGSubjectType: "enterprise", BoxCCGSubjectID: "123",
-				VerifiedConnections: map[string]config.VerifiedConnection{"box": {VerifiedAt: "2026-08-21", Selection: "ccg", Identity: "operator@example.com"}},
+				BoxConnections:          []config.BoxAppConnection{{ID: "box-1", Alias: "Legal Box", ClientID: "client-id", ClientSecret: "private-secret", SubjectType: "enterprise", SubjectID: "123", VerifiedAt: "2026-08-21", Identity: "operator@example.com", Hostname: "https://acme.app.box.com/path?secret=value"}},
+				BoxSelectedConnectionID: "box-1",
+				SalesforceOrgs:          []config.SalesforceOrgConnection{{ID: "sf-1", Alias: "scratch-org", InstanceURL: "https://dispatch.scratch.my.salesforce.com/services/data", Status: "Active"}},
+				SalesforceSelectedOrgID: "sf-1",
+				VerifiedConnections:     map[string]config.VerifiedConnection{"box": {VerifiedAt: "2026-08-21", Selection: "ccg", Identity: "operator@example.com"}},
 			}, nil
 		},
 	})
@@ -805,7 +849,7 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 			t.Fatalf("response leaked %q: %s", forbidden, body)
 		}
 	}
-	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") || !strings.Contains(body, "Legal Box") || !strings.Contains(body, "Ending in t-id") || !strings.Contains(body, "operator@example.com") {
+	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") || !strings.Contains(body, "Legal Box") || !strings.Contains(body, "Ending in t-id") || !strings.Contains(body, "operator@example.com") || !strings.Contains(body, "acme.app.box.com") || !strings.Contains(body, "dispatch.scratch.my.salesforce.com") || strings.Contains(body, "/services/data") || strings.Contains(body, "secret=value") {
 		t.Fatalf("response omitted safe connection state: %s", body)
 	}
 }

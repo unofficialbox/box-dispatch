@@ -3,6 +3,14 @@ import { expect, test } from '@playwright/test'
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  await expect(page.getByText('acme.app.box.com')).toBeVisible()
+  await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByText('acme.app.box.com')).toBeVisible()
+  await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 
   const overviewGutter = await page.evaluate(() => {
     const progress = document.querySelector('box-progress-bar')!.getBoundingClientRect()
@@ -86,8 +94,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByText('All selected systems finished successfully.')).toBeVisible()
   expect(await page.getByText('Authentication verified').count()).toBeGreaterThanOrEqual(2)
 
-  await page.getByRole('button', { name: 'View file changes' }).click()
-  await expect(page.getByRole('heading', { name: 'Salesforce changes' })).toBeVisible()
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('heading', { name: 'Review validation changes' })).toBeVisible()
   await expect(page.getByText('2 files')).toBeVisible()
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
   expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({
@@ -96,7 +104,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     mode: viewer.getAttribute('mode'),
     hasCurrent: viewer.getAttribute('before-text')?.includes('false'),
     hasPackaged: viewer.getAttribute('after-text')?.includes('true'),
-  }))).toEqual({ before: 'Current org', after: 'Packaged change', mode: 'split', hasCurrent: true, hasPackaged: true })
+  }))).toEqual({ before: 'Current org', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
   await page.getByRole('button', { name: /Amount__c.field-meta.xml/ }).click()
   await expect(page.locator('box-diff-viewer[heading="objects/Contract__c/fields/Amount__c.field-meta.xml"]')).toBeVisible()
   await page.getByRole('button', { name: 'Close drawer' }).click()
@@ -145,24 +153,39 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByText('Box workspace')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Box App & Settings' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Contract Lifecycle Management' })).toBeVisible()
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('heading', { name: 'Review deployed changes' })).toBeVisible()
+  expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({ before: viewer.getAttribute('before-label'), after: viewer.getAttribute('after-label') }))).toEqual({ before: 'Before deployment', after: 'After deployment' })
+  await page.getByRole('button', { name: 'Close drawer' }).click()
 
   await page.getByRole('button', { name: 'Overview', exact: true }).click()
   await expect(page.getByText('Northstar CLM rollout').first()).toBeVisible()
-
-  await page.getByRole('button', { name: 'Deployment history' }).click()
+  const recentDeployments = page.getByRole('table', { name: 'Recent deployments' })
+  await recentDeployments.getByRole('button', { name: 'View summary for Northstar CLM rollout' }).click()
+  await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Provider summary' })).toBeVisible()
+  await expect(page.getByText('The immutable audit record for this run.')).toBeVisible()
+  await expect(page.locator('.history-provider-summary > ul > li').filter({ hasText: 'Box' }).locator('header box-button[label="Open Box"]')).toBeVisible()
+  await expect(page.locator('.history-provider-summary > ul > li').filter({ hasText: 'Salesforce' }).locator('header box-button[label="Open Salesforce"]')).toBeVisible()
+  await expect(page.locator('box-button[label*="EID-mock"], box-button[label*="00D-mock"]')).toHaveCount(0)
+  await expect(page.getByRole('table', { name: 'Components deployed by this deployment' })).toBeVisible()
+  await expect(page.getByText('Sample Content:northstar-msa-redline-v3.pdf')).toBeVisible()
+  await expect(page.getByText('UIBundle:clmreactapp')).toBeVisible()
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('heading', { name: 'Review deployed changes' })).toBeVisible()
+  await expect(page.getByText('2 files')).toBeVisible()
+  expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({ before: viewer.getAttribute('before-label'), after: viewer.getAttribute('after-label') }))).toEqual({ before: 'Before deployment', after: 'After deployment' })
+  await page.getByRole('button', { name: 'Close drawer' }).click()
+  await page.getByRole('button', { name: 'Back to deployment history' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment history' })).toBeVisible()
   await expect(page.getByLabel('Search')).toBeVisible()
   await expect(page.getByLabel('System')).toBeVisible()
   await expect(page.getByLabel('Result')).toBeVisible()
   await expect(page.getByLabel('Strategy')).toBeVisible()
-  await page.getByLabel('Result').selectOption('complete')
-  await expect(page.getByRole('button', { name: 'View summary for Northstar CLM rollout' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'View summary for Northstar CLM rollout' }).click()
-  await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Provider summary' })).toBeVisible()
-  await expect(page.getByText('The immutable audit record for this run.')).toBeVisible()
-  await page.getByRole('button', { name: 'Back to deployment history' }).click()
-  await expect(page.getByRole('heading', { name: 'Deployment history' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })
 
 test('keeps the primary workflow usable on a mobile viewport', async ({ page }) => {

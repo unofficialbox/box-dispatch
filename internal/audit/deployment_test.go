@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 )
 
 func TestDeployedResourcesFlattensEveryProvider(t *testing.T) {
@@ -36,5 +37,27 @@ func TestDeployedResourcesIsEmptyWithoutRecordedResources(t *testing.T) {
 	record := DeploymentRecord{Providers: []ProviderRecord{{Provider: "box"}}}
 	if resources := record.DeployedResources(); len(resources) != 0 {
 		t.Fatalf("expected no resources, got %+v", resources)
+	}
+}
+
+func TestProviderRecordsCaptureDeploymentEnvironment(t *testing.T) {
+	records := providerRecords(nil, []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}, map[string]string{"box": " 5105484 "})
+	if len(records) != 1 || records[0].EnvironmentID != "5105484" {
+		t.Fatalf("provider records = %#v", records)
+	}
+}
+
+func TestProviderRecordsCaptureValidatedFileChanges(t *testing.T) {
+	validated := salesforceapi.MetadataFileDiff{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
+	before := []lifecycle.Item{{Provider: "salesforce", Changes: []salesforceapi.MetadataFileDiff{validated}}}
+	after := []lifecycle.Item{{Provider: "salesforce", Status: lifecycle.StatusPresent}}
+
+	records := providerRecords(before, after, nil)
+	if len(records) != 1 || len(records[0].Changes) != 1 || records[0].Changes[0] != validated {
+		t.Fatalf("provider records = %#v", records)
+	}
+	record := DeploymentRecord{Providers: records}
+	if changes := record.FileChanges(); len(changes) != 1 || changes[0] != validated {
+		t.Fatalf("file changes = %#v", changes)
 	}
 }
