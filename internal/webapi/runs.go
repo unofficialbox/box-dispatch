@@ -484,6 +484,15 @@ func safeDiagnostic(action runAction, err error) *runDiagnostic {
 		nextSteps = []string{"Retry validation; Dispatch retries one incomplete metadata response automatically.", "If it continues, reconnect the selected Salesforce org and retry."}
 		code = "SALESFORCE_METADATA_RESPONSE_INCOMPLETE"
 		provider = "Salesforce"
+	case strings.Contains(message, "salesforce multi-framework"), strings.Contains(message, "hyperforce"):
+		summary = "The selected Salesforce org cannot run this solution's Multi-Framework application."
+		nextSteps = []string{
+			"Connect a Summer '26 or later Hyperforce Salesforce org with English as its default language.",
+			"For a scratch org, connect a Hyperforce Dev Hub and create a replacement org.",
+			"Run validation again with the eligible org selected.",
+		}
+		code = "SALESFORCE_MULTIFRAMEWORK_UNAVAILABLE"
+		provider = "Salesforce"
 	case strings.Contains(message, "conflict"):
 		summary = "Existing Salesforce source conflicts with the package you are applying."
 		nextSteps = []string{"Resolve the source conflicts in the Salesforce project.", "Run validation again before applying changes."}

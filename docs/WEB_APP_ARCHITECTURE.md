@@ -16,6 +16,7 @@ flowchart LR
     API --> Engine["Dispatch engine and lifecycle"]
     Engine --> Box["Box public APIs"]
     Engine --> SalesforceREST["Salesforce REST API"]
+    SalesforceREST --> SalesforceEligibility["UIBundle eligibility preflight"]
     Engine --> SalesforceMetadata["Salesforce Metadata API adapter"]
     Engine --> Audit["Credential-free audit records"]
     API --> Audit
@@ -156,10 +157,16 @@ Previously saved CLI-derived aliases remain readable only as a migration fallbac
 When target REST credentials are saved, the Salesforce lifecycle is API-native:
 REST checks org availability and manages permission assignments; Tooling API
 inventories and installs managed packages; Metadata API inventories source and
-deploys the generated package. Validation uses `ListMetadata` only to identify
-missing component names, retrieves every existing packaged component, and compares
+deploys the generated package. When the package contains `UIBundle` metadata,
+validation reads the target org's instance and default language before component
+comparison. It blocks first-party or non-English orgs with Hyperforce remediation,
+and deployment repeats the preflight so skipped or stale validation cannot bypass it.
+Packages without `UIBundle` metadata are unaffected. Validation uses `ListMetadata`
+only to identify missing component names, retrieves every existing packaged component, and compares
 normalized XML, JSON, bundle content, and source text against the package. Changed
-components remain deployable even when their names already exist. After deployment,
+components remain deployable even when their names already exist. Semantic XML comparison
+recognizes Salesforce-owned read-back values for masked Auth Provider secrets and scratch-org
+Network sender addresses without ignoring unrelated configuration drift. After deployment,
 Dispatch retrieves the affected components again and refuses to report success until
 the resulting Salesforce configuration matches. Validation emits a structured event
 for every selected component as discovery and semantic comparison complete. After a

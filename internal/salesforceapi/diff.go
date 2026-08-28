@@ -343,7 +343,15 @@ func canonicalMetadataData(path string, local, remote []byte) bool {
 // other server-owned elements. Those additions do not require another deployment.
 // Every value declared by the package must still be present and equal.
 func metadataNodeMatches(local, remote *metadataXMLNode) bool {
-	if local == nil || remote == nil || local.Name != remote.Name || strings.TrimSpace(local.Text) != strings.TrimSpace(remote.Text) {
+	rootName := ""
+	if local != nil {
+		rootName = local.Name
+	}
+	return metadataNodeMatchesWithin(rootName, local, remote)
+}
+
+func metadataNodeMatchesWithin(rootName string, local, remote *metadataXMLNode) bool {
+	if local == nil || remote == nil || local.Name != remote.Name || !metadataTextMatches(rootName, local.Name, local.Text, remote.Text) {
 		return false
 	}
 	for key, value := range local.Attrs {
@@ -351,10 +359,14 @@ func metadataNodeMatches(local, remote *metadataXMLNode) bool {
 			return false
 		}
 	}
-	return metadataChildrenMatch(local.Children, remote.Children)
+	return metadataChildrenMatchWithin(rootName, local.Children, remote.Children)
 }
 
 func metadataChildrenMatch(local, remote []*metadataXMLNode) bool {
+	return metadataChildrenMatchWithin("", local, remote)
+}
+
+func metadataChildrenMatchWithin(rootName string, local, remote []*metadataXMLNode) bool {
 	used := make([]bool, len(remote))
 	localCounts := map[string]int{}
 	nextUnkeyedIndex := map[string]int{}
@@ -382,7 +394,7 @@ func metadataChildrenMatch(local, remote []*metadataXMLNode) bool {
 			match = index
 			break
 		}
-		if match < 0 || !metadataNodeMatches(child, remote[match]) {
+		if match < 0 || !metadataNodeMatchesWithin(rootName, child, remote[match]) {
 			return false
 		}
 		used[match] = true
@@ -391,6 +403,25 @@ func metadataChildrenMatch(local, remote []*metadataXMLNode) bool {
 		}
 	}
 	return true
+}
+
+func metadataTextMatches(rootName, nodeName, local, remote string) bool {
+	local = strings.TrimSpace(local)
+	remote = strings.TrimSpace(remote)
+	if local == remote {
+		return true
+	}
+	// Salesforce never returns an Auth Provider's actual secret through the
+	// Metadata API. A non-empty package value can only be verified as present.
+	if rootName == "AuthProvider" && nodeName == "consumerSecret" {
+		return local != "" && remote == "Placeholder_Value"
+	}
+	// Scratch orgs make unverified Experience Cloud sender addresses inert by
+	// appending .invalid. This is the same declared address, not configuration drift.
+	if rootName == "Network" && (nodeName == "emailSenderAddress" || nodeName == "newSenderAddress") {
+		return local != "" && remote == local+".invalid"
+	}
+	return false
 }
 
 func metadataNodeIdentity(node *metadataXMLNode) (string, string) {

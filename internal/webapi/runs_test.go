@@ -444,6 +444,22 @@ func TestSafeDiagnosticExplainsIncompleteSalesforceMetadataResponse(t *testing.T
 	}
 }
 
+func TestSafeDiagnosticExplainsUnavailableSalesforceMultiFramework(t *testing.T) {
+	diagnostic := safeDiagnostic(runActionValidate, &providerRunFailure{
+		Provider: "salesforce",
+		Detail:   "Salesforce Multi-Framework is unavailable in the selected org: the selected org is on first-party instance CS248",
+	})
+	if diagnostic.Provider != "Salesforce" || diagnostic.Code != "SALESFORCE_MULTIFRAMEWORK_UNAVAILABLE" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !strings.Contains(diagnostic.Summary, "cannot run") || len(diagnostic.NextSteps) != 3 {
+		t.Fatalf("diagnostic was not actionable: %#v", diagnostic)
+	}
+	if !strings.Contains(strings.Join(diagnostic.NextSteps, " "), "Hyperforce Dev Hub") {
+		t.Fatalf("diagnostic omitted scratch-org remediation: %#v", diagnostic.NextSteps)
+	}
+}
+
 type testRunStore struct {
 	runs []persistedRun
 }

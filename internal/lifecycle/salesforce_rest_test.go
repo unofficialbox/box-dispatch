@@ -2,7 +2,12 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -166,6 +171,90 @@ func TestSalesforceExperienceDeploymentAlwaysIncludesEnablingSettings(t *testing
 	}
 	if !sourceIncludesSalesforceExperience(inventory) {
 		t.Fatal("expected the source inventory to identify an Experience Cloud application")
+	}
+}
+
+func TestSalesforceMultiFrameworkPreflightOnlyAppliesToUIBundles(t *testing.T) {
+	if !sourceRequiresSalesforceMultiFramework(map[string]bool{"UIBundle:clmreactapp": true}) {
+		t.Fatal("expected a UIBundle to require the Multi-Framework preflight")
+	}
+	if sourceRequiresSalesforceMultiFramework(map[string]bool{"ApexClass:ContractController": true}) {
+		t.Fatal("ordinary Salesforce metadata must not require the Multi-Framework preflight")
+	}
+}
+
+func TestSalesforceMultiFrameworkPreflightRejectsFirstPartyOrg(t *testing.T) {
+	err := salesforceMultiFrameworkCompatibilityError(salesforceapi.MultiFrameworkEligibility{
+		InstanceName: "CS248", LanguageLocale: "en_US", APIVersion: "67.0", Hyperforce: false, EnglishDefault: true, SupportedRelease: true,
+	})
+	if err == nil {
+		t.Fatal("expected a first-party org to fail the Multi-Framework preflight")
+	}
+	for _, want := range []string{"Hyperforce", "CS248", "Hyperforce Dev Hub", "validation"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error omitted %q: %v", want, err)
+		}
+	}
+}
+
+func TestSalesforceMultiFrameworkPreflightRequiresEnglishDefault(t *testing.T) {
+	err := salesforceMultiFrameworkCompatibilityError(salesforceapi.MultiFrameworkEligibility{
+		InstanceName: "DEU52", LanguageLocale: "de_DE", APIVersion: "67.0", Hyperforce: true, EnglishDefault: false, SupportedRelease: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "English") || !strings.Contains(err.Error(), "de_DE") {
+		t.Fatalf("error = %v", err)
+	}
+	if err := salesforceMultiFrameworkCompatibilityError(salesforceapi.MultiFrameworkEligibility{
+		InstanceName: "USA470", LanguageLocale: "en_US", APIVersion: "67.0", Hyperforce: true, EnglishDefault: true, SupportedRelease: true,
+	}); err != nil {
+		t.Fatalf("eligible org failed preflight: %v", err)
+	}
+}
+
+func TestSalesforceMultiFrameworkPreflightRequiresSummer26(t *testing.T) {
+	err := salesforceMultiFrameworkCompatibilityError(salesforceapi.MultiFrameworkEligibility{
+		InstanceName: "USA470", LanguageLocale: "en_US", APIVersion: "66.0", Hyperforce: true, EnglishDefault: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Summer '26") || !strings.Contains(err.Error(), "66.0") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCheckSalesforceMultiFrameworkCompatibilityReadsUIBundleTargetOrg(t *testing.T) {
+	project := t.TempDir()
+	descriptor := filepath.Join(project, "force-app", "main", "default", "uiBundles", "clmreactapp", "clmreactapp.uibundle-meta.xml")
+	if err := os.MkdirAll(filepath.Dir(descriptor), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(descriptor, []byte(`<UIBundle xmlns="http://soap.sforce.com/2006/04/metadata"><target>Experience</target></UIBundle>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/services/data/":
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"version": "67.0"}})
+		case "/services/data/v67.0/query":
+			_ = json.NewEncoder(w).Encode(map[string]any{"records": []map[string]string{{"InstanceName": "CS248", "LanguageLocaleKey": "en_US"}}})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	session := &salesforceRESTSession{
+		credential: salesforceapi.Credential{InstanceURL: server.URL, AccessToken: "token"},
+		client:     &salesforceapi.Client{HTTP: server.Client()},
+	}
+	var updates []ProgressUpdate
+	err := checkSalesforceMultiFrameworkCompatibility(context.Background(), session, project, func(update ProgressUpdate) {
+		updates = append(updates, update)
+	})
+	if err == nil || !strings.Contains(err.Error(), "CS248") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(updates) != 1 || updates[0].Message != "Checking Salesforce Multi-Framework compatibility" {
+		t.Fatalf("updates = %#v", updates)
 	}
 }
 

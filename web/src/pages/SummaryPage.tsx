@@ -25,7 +25,7 @@ export function SummaryPage({ plan, connections, run, onOpenProvider, onOverview
         <h3 id="summary-destinations-title">Open your deployment</h3>
         <ul>{destinations.map((destination) => <li key={destination.id}>
           <div><strong>{destination.title}</strong><span>{destination.description}</span></div>
-          {destination.href ? <a className="summary-destination-link" href={destination.href} target="_blank" rel="noreferrer" aria-label={`Open ${destination.title}`}>Open</a> : <box-button label="Open" onClick={() => onOpenProvider(destination.providerID!)}></box-button>}
+          {destination.href ? <a className="summary-destination-link" href={destination.href} target="_blank" rel="noreferrer" aria-label={`Open ${destination.title}`}>Open</a> : <box-button label="Open" tone="primary" onClick={() => onOpenProvider(destination.providerID!)}></box-button>}
         </li>)}</ul>
       </section>
       <div className="summary-actions"><box-button label="Return to overview" onClick={onOverview}></box-button></div>

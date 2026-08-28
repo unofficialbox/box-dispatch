@@ -164,6 +164,9 @@ func validateSalesforceREST(root string, item Item, report Reporter, settings co
 		return salesforceRESTFailure(item, "Salesforce validation stopped before reading metadata", err), nil
 	}
 	alias := salesforceRESTLabel(settings, org)
+	if err := checkSalesforceMultiFrameworkCompatibility(ctx, session, project, report); err != nil {
+		return salesforceRESTFailure(item, "Salesforce validation stopped during the Multi-Framework compatibility preflight", err), nil
+	}
 	manifest, err := solution.Load(root)
 	if err != nil {
 		return salesforceRESTFailure(item, "Unable to read Salesforce deployment prerequisites", err), nil
@@ -260,6 +263,9 @@ func deploySalesforceREST(root string, item Item, settings config.ConnectionSett
 		return salesforceRESTFailure(item, "Salesforce deployment stopped before sending metadata", err)
 	}
 	report.component(orgAvailabilityComponent, ProgressCompleted, "Salesforce org is available", 1, 1)
+	if err := checkSalesforceMultiFrameworkCompatibility(ctx, session, project, report); err != nil {
+		return salesforceRESTFailure(item, "Salesforce deployment stopped during the Multi-Framework compatibility preflight", err)
+	}
 	manifest, err := solution.Load(root)
 	if err != nil {
 		return salesforceRESTFailure(item, "Unable to read Salesforce deployment prerequisites", err)
@@ -421,6 +427,56 @@ func sourceIncludesSalesforceExperience(inventory map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+func sourceRequiresSalesforceMultiFramework(inventory map[string]bool) bool {
+	for component := range inventory {
+		if strings.HasPrefix(component, "UIBundle:") {
+			return true
+		}
+	}
+	return false
+}
+
+func checkSalesforceMultiFrameworkCompatibility(ctx context.Context, session *salesforceRESTSession, project string, report Reporter) error {
+	sourceInventory, _, err := salesforceapi.InventorySource(project)
+	if err != nil {
+		return fmt.Errorf("inspect packaged Salesforce metadata requirements: %w", err)
+	}
+	if !sourceRequiresSalesforceMultiFramework(sourceInventory) {
+		return nil
+	}
+	report.step("Checking Salesforce Multi-Framework compatibility")
+	eligibility, err := session.client.ReadMultiFrameworkEligibility(ctx, session.credential)
+	if err != nil && salesforceSessionExpired(err) {
+		report.step("Refreshing the selected Salesforce session")
+		if refreshErr := session.refresh(ctx); refreshErr != nil {
+			return refreshErr
+		}
+		eligibility, err = session.client.ReadMultiFrameworkEligibility(ctx, session.credential)
+	}
+	if err != nil {
+		return err
+	}
+	if err := salesforceMultiFrameworkCompatibilityError(eligibility); err != nil {
+		return err
+	}
+	report.step("Salesforce Multi-Framework is available on Hyperforce instance " + eligibility.InstanceName)
+	return nil
+}
+
+func salesforceMultiFrameworkCompatibilityError(eligibility salesforceapi.MultiFrameworkEligibility) error {
+	const requirement = "Salesforce Multi-Framework requires a Summer '26 or later Hyperforce org with English as the default language"
+	if !eligibility.SupportedRelease {
+		return fmt.Errorf("%s; the selected org exposes Salesforce API %s. Connect an org on Summer '26 or later, then run validation again", requirement, eligibility.APIVersion)
+	}
+	if !eligibility.Hyperforce {
+		return fmt.Errorf("%s; the selected org is on first-party instance %s. Connect an eligible Hyperforce org, or use a Hyperforce Dev Hub to create a replacement scratch org, then run validation again", requirement, eligibility.InstanceName)
+	}
+	if !eligibility.EnglishDefault {
+		return fmt.Errorf("%s; the selected org uses %s as its default language. Connect an eligible English-language org, then run validation again", requirement, eligibility.LanguageLocale)
+	}
+	return nil
 }
 
 func includeSalesforceOrgSettings(components []string, inventory map[string]bool) []string {

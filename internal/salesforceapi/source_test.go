@@ -184,6 +184,78 @@ func TestMetadataNodeMatchesReorderedPermissionEntriesButDetectsChangedPermissio
 	}
 }
 
+func TestMetadataNodeMatchesMaskedAuthProviderSecret(t *testing.T) {
+	local, err := parseMetadataXML([]byte(metadataXML("AuthProvider", "<consumerKey>box-client</consumerKey><consumerSecret>set-in-setup</consumerSecret>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrieved, err := parseMetadataXML([]byte(metadataXML("AuthProvider", "<consumerKey>box-client</consumerKey><consumerSecret>Placeholder_Value</consumerSecret>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !metadataNodeMatches(local, retrieved) {
+		t.Fatal("Salesforce's masked Auth Provider secret should preserve declared intent")
+	}
+
+	changedKey, err := parseMetadataXML([]byte(metadataXML("AuthProvider", "<consumerKey>different-client</consumerKey><consumerSecret>Placeholder_Value</consumerSecret>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataNodeMatches(local, changedKey) {
+		t.Fatal("an unrelated Auth Provider change must still require deployment")
+	}
+	emptySecret, err := parseMetadataXML([]byte(metadataXML("AuthProvider", "<consumerKey>box-client</consumerKey><consumerSecret></consumerSecret>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataNodeMatches(emptySecret, retrieved) {
+		t.Fatal("a placeholder must not prove that an empty package secret was configured")
+	}
+}
+
+func TestMetadataNodeMatchesScratchNetworkSenderAddress(t *testing.T) {
+	local, err := parseMetadataXML([]byte(metadataXML("Network", "<newSenderAddress>noreply@example.com</newSenderAddress><status>Live</status>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrieved, err := parseMetadataXML([]byte(metadataXML("Network", "<newSenderAddress>noreply@example.com.invalid</newSenderAddress><status>Live</status>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !metadataNodeMatches(local, retrieved) {
+		t.Fatal("a scratch org's inert sender suffix should preserve the declared Network address")
+	}
+
+	changedAddress, err := parseMetadataXML([]byte(metadataXML("Network", "<newSenderAddress>different@example.com.invalid</newSenderAddress><status>Live</status>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataNodeMatches(local, changedAddress) {
+		t.Fatal("a different Network sender address must still require deployment")
+	}
+	changedStatus, err := parseMetadataXML([]byte(metadataXML("Network", "<newSenderAddress>noreply@example.com.invalid</newSenderAddress><status>DownForMaintenance</status>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataNodeMatches(local, changedStatus) {
+		t.Fatal("an unrelated Network change must still require deployment")
+	}
+}
+
+func TestMetadataNodeDoesNotApplyServerOwnedValuesToOtherTypes(t *testing.T) {
+	local, err := parseMetadataXML([]byte(metadataXML("NamedCredential", "<consumerSecret>set-in-setup</consumerSecret><newSenderAddress>noreply@example.com</newSenderAddress>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrieved, err := parseMetadataXML([]byte(metadataXML("NamedCredential", "<consumerSecret>Placeholder_Value</consumerSecret><newSenderAddress>noreply@example.com.invalid</newSenderAddress>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataNodeMatches(local, retrieved) {
+		t.Fatal("server-owned comparison rules must remain scoped to their metadata types")
+	}
+}
+
 func metadataXML(root, inner string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>` + "\n<" + root + ` xmlns="http://soap.sforce.com/2006/04/metadata">` + inner + "</" + root + ">"
 }
