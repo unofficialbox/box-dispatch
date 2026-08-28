@@ -25,7 +25,7 @@ func TestVerifyBoxConnectionChecksActingUser(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer token-value" {
 				t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
 			}
-			_, _ = w.Write([]byte(`{"id":"12345","login":"box-user@example.com","enterprise":{"id":"98765"}}`))
+			_, _ = w.Write([]byte(`{"id":"12345","login":"box-user@example.com","hostname":"https://acme.app.box.com/","enterprise":{"id":"98765"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -44,7 +44,21 @@ func TestVerifyBoxConnectionChecksActingUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verification.Identity != "box-user@example.com" || verification.Account != "12345" || verification.Enterprise != "98765" || verification.AuthType != "CCG" {
+	if verification.Identity != "box-user@example.com" || verification.Account != "12345" || verification.Enterprise != "98765" || verification.Host != "https://acme.app.box.com/" || verification.AuthType != "CCG" {
 		t.Fatalf("verification = %#v", verification)
+	}
+}
+
+func TestSafeConnectionHostnameOnlyReturnsHTTPSHost(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://Acme.App.Box.com/folder/123?token=secret": "acme.app.box.com",
+		"https://example.my.salesforce.com/services/data":  "example.my.salesforce.com",
+		"http://example.my.salesforce.com/":                "",
+		"https://user:secret@example.com/":                 "",
+		"not a URL":                                        "",
+	} {
+		if got := safeConnectionHostname(input); got != want {
+			t.Fatalf("safeConnectionHostname(%q) = %q, want %q", input, got, want)
+		}
 	}
 }

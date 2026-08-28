@@ -44,11 +44,11 @@ func TestAWSIdentityFromARN(t *testing.T) {
 
 func TestBoxUserDiscoveryMapsFields(t *testing.T) {
 	var user boxUser
-	if err := json.Unmarshal([]byte(`{"id":"385982796","login":"kadams@boxdemo.com","enterprise":{"id":"5105484"}}`), &user); err != nil {
+	if err := json.Unmarshal([]byte(`{"id":"385982796","login":"kadams@boxdemo.com","hostname":"https://boxdemo.app.box.com/","enterprise":{"id":"5105484"}}`), &user); err != nil {
 		t.Fatal(err)
 	}
 	d := user.discovery()
-	if d.Identity != "kadams@boxdemo.com" || d.Account != "385982796" || d.Enterprise != "5105484" {
+	if d.Identity != "kadams@boxdemo.com" || d.Account != "385982796" || d.Enterprise != "5105484" || d.Host != "https://boxdemo.app.box.com/" {
 		t.Fatalf("unexpected discovery: %+v", d)
 	}
 }

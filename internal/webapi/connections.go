@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type connectionSaver func(config.ConnectionSettings) error
 type salesforceTargetStore func() ([]salesforceorg.Target, error)
 type boxConnectionCheck func(context.Context, config.ConnectionSettings) (config.VerifiedConnection, error)
 
-var boxCurrentUserURL = "https://api.box.com/2.0/users/me?fields=id,login,name,enterprise"
+var boxCurrentUserURL = "https://api.box.com/2.0/users/me?fields=id,login,name,enterprise,hostname"
 
 type salesforceConnectionOption struct {
 	ID        string `json:"id,omitempty"`
@@ -31,6 +32,7 @@ type salesforceConnectionOption struct {
 	DevHub    bool   `json:"devHub,omitempty"`
 	Username  string `json:"username,omitempty"`
 	OrgID     string `json:"orgId,omitempty"`
+	Domain    string `json:"domain,omitempty"`
 }
 
 type salesforceConnectionSelection struct {
@@ -94,6 +96,7 @@ type boxConnectionOption struct {
 	SubjectType   string `json:"subjectType,omitempty"`
 	ClientIDHint  string `json:"clientIdHint,omitempty"`
 	SubjectIDHint string `json:"subjectIdHint,omitempty"`
+	Domain        string `json:"domain,omitempty"`
 }
 
 type boxConnectionSelection struct {
@@ -109,7 +112,7 @@ func presentBoxConnectionOptions(settings config.ConnectionSettings) []boxConnec
 			ID: app.ID, Alias: app.Alias, Status: connectionReadiness(app.VerifiedAt != ""),
 			Selected: app.ID == settings.BoxSelectedConnectionID, Identity: app.Identity,
 			SubjectType: app.SubjectType, ClientIDHint: identifierHint(app.ClientID),
-			SubjectIDHint: identifierHint(app.SubjectID),
+			SubjectIDHint: identifierHint(app.SubjectID), Domain: safeConnectionHostname(app.Hostname),
 		})
 	}
 	return options
@@ -156,6 +159,7 @@ func verifyBoxConnection(ctx context.Context, settings config.ConnectionSettings
 	var user struct {
 		ID         string `json:"id"`
 		Login      string `json:"login"`
+		Hostname   string `json:"hostname"`
 		Enterprise struct {
 			ID string `json:"id"`
 		} `json:"enterprise"`
@@ -172,6 +176,7 @@ func verifyBoxConnection(ctx context.Context, settings config.ConnectionSettings
 		Identity:     user.Login,
 		Account:      user.ID,
 		Enterprise:   user.Enterprise.ID,
+		Host:         user.Hostname,
 		AuthType:     authType,
 		RefreshToken: refreshToken,
 	}, nil
@@ -285,6 +290,7 @@ func presentSalesforceOrgOptions(settings config.ConnectionSettings) []salesforc
 		options = append(options, salesforceConnectionOption{
 			ID: org.ID, Alias: org.Alias, Kind: kind, Status: presentSalesforceOrgStatus(org.Status, selected, verified),
 			ExpiresAt: org.ExpirationDate, Selected: selected, DevHub: org.DevHub, Username: org.Username, OrgID: org.OrgID,
+			Domain: safeConnectionHostname(org.InstanceURL),
 		})
 	}
 	return options
@@ -302,7 +308,15 @@ func presentSalesforceRESTOption(settings config.ConnectionSettings) []salesforc
 	if strings.EqualFold(settings.SalesforceOrgType, "scratch") {
 		kind = "Scratch org"
 	}
-	return []salesforceConnectionOption{{Alias: alias, Kind: kind, Status: settings.SalesforceOrgStatus, ExpiresAt: settings.SalesforceExpirationDate, Selected: true}}
+	return []salesforceConnectionOption{{Alias: alias, Kind: kind, Status: settings.SalesforceOrgStatus, ExpiresAt: settings.SalesforceExpirationDate, Selected: true, Domain: safeConnectionHostname(settings.SalesforceInstanceURL)}}
+}
+
+func safeConnectionHostname(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 func saveSalesforceSelection(settings config.ConnectionSettings, target salesforceorg.Target) config.ConnectionSettings {

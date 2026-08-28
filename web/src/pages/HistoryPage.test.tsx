@@ -58,14 +58,18 @@ describe('HistoryPage', () => {
       startedAt: '2026-08-02T11:58:00Z',
       duration: '2m0s',
       runId: 'web-run-1',
+      changesRecorded: true,
+      changeCount: 2,
       providers: [
-        { name: 'box', status: 'present', deployedCount: 3, presentCount: 8, remainingCount: 0, manualItemCount: 1 },
-        { name: 'salesforce', status: 'present', deployedCount: 12, presentCount: 24, remainingCount: 0, manualItemCount: 0 },
+        { name: 'box', status: 'present', deployedCount: 1, presentCount: 8, remainingCount: 0, manualItemCount: 1, deployedComponents: ['Metadata Template:Contract'], environmentId: '5105484', launchUrl: 'https://app.box.com/' },
+        { name: 'salesforce', status: 'present', deployedCount: 1, presentCount: 24, remainingCount: 0, manualItemCount: 0, deployedComponents: ['UIBundle:clmreactapp'], environmentId: '00D123', launchUrl: '/api/connections/salesforce/open' },
       ],
     }
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(detail), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const onCloseDeployment = vi.fn()
-    const { container } = render(<HistoryPage deployments={[deployment(1)]} selectedDeploymentID="deployment-1" onCloseDeployment={onCloseDeployment}/>)
+    const onOpenDestination = vi.fn()
+    const onViewChanges = vi.fn()
+    const { container } = render(<HistoryPage deployments={[deployment(1)]} selectedDeploymentID="deployment-1" onCloseDeployment={onCloseDeployment} onOpenDestination={onOpenDestination} onViewChanges={onViewChanges}/>)
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Deployment 1' })).toBeTruthy())
     expect(screen.getByRole('heading', { name: 'Provider summary' })).toBeTruthy()
@@ -73,8 +77,29 @@ describe('HistoryPage', () => {
     expect(screen.getByText('2m0s')).toBeTruthy()
     expect(container.querySelectorAll('box-badge[label="Complete"]')).toHaveLength(3)
     expect(screen.getByText('24')).toBeTruthy()
+    expect(screen.getByRole('table', { name: 'Components deployed by this deployment' })).toBeTruthy()
+    expect(screen.getByText('Metadata Template:Contract')).toBeTruthy()
+    expect(screen.getByText('UIBundle:clmreactapp')).toBeTruthy()
+    const providerCards = container.querySelectorAll('.history-provider-summary > ul > li')
+    expect(providerCards[0].querySelector('header box-button[label="Open Box"]')).toBeTruthy()
+    expect(providerCards[1].querySelector('header box-button[label="Open Salesforce"]')).toBeTruthy()
+    expect(container.querySelector('box-button[label*="5105484"], box-button[label*="00D123"]')).toBeNull()
+    fireEvent.click(container.querySelector('box-button[label="Open Box"]')!)
+    expect(onOpenDestination).toHaveBeenCalledWith('https://app.box.com/', 'Open Box')
+    fireEvent.click(container.querySelector('box-button[label="Open Salesforce"]')!)
+    expect(onOpenDestination).toHaveBeenCalledWith('/api/connections/salesforce/open', 'Open Salesforce')
+    fireEvent.click(container.querySelector('box-button[label="Review changes"]')!)
+    expect(onViewChanges).toHaveBeenCalledWith('deployment-1')
     fireEvent.click(screen.getByRole('button', { name: 'Back to deployment history' }))
     expect(onCloseDeployment).toHaveBeenCalledOnce()
+  })
+
+  it('explains when a legacy audit has no recorded change preview', async () => {
+    const detail: DeploymentDetail = { ...deployment(1), startedAt: '2026-08-02T11:58:00Z', duration: '2m0s', changesRecorded: false, changeCount: 0, providers: [] }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(detail), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    render(<HistoryPage deployments={[deployment(1)]} selectedDeploymentID="deployment-1"/>)
+
+    await waitFor(() => expect(screen.getByText('Change preview not recorded')).toBeTruthy())
   })
 
   it('selects a deployment from the history table', () => {

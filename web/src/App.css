@@ -555,19 +555,35 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .history-back-button:focus-visible { border-radius: 3px; outline: 3px solid rgb(18 105 223 / 22%); outline-offset: 3px; }
 .history-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .history-detail-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, .78fr); gap: 32px; padding-top: 28px; }
+.history-provider-summary { min-width: 0; }
 .history-provider-summary > header { padding-bottom: 14px; }
 .history-provider-summary > header h2 { color: var(--dispatch-navy); font-size: 20px; }
 .history-provider-summary > header p { margin: 5px 0 0; color: var(--dispatch-muted); font-size: 13px; }
+.history-environment-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.history-change-unavailable { align-items: center; color: var(--dispatch-muted); display: inline-flex; font-size: 12px; font-weight: 700; min-height: 32px; }
 .history-provider-summary > ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .history-provider-summary > ul > li { padding: 18px; border: 1px solid var(--dispatch-rule); border-radius: 9px; background: #fff; }
 .history-provider-summary li > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .history-provider-summary li > header strong { color: var(--dispatch-navy); font-size: 16px; }
+.history-provider-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .history-provider-summary dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 16px 0 0; border-top: 1px solid var(--dispatch-rule-soft); }
 .history-provider-summary dl > div { padding: 14px 12px 0; border-right: 1px solid var(--dispatch-rule-soft); }
 .history-provider-summary dl > div:first-child { padding-left: 0; }
 .history-provider-summary dl > div:last-child { border-right: 0; }
 .history-provider-summary dt { color: var(--dispatch-muted); font-size: 11px; font-weight: 700; }
 .history-provider-summary dd { margin: 5px 0 0; color: var(--dispatch-navy); font-size: 20px; font-weight: 750; }
+.history-components { margin-top: 28px; }
+.history-components > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 14px; }
+.history-components > header h2 { color: var(--dispatch-navy); font-size: 20px; }
+.history-components > header p { margin: 5px 0 0; color: var(--dispatch-muted); font-size: 13px; }
+.history-components > header > span { flex: none; color: var(--dispatch-muted); font-size: 12px; }
+.deployment-component-table { width: 100%; overflow-x: auto; border: 1px solid var(--dispatch-rule); border-radius: 8px; }
+.deployment-component-table table { width: 100%; min-width: 620px; border-collapse: collapse; color: #293b55; font-size: 12px; text-align: left; }
+.deployment-component-table thead { background: #f8fafc; }
+.deployment-component-table th, .deployment-component-table td { padding: 11px 14px; border-bottom: 1px solid var(--dispatch-rule-soft); vertical-align: middle; }
+.deployment-component-table thead th { color: #667085; font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.deployment-component-table tbody th { color: #183760; font-weight: 700; }
+.deployment-component-table tbody tr:last-child > * { border-bottom: 0; }
 .history-detail-state { max-width: 720px; padding: 34px; border: 1px solid var(--dispatch-rule); border-radius: 10px; background: #f8fafc; }
 .history-detail-state h1 { color: var(--dispatch-navy); font-size: 26px; }
 .history-detail-state p { margin: 8px 0 0; color: var(--dispatch-muted); }
@@ -639,6 +655,7 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
   .history-clear-filters { width: 100%; }
   .history-detail-heading { display: grid; }
   .history-detail-layout { grid-template-columns: 1fr; }
+  .history-environment-actions { align-items: stretch; flex-direction: column; }
   .history-provider-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .history-provider-summary dl > div { padding: 12px 0; border-right: 0; border-bottom: 1px solid var(--dispatch-rule-soft); }
   .history-provider-summary dl > div:nth-last-child(-n+2) { border-bottom: 0; }

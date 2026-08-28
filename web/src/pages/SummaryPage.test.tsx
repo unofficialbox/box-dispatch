@@ -9,8 +9,9 @@ describe('SummaryPage', () => {
     const plan: DeploymentPlan = { exists: true, name: 'Northstar CLM', templateId: 'clm', template: 'CLM deployment', repository: 'example/repo', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }, { id: 'salesforce', name: 'Salesforce', configured: true, verified: true, ready: true }] }
     const run: DispatchRun = { id: 'deploy-1', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present' }, { name: 'salesforce', status: 'present' }], resources: [{ provider: 'salesforce', component: 'Salesforce Experience', kind: 'experience_site', name: 'CLM Experience', id: '0DB1', url: 'https://example.my.site.com/clm' }] }
     const onOpenProvider = vi.fn()
+    const onViewChanges = vi.fn()
     const onOverview = vi.fn()
-    render(<SummaryPage plan={plan} connections={[{ name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/' }, { name: 'Salesforce', configured: true, verified: true, launchUrl: '/api/connections/salesforce/open' }]} run={run} onOpenProvider={onOpenProvider} onOverview={onOverview} />)
+    const { container } = render(<SummaryPage plan={plan} connections={[{ name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/' }, { name: 'Salesforce', configured: true, verified: true, launchUrl: '/api/connections/salesforce/open' }]} run={run} onOpenProvider={onOpenProvider} onViewChanges={onViewChanges} onOverview={onOverview} />)
 
     expect(screen.getByText('Northstar CLM is ready')).toBeTruthy()
     const box = screen.getByText('Box workspace').closest('li')?.querySelector('box-button[label="Open"]')
@@ -27,5 +28,7 @@ describe('SummaryPage', () => {
     expect(experienceSite.getAttribute('href')).toBe('/api/connections/salesforce/open?destination=experience-site&site=0DB1')
     fireEvent.click(box!)
     expect(onOpenProvider).toHaveBeenCalledWith('box')
+    fireEvent.click(container.querySelector('box-button[label="Review changes"]')!)
+    expect(onViewChanges).toHaveBeenCalledWith('deploy-1')
   })
 })

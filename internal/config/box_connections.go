@@ -23,6 +23,7 @@ type BoxAppConnection struct {
 	Identity     string `json:"identity,omitempty"`
 	Account      string `json:"account,omitempty"`
 	Enterprise   string `json:"enterprise,omitempty"`
+	Hostname     string `json:"hostname,omitempty"`
 }
 
 func (c ConnectionSettings) HydrateBoxConnections() ConnectionSettings {
@@ -48,6 +49,7 @@ func (c ConnectionSettings) HydrateBoxConnections() ConnectionSettings {
 		app.Identity = snapshot.Identity
 		app.Account = snapshot.Account
 		app.Enterprise = snapshot.Enterprise
+		app.Hostname = snapshot.Host
 	}
 	c.BoxConnections = []BoxAppConnection{app}
 	c.BoxSelectedConnectionID = app.ID
@@ -65,6 +67,7 @@ func (c ConnectionSettings) UpsertBoxConnection(app BoxAppConnection, selectApp 
 	app.SubjectID = strings.TrimSpace(app.SubjectID)
 	app.Identity = strings.TrimSpace(app.Identity)
 	app.Account = strings.TrimSpace(app.Account)
+	app.Hostname = strings.TrimSpace(app.Hostname)
 	if app.Alias == "" {
 		app.Alias = firstOrgValue(app.Identity, "Box")
 	}
@@ -170,6 +173,7 @@ func (c ConnectionSettings) MarkBoxVerified(verification VerifiedConnection) Con
 		app.Identity = verification.Identity
 		app.Account = verification.Account
 		app.Enterprise = verification.Enterprise
+		app.Hostname = verification.Host
 		if verification.RefreshToken != "" {
 			app.RefreshToken = verification.RefreshToken
 		}
@@ -227,7 +231,7 @@ func (c ConnectionSettings) syncBoxVerification(app BoxAppConnection) Connection
 	}
 	c.VerifiedConnections["box"] = VerifiedConnection{
 		VerifiedAt: app.VerifiedAt, Selection: app.Alias, Identity: app.Identity,
-		Account: app.Account, Enterprise: app.Enterprise, AuthType: authType,
+		Account: app.Account, Enterprise: app.Enterprise, Host: app.Hostname, AuthType: authType,
 	}
 	return c
 }
@@ -264,6 +268,10 @@ func mergeBoxConnection(existing, next BoxAppConnection) BoxAppConnection {
 		next.Identity = existing.Identity
 		next.Account = existing.Account
 		next.Enterprise = existing.Enterprise
+		next.Hostname = existing.Hostname
+	}
+	if next.Hostname == "" {
+		next.Hostname = existing.Hostname
 	}
 	return next
 }

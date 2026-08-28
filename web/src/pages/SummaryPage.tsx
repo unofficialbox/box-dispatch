@@ -3,7 +3,7 @@ import { DetailList, DetailsRail } from '../components/DetailsRail'
 
 type Destination = { id: string; title: string; description: string; href?: string; providerID?: string }
 
-export function SummaryPage({ plan, connections, run, onOpenProvider, onOverview }: { plan: DeploymentPlan; connections: ConnectionSummary[]; run: DispatchRun; onOpenProvider: (providerID: string) => void; onOverview: () => void }) {
+export function SummaryPage({ plan, connections, run, onOpenProvider, onViewChanges, onOverview }: { plan: DeploymentPlan; connections: ConnectionSummary[]; run: DispatchRun; onOpenProvider: (providerID: string) => void; onViewChanges: (runID: string) => void; onOverview: () => void }) {
   const boxReady = plan.components.some((component) => component.id === 'box') && connections.some((connection) => connection.name === 'Box' && connection.launchUrl)
   const salesforceReady = plan.components.some((component) => component.id === 'salesforce') && connections.some((connection) => connection.name === 'Salesforce' && connection.launchUrl)
   const experienceSite = run.resources?.find((resource) => resource.provider === 'salesforce' && resource.kind === 'experience_site' && resource.url)
@@ -28,7 +28,7 @@ export function SummaryPage({ plan, connections, run, onOpenProvider, onOverview
           {destination.href ? <a className="summary-destination-link" href={destination.href} target="_blank" rel="noreferrer" aria-label={`Open ${destination.title}`}>Open</a> : <box-button label="Open" tone="primary" onClick={() => onOpenProvider(destination.providerID!)}></box-button>}
         </li>)}</ul>
       </section>
-      <div className="summary-actions"><box-button label="Return to overview" onClick={onOverview}></box-button></div>
+      <div className="summary-actions"><box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button><box-button label="Return to overview" onClick={onOverview}></box-button></div>
     </section>
     <DetailsRail title="Deployment summary" description="A final record of the completed run."><DetailList rows={[["Deployment", plan.name], ["Status", "Deployment complete"], ["Run ID", run.id], ["Systems", plan.components.map((component) => component.name).join(', ')], ["Strategy", plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
   </section>

@@ -31,7 +31,7 @@ describe('connection drawers', () => {
         name: 'Salesforce', configured: true, verified: true, restConfigured: true, devHubConfigured: true,
         launchUrl: 'https://example.my.salesforce.com/',
         orgs: [
-          { id: 'org-1', alias: 'Test1', kind: 'Scratch org', status: 'Ready', selected: true, username: 'user@example.com', orgId: '00D123' },
+          { id: 'org-1', alias: 'Test1', kind: 'Scratch org', status: 'Ready', selected: true, username: 'user@example.com', orgId: '00D123', domain: 'example.scratch.my.salesforce.com' },
           { id: 'org-2', alias: 'Production', kind: 'Org', status: 'Ready', selected: false, username: 'admin@example.com', orgId: '00D456' },
         ],
       }}
@@ -44,6 +44,7 @@ describe('connection drawers', () => {
     expect(container.querySelector('box-button[label="Verify"]')).toBeNull()
     expect(container.querySelector('.selected-environment-details')?.textContent).toContain('00D123')
     expect(container.querySelector('.selected-environment-details')?.textContent).toContain('Scratch org')
+    expect(container.querySelector('.selected-environment-details')?.textContent).toContain('example.scratch.my.salesforce.com')
     expect(container.querySelector('box-select[label="Salesforce environment"]')).toBeNull()
     expect(container.querySelector('box-text-field[label="Scratch org alias"]')).toBeNull()
 
@@ -105,7 +106,7 @@ describe('connection drawers', () => {
         name: 'Box', configured: true, verified: true, oauthConfigured: true, authType: 'Box OAuth',
         launchUrl: 'https://app.box.com/',
         connections: [
-          { id: 'box-1', alias: 'Production', status: 'Ready', selected: true, identity: 'owner@example.com', subjectType: 'User' },
+          { id: 'box-1', alias: 'Production', status: 'Ready', selected: true, identity: 'owner@example.com', subjectType: 'User', domain: 'acme.app.box.com' },
           { id: 'box-2', alias: 'Sandbox', status: 'Not ready', selected: false, identity: 'demo@example.com', subjectType: 'User' },
         ],
       }}
@@ -117,6 +118,7 @@ describe('connection drawers', () => {
     expect(container.querySelector('box-select[label="Box connection"]')).toBeNull()
     expect(container.querySelector('box-button[label="Check availability"]')).toBeNull()
     expect(container.querySelector('.selected-environment-details')?.textContent).toContain('Box OAuth')
+    expect(container.querySelector('.selected-environment-details')?.textContent).toContain('acme.app.box.com')
     expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Production')
     expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Sandbox')
     const sandbox = Array.from(container.querySelectorAll<HTMLButtonElement>('.connection-option-main')).find((button) => button.textContent?.includes('Sandbox'))

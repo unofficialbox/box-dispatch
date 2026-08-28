@@ -6,8 +6,8 @@ import type { ConnectionSummary, DeploymentDefaults } from '../types'
 
 const defaults: DeploymentDefaults = { templateId: 'clm', template: 'Contract Lifecycle Management', repository: 'https://example.com/clm', strategy: 'reuse', components: ['box', 'salesforce'] }
 const connections: ConnectionSummary[] = [
-  { name: 'Box', configured: true, verified: true, connections: [{ id: 'box-1', alias: 'Production Box', status: 'Ready', selected: true, identity: 'owner@example.com' }, { id: 'box-2', alias: 'Sandbox Box', status: 'Not ready', selected: false }] },
-  { name: 'Salesforce', configured: true, verified: true, orgs: [{ id: 'sf-1', alias: 'CLM Scratch', kind: 'Scratch org', status: 'Ready', selected: true, username: 'test@example.com', orgId: '00D000000000001' }, { id: 'sf-2', alias: 'Production Dev Hub', kind: 'Dev Hub', status: 'Ready', selected: false, devHub: true }] },
+  { name: 'Box', configured: true, verified: true, connections: [{ id: 'box-1', alias: 'Production Box', status: 'Ready', selected: true, identity: 'owner@example.com', domain: 'acme.app.box.com' }, { id: 'box-2', alias: 'Sandbox Box', status: 'Not ready', selected: false }] },
+  { name: 'Salesforce', configured: true, verified: true, orgs: [{ id: 'sf-1', alias: 'CLM Scratch', kind: 'Scratch org', status: 'Ready', selected: true, username: 'test@example.com', orgId: '00D000000000001', domain: 'example.scratch.my.salesforce.com' }, { id: 'sf-2', alias: 'Production Dev Hub', kind: 'Dev Hub', status: 'Ready', selected: false, devHub: true }] },
 ]
 
 const connectionActions = {
@@ -24,6 +24,8 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Sandbox Box')).toBeTruthy()
     expect(screen.getByText('CLM Scratch')).toBeTruthy()
     expect(screen.getByText('Production Dev Hub')).toBeTruthy()
+    expect(screen.getByText('acme.app.box.com')).toBeTruthy()
+    expect(screen.getByText('example.scratch.my.salesforce.com')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Defaults' })).toBeTruthy()
     expect(screen.getByText('Starting configuration for new deployments. Each deployment can override these choices.')).toBeTruthy()
     expect(view.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ }).getAttribute('aria-checked')).toBe('true')

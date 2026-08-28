@@ -108,12 +108,12 @@ func TestHydrateBoxConnectionsPromotesLegacyCCG(t *testing.T) {
 	settings := ConnectionSettings{
 		BoxCCGAlias: "Legal Box", BoxCCGClientID: "client-id", BoxCCGClientSecret: "secret",
 		BoxCCGSubjectType: "user", BoxCCGSubjectID: "12345",
-		VerifiedConnections: map[string]VerifiedConnection{"box": {VerifiedAt: "2026-08-22T20:00:00Z", Identity: "box-user"}},
+		VerifiedConnections: map[string]VerifiedConnection{"box": {VerifiedAt: "2026-08-22T20:00:00Z", Identity: "box-user", Host: "https://acme.app.box.com/"}},
 	}.HydrateBoxConnections()
 	if len(settings.BoxConnections) != 1 || settings.BoxSelectedConnectionID != "legacy-box" {
 		t.Fatalf("hydrated = %#v", settings)
 	}
-	if settings.BoxConnections[0].VerifiedAt == "" || settings.BoxCCGClientSecret != "secret" {
+	if settings.BoxConnections[0].VerifiedAt == "" || settings.BoxConnections[0].Hostname != "https://acme.app.box.com/" || settings.BoxCCGClientSecret != "secret" {
 		t.Fatalf("legacy snapshot was dropped: %#v", settings.BoxConnections[0])
 	}
 }
