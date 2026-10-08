@@ -193,6 +193,11 @@ Status: **Complete within the current component contracts**
 Keep the drawer header-close CSS bridge until issue #355 is released; do not replace
 it with shadow-DOM queries.
 
+The retained confirmation composition uses a native modal `<dialog>` for focus
+containment, background inertness, Escape cancellation, and focus restoration while
+Dispatch continues to own its disabled confirmation action. These keyboard behaviors
+are covered by the mock end-to-end suite.
+
 Exit gate: repeated fact-list CSS and replaceable custom radio-card behavior are
 removed. The remaining dialog and rich solution-card implementations are explicit
 exceptions pending issues #357 and #358.

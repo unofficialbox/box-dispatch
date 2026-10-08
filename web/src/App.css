@@ -330,7 +330,9 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .scratch-job span, .scratch-job small { display: block; }
 .scratch-job small { color: #607492; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-.confirmation-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgb(9 21 43 / 54%); backdrop-filter: blur(3px); }
+.confirmation-backdrop { position: fixed; inset: 0; z-index: 1000; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; box-sizing: border-box; place-items: center; padding: 24px; color: inherit; background: rgb(9 21 43 / 54%); backdrop-filter: blur(3px); }
+.confirmation-backdrop[open] { display: grid; }
+.confirmation-backdrop::backdrop { background: transparent; }
 .deployment-confirmation { width: min(520px, 100%); overflow: hidden; border: 1px solid #d3deec; border-radius: 18px; background: #fff; box-shadow: 0 24px 80px rgb(4 20 50 / 28%); }
 .deployment-confirmation > header { display: flex; align-items: center; gap: 14px; padding: 24px 26px 14px; }
 .confirmation-mark { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #e8f7ef; color: #16874d; font-size: 18px; font-weight: 850; }
