@@ -89,7 +89,7 @@ function App() {
   const [toast, setToast] = useState<AppToastNotice | null>(null)
   const showToast = (message: string, tone = 'success') => setToast({ id: Date.now(), message, tone })
   const toastNotice = toast ? <AppToast key={toast.id} notice={toast} onDismiss={() => setToast(null)} /> : null
-  const activeRunID = run && (run.status === 'queued' || run.status === 'running') ? run.id : null
+  const activeRunID = run?.id ?? null
   const packagePreparing = scratchJob?.status === 'preparing' && (scratchJob.packageStatus === 'checking' || scratchJob.packageStatus === 'installing')
 
   const navigateTo = (view: AppView) => {

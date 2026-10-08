@@ -4,6 +4,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { Sidebar } from './Sidebar'
 
 describe('Sidebar', () => {
+  it('exposes only the current route and updates it after navigation', () => {
+    const callbacks = { onOverview: vi.fn(), onNewDeployment: vi.fn(), onHistory: vi.fn(), onSettings: vi.fn() }
+    const { container, rerender } = render(<Sidebar activeView="overview" {...callbacks}/>)
+    for (const [activeView, name] of [['overview', 'Overview'], ['workflow', 'Deployments'], ['history', 'Deployment history'], ['settings', 'Settings']] as const) {
+      rerender(<Sidebar activeView={activeView} {...callbacks}/>)
+      expect(container.querySelectorAll('[aria-current]')).toHaveLength(1)
+      expect(within(container).getByRole('button', { name }).getAttribute('aria-current')).toBe('page')
+    }
+  })
+
   it('uses the clock-2 icon for deployment history', () => {
     const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
 

@@ -3,19 +3,22 @@ import { expect, test } from '@playwright/test'
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
   const sidebar = page.locator('box-nav-sidebar')
   await expect(sidebar).toHaveAttribute('collapsed', '')
   const collapsedWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Expand navigation' }).click()
   await expect(sidebar).not.toHaveAttribute('collapsed', '')
-  expect(await sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(collapsedWidth)
+  await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(collapsedWidth)
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' }).click()
   await expect(sidebar).toHaveAttribute('collapsed', '')
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('button', { name: 'Overview', exact: true })).not.toHaveAttribute('aria-current')
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
   await page.goBack()
@@ -116,7 +119,10 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Validation', exact: true })).toBeVisible()
   await expect(page.getByText('All selected systems finished successfully.')).toBeVisible()
-  expect(await page.getByText('Authentication verified').count()).toBeGreaterThanOrEqual(2)
+  // Completed runs must replay their activity too, not only runs still in flight.
+  await page.reload()
+  await expect(page.getByText('All selected systems finished successfully.')).toBeVisible()
+  await expect.poll(() => page.getByText('Authentication verified').count()).toBeGreaterThanOrEqual(2)
   const liveActivity = page.locator('box-timeline[aria-label="Live validation log"]')
   await expect(liveActivity).toBeVisible()
   await liveActivity.focus()
@@ -178,6 +184,21 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await page.getByRole('button', { name: 'Continue to deployment' }).click()
   await expect(page.getByRole('heading', { name: 'Start deployment?' })).toBeVisible()
+  const confirmation = page.getByRole('dialog', { name: 'Start deployment?' })
+  await expect(confirmation).toBeVisible()
+  expect(await confirmation.evaluate((dialog) => dialog.matches(':modal'))).toBe(true)
+  await page.getByRole('button', { name: 'Overview', exact: true, includeHidden: true }).evaluate((button) => button.focus())
+  expect(await confirmation.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true)
+  for (let index = 0; index < 4; index++) {
+    await page.keyboard.press('Tab')
+    // Native modal navigation may visit browser chrome (reported as body),
+    // but must never focus the inert workspace controls.
+    expect(await confirmation.evaluate((dialog) => document.activeElement === document.body || dialog.contains(document.activeElement))).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(confirmation).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Continue to deployment' })).toBeFocused()
+  await page.getByRole('button', { name: 'Continue to deployment' }).click()
   await page.getByRole('button', { name: 'Start deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout is ready' })).toBeVisible()
