@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import '@unofficialbox/box-open-elements/metric-card'
 import type { ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun } from '../types'
 import { DeploymentHistoryTable } from '../components/DeploymentHistoryTable'
 import { EmptyProviderConnection, ProviderConnectionPanel, ProviderConnectionRow } from '../components/ProviderConnectionPanel'
@@ -15,7 +16,6 @@ type OverviewPageProps = {
   onSalesforceConnection: () => void
   onOpenProvider: (providerID: string) => void
   onViewHistory: () => void
-  onOpenDeployment?: (deploymentID: string) => void
 }
 
 const isCurrentWeek = (value: string) => {
@@ -83,12 +83,12 @@ function CurrentDeployment({ plan, connections, run, deploymentComplete, onConti
   return <box-card className="overview-current"><section><header><div><p className="overview-eyebrow">{status}</p><h2>{plan.exists ? plan.name || plan.template || 'Deployment plan' : 'Choose a solution'}</h2></div>{running ? <box-badge label="Live" tone="info"></box-badge> : null}</header><p className="overview-summary">{plan.exists ? `${displayStrategy(plan.strategy)} · ${configured} of ${plan.components.length} selected system${plan.components.length === 1 ? '' : 's'} ready` : 'Choose a supported solution and the systems it should configure.'}</p>{plan.components.length > 0 ? <box-progress-bar label="Connection readiness" value={verified} max={plan.components.length}></box-progress-bar> : null}{plan.exists ? <box-button label={running ? `View ${action.toLowerCase()}` : allReady ? 'Continue deployment' : 'Connect systems'} tone="primary" onClick={onContinue}></box-button> : null}</section></box-card>
 }
 
-function DeploymentHistory({ deployments, onOpenDeployment = () => undefined }: Pick<OverviewPageProps, 'deployments' | 'onOpenDeployment'>) {
+function DeploymentHistory({ deployments }: Pick<OverviewPageProps, 'deployments'>) {
   const recent = deployments.slice(0, 5)
-  return <box-card className="overview-history"><section><header><div><p className="overview-eyebrow">Audit records</p><h2>Recent deployments</h2></div><span>{deployments.length} recorded</span></header><div className="overview-history-table"><DeploymentHistoryTable deployments={recent} caption="Recent deployments" onSelect={onOpenDeployment}/></div></section></box-card>
+  return <box-card className="overview-history"><section><header><div><p className="overview-eyebrow">Audit records</p><h2>Recent deployments</h2></div><span>{deployments.length} recorded</span></header><div className="overview-history-table"><DeploymentHistoryTable deployments={recent} caption="Recent deployments"/></div></section></box-card>
 }
 
-export function OverviewPage({ plan, connections, deployments, run, onNewDeployment, onContinue, onBoxConnection, onSalesforceConnection, onOpenProvider, onViewHistory, onOpenDeployment = () => undefined }: OverviewPageProps) {
+export function OverviewPage({ plan, connections, deployments, run, onNewDeployment, onContinue, onBoxConnection, onSalesforceConnection, onOpenProvider, onViewHistory }: OverviewPageProps) {
   const selectedSystems = plan.components.length
   const verifiedSystems = plan.components.filter((component) => connectionFor(component.name, connections)?.verified).length
   const completedThisWeek = deployments.filter((deployment) => isCurrentWeek(deployment.completedAt)).length
@@ -105,12 +105,12 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
       <Metric label="Latest deployment" value={latest ? 'Complete' : 'No runs'} detail={latest ? formatDeploymentDate(latest.completedAt) : 'Run a deployment to see history'}/>
     </section>
     <section className="overview-dashboard">
-      <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} deploymentComplete={deploymentComplete} onContinue={onContinue} onViewHistory={onViewHistory}/><DeploymentHistory deployments={deployments} onOpenDeployment={onOpenDeployment}/></div>
+      <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} deploymentComplete={deploymentComplete} onContinue={onContinue} onViewHistory={onViewHistory}/><DeploymentHistory deployments={deployments}/></div>
       <aside className="overview-secondary"><ConnectionHealth plan={plan} connections={connections} onBoxConnection={onBoxConnection} onSalesforceConnection={onSalesforceConnection} onOpenProvider={onOpenProvider}/></aside>
     </section>
   </section>
 }
 
 function Metric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'success' }) {
-  return <div className={`overview-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
+  return <box-metric-card className={`overview-metric ${tone}`} heading={label} value={value} message={detail}></box-metric-card>
 }

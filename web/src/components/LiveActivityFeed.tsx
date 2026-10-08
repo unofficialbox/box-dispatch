@@ -1,36 +1,38 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
+import '@unofficialbox/box-open-elements/timeline'
+import type { TimelineEvent, TimelineTone } from '@unofficialbox/box-open-elements/patterns/timeline'
 import type { RunEvent } from '../types'
 import type { ProviderProgress } from './runTimelineModel'
 import { latestActivityEvents, type FeedItem } from './liveActivityModel'
 
+type TimelineElement = HTMLElement & { events: TimelineEvent[] }
+
 export function LiveActivityFeed({ providers }: { providers: ProviderProgress[] }) {
   const events: FeedItem[] = useMemo(() => providers.flatMap((provider) => provider.updates.map((event) => ({ ...event, providerName: provider.name }))).sort((left, right) => left.sequence - right.sequence), [providers])
   const visibleEvents = useMemo(() => latestActivityEvents(events).slice(-12), [events])
+  const timelineEvents = useMemo<TimelineEvent[]>(() => visibleEvents.map((event) => ({
+    id: String(event.sequence),
+    action: event.component || event.providerName,
+    actor: { name: event.providerName },
+    summary: event.message,
+    timestamp: event.at,
+    tone: eventTone(event),
+    badge: eventLabel(event),
+  })), [visibleEvents])
   const lastEventSequence = visibleEvents.at(-1)?.sequence
-  const logRef = useRef<HTMLDivElement>(null)
+  const logRef = useRef<TimelineElement>(null)
   useLayoutEffect(() => {
     const log = logRef.current
-    if (log) log.scrollTop = log.scrollHeight
-  }, [visibleEvents.length, lastEventSequence])
+    if (log) {
+      log.events = timelineEvents
+      log.scrollTop = log.scrollHeight
+    }
+  }, [lastEventSequence, timelineEvents])
   if (events.length === 0) return null
   return <section className="live-activity-feed" aria-label="Recent validation activity" aria-live="polite">
-    <header><div><h3>Live activity</h3><p>Latest provider and component updates.</p></div></header>
-    <div className="live-activity-log" ref={logRef} tabIndex={0} aria-label="Live validation log"><ol>{visibleEvents.map((event) => <li className={eventState(event)} key={event.sequence}>
-      <span className="activity-indicator">
-        {isWorking(event) && <box-spinner aria-label="Working" label="" size="small" />}
-      </span>
-      <div><strong>{event.component || event.providerName}</strong><p>{event.message}</p></div>
-      <box-badge label={eventLabel(event)} tone={eventTone(event)} />
-    </li>)}</ol></div>
+    <box-timeline className="live-activity-log" ref={logRef} heading="Live activity" tabIndex={0} aria-label="Live validation log"></box-timeline>
   </section>
 }
-
-
-function eventState(event: RunEvent) {
-  return event.progressState === 'failed' ? 'failed' : event.progressState === 'completed' ? 'complete' : event.progressState === 'running' ? 'running' : 'activity'
-}
-
-function isWorking(event: RunEvent) { return event.progressState === 'running' || event.progressState === 'activity' }
 
 function eventLabel(event: RunEvent) {
   if (event.progressState === 'completed') return 'Complete'
@@ -39,9 +41,9 @@ function eventLabel(event: RunEvent) {
   return 'Update'
 }
 
-function eventTone(event: RunEvent) {
+function eventTone(event: RunEvent): TimelineTone {
   if (event.progressState === 'completed') return 'success'
   if (event.progressState === 'failed') return 'error'
-  if (event.progressState === 'running') return 'inprogress'
+  if (event.progressState === 'running') return 'brand'
   return 'neutral'
 }

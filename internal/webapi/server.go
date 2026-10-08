@@ -223,7 +223,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeJSON(w, http.StatusOK, []salesforceConnectionOption{})
 			return
 		}
-		writeJSON(w, http.StatusOK, presentSalesforceOptions(settings, targets))
+		writeJSON(w, http.StatusOK, presentSalesforceOptions(settings, targets, options.Now()))
 	})
 	mux.HandleFunc("PUT /api/connections/salesforce/rest", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()

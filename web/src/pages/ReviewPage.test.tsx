@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ReviewPage } from './ReviewPage'
 
@@ -26,7 +26,8 @@ describe('ReviewPage', () => {
     />)
 
     expect(container.querySelector('.review-summary')).toBeNull()
-    expect(screen.getAllByText('Box CLM')).toHaveLength(1)
-    expect(screen.getByText('CLM deployment')).toBeTruthy()
+    const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
+    expect(facts.rows).toContainEqual({ label: 'Deployment', value: 'Box CLM' })
+    expect(facts.rows).toContainEqual({ label: 'Solution', value: 'CLM deployment' })
   })
 })

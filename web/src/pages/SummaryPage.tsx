@@ -1,3 +1,6 @@
+import '@unofficialbox/box-open-elements/card'
+import '@unofficialbox/box-open-elements/link-button'
+import '@unofficialbox/box-open-elements/section'
 import type { ConnectionSummary, DeploymentPlan, DispatchRun } from '../types'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 
@@ -16,20 +19,19 @@ export function SummaryPage({ plan, connections, run, onOpenProvider, onViewChan
     ...(experienceSite?.url && experienceSite.id ? [{ id: 'experience-site', title: 'Experience Cloud site', description: 'Enter the published CLM experience with your Salesforce employee session.', href: `/api/connections/salesforce/open?destination=experience-site&site=${encodeURIComponent(experienceSite.id)}` }] : []),
   ]
   return <section className="summary-workspace" aria-labelledby="deployment-summary-title">
-    <section className="summary-surface">
+    <box-card className="summary-surface"><section>
       <div className="summary-success-mark" aria-hidden="true">✓</div>
       <p className="summary-eyebrow">Deployment complete</p>
       <h2 id="deployment-summary-title">{plan.name} is ready</h2>
       <p className="summary-lede">Every selected system finished successfully. Open a destination to review the deployed experience.</p>
-      <section className="summary-destinations" aria-labelledby="summary-destinations-title">
-        <h3 id="summary-destinations-title">Open your deployment</h3>
+      <box-section className="summary-destinations" heading="Open your deployment" description="Launch a deployed workspace or application.">
         <ul>{destinations.map((destination) => <li key={destination.id}>
           <div><strong>{destination.title}</strong><span>{destination.description}</span></div>
-          {destination.href ? <a className="summary-destination-link" href={destination.href} target="_blank" rel="noreferrer" aria-label={`Open ${destination.title}`}>Open</a> : <box-button label="Open" tone="primary" onClick={() => onOpenProvider(destination.providerID!)}></box-button>}
+          {destination.href ? <box-link-button className="summary-destination-link" href={destination.href} target="_blank" rel="noreferrer" label={`Open ${destination.title}`}></box-link-button> : <box-button label="Open" tone="primary" onClick={() => onOpenProvider(destination.providerID!)}></box-button>}
         </li>)}</ul>
-      </section>
+      </box-section>
       <div className="summary-actions"><box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button><box-button label="Return to overview" onClick={onOverview}></box-button></div>
-    </section>
+    </section></box-card>
     <DetailsRail title="Deployment summary" description="A final record of the completed run."><DetailList rows={[["Deployment", plan.name], ["Status", "Deployment complete"], ["Run ID", run.id], ["Systems", plan.components.map((component) => component.name).join(', ')], ["Strategy", plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
   </section>
 }

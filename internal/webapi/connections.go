@@ -257,10 +257,10 @@ func openSalesforceScratch(ctx context.Context, target, returnPath string) (stri
 	return salesforceorg.OpenScratchURL(ctx, target, returnPath)
 }
 
-func presentSalesforceOptions(settings config.ConnectionSettings, targets []salesforceorg.Target) []salesforceConnectionOption {
+func presentSalesforceOptions(settings config.ConnectionSettings, targets []salesforceorg.Target, now time.Time) []salesforceConnectionOption {
 	options := make([]salesforceConnectionOption, 0, len(targets))
 	for _, target := range targets {
-		if !target.Healthy(time.Now()) {
+		if !target.Healthy(now) {
 			continue
 		}
 		kind := "Org"
