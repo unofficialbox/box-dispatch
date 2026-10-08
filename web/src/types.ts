@@ -15,12 +15,17 @@ export type DeploymentProviderDetail = ProviderSummary & {
   presentCount: number
   remainingCount: number
   manualItemCount: number
+  deployedComponents: string[]
+  environmentId?: string
+  launchUrl?: string
 }
 
 export type DeploymentDetail = Omit<DeploymentSummary, 'providers'> & {
   startedAt: string
   duration: string
   runId?: string
+  changesRecorded: boolean
+  changeCount: number
   providers: DeploymentProviderDetail[]
 }
 
@@ -118,6 +123,7 @@ export type SalesforceConnectionOption = {
   devHub?: boolean
   username?: string
   orgId?: string
+  domain?: string
 }
 
 export type SalesforceRESTInput = {
@@ -151,6 +157,7 @@ export type BoxConnectionOption = {
   subjectType?: string
   clientIdHint?: string
   subjectIdHint?: string
+  domain?: string
 }
 
 export type BoxOAuthJob = {

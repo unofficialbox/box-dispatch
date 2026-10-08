@@ -207,20 +207,21 @@ func decodeCLIJSON(out string, target any) error {
 	return json.NewDecoder(strings.NewReader(clean[start:])).Decode(target)
 }
 
-// boxUserFields is the field set both transports request; enterprise is not
-// part of the default projection and has to be named explicitly.
-const boxUserFields = "id,login,name,enterprise"
+// boxUserFields is the field set both transports request; enterprise and
+// hostname are not part of the default projection and have to be named.
+const boxUserFields = "id,login,name,enterprise,hostname"
 
 type boxUser struct {
 	ID         string `json:"id"`
 	Login      string `json:"login"`
+	Hostname   string `json:"hostname"`
 	Enterprise struct {
 		ID string `json:"id"`
 	} `json:"enterprise"`
 }
 
 func (u boxUser) discovery() ProviderDiscovery {
-	return ProviderDiscovery{Identity: u.Login, Account: u.ID, Enterprise: u.Enterprise.ID}
+	return ProviderDiscovery{Identity: u.Login, Account: u.ID, Enterprise: u.Enterprise.ID, Host: u.Hostname}
 }
 
 // connectivityBox validates the exact supported authentication configuration

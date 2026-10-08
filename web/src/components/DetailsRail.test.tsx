@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { DetailList } from './DetailsRail'
 
 describe('DetailList', () => {
-  it('exposes semantic value classes for readiness styling', () => {
-    render(<DetailList rows={[["Status", "Validation complete"], ["Connections", "Ready"], ["Strategy", "Reuse existing"]]} />)
+  it('passes the requested facts to the Box Open Elements fact list', () => {
+    const rows: Array<[string, string]> = [["Status", "Validation complete"], ["Connections", "Ready"], ["Strategy", "Reuse existing"]]
+    const { container } = render(<DetailList rows={rows} />)
 
-    expect(screen.getByText('Validation complete').classList.contains('detail-value-validation-complete')).toBe(true)
-    expect(screen.getByText('Ready').classList.contains('detail-value-ready')).toBe(true)
-    expect(screen.getByText('Reuse existing').classList.contains('detail-value-reuse-existing')).toBe(true)
+    const factList = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
+    expect(factList).toBeTruthy()
+    expect(factList.rows).toEqual(rows.map(([label, value]) => ({ label, value })))
   })
 })

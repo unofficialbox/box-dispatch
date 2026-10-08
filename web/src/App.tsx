@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import '@unofficialbox/box-open-elements/app-shell'
 import './App.css'
 import { AppToast, type AppToastNotice } from './components/AppToast'
 import { BoxConnectionDrawer, DiagnosticsDrawer, SalesforceConnectionDrawer } from './components/Drawers'
@@ -76,7 +77,7 @@ function App() {
   const [boxConnectionError, setBoxConnectionError] = useState('')
   const [checkingConnections, setCheckingConnections] = useState(false)
   const [deploymentConfirmationOpen, setDeploymentConfirmationOpen] = useState(false)
-  const [changesRunID, setChangesRunID] = useState<string | null>(null)
+  const [changeReview, setChangeReview] = useState<{ url: string; stage: 'validation' | 'deployment' } | null>(null)
   const [validationChanges, setValidationChanges] = useState<ValidationFileChange[]>([])
   const [validationChangesLoading, setValidationChangesLoading] = useState(false)
   const [validationChangesError, setValidationChangesError] = useState('')
@@ -88,7 +89,7 @@ function App() {
   const [toast, setToast] = useState<AppToastNotice | null>(null)
   const showToast = (message: string, tone = 'success') => setToast({ id: Date.now(), message, tone })
   const toastNotice = toast ? <AppToast key={toast.id} notice={toast} onDismiss={() => setToast(null)} /> : null
-  const activeRunID = run && (run.status === 'queued' || run.status === 'running') ? run.id : null
+  const activeRunID = run?.id ?? null
   const packagePreparing = scratchJob?.status === 'preparing' && (scratchJob.packageStatus === 'checking' || scratchJob.packageStatus === 'installing')
 
   const navigateTo = (view: AppView) => {
@@ -97,13 +98,6 @@ function App() {
     window.history.pushState(null, '', nextURL)
     setScreen(view)
     if (view === 'history') setHistoryDeploymentID(null)
-  }
-
-  const openHistoricalDeployment = (deploymentID: string) => {
-    const nextURL = `${window.location.pathname}${window.location.search}#history/${encodeURIComponent(deploymentID)}`
-    window.history.pushState(null, '', nextURL)
-    setHistoryDeploymentID(deploymentID)
-    setScreen('history')
   }
 
   useEffect(() => {
@@ -218,16 +212,19 @@ function App() {
       return (await response.json()) as RunDiagnostic
     }).then(setDiagnostic).catch(() => setNotice('Diagnostic guidance is unavailable. Refresh the failed run and try again.'))
   }
-  const openValidationChanges = (runID: string) => {
-    setChangesRunID(runID)
+  const openChanges = (url: string, stage: 'validation' | 'deployment') => {
+    setChangeReview({ url, stage })
     setValidationChanges([])
     setValidationChangesError('')
     setValidationChangesLoading(true)
-    void fetch(`/api/runs/${runID}/changes`).then(async (response) => {
-      if (!response.ok) throw new Error('Validation changes are unavailable.')
+    void fetch(url).then(async (response) => {
+      if (!response.ok) throw new Error('Deployment changes are unavailable.')
       return (await response.json()) as ValidationChanges
-    }).then((changes) => setValidationChanges(changes.files)).catch((error: unknown) => setValidationChangesError(error instanceof Error ? error.message : 'Validation changes are unavailable.')).finally(() => setValidationChangesLoading(false))
+    }).then((changes) => setValidationChanges(changes.files)).catch((error: unknown) => setValidationChangesError(error instanceof Error ? error.message : 'Deployment changes are unavailable.')).finally(() => setValidationChangesLoading(false))
   }
+  const openValidationChanges = (runID: string) => openChanges(`/api/runs/${encodeURIComponent(runID)}/changes`, 'validation')
+  const openCompletedRunChanges = (runID: string) => openChanges(`/api/runs/${encodeURIComponent(runID)}/changes`, 'deployment')
+  const openDeploymentChanges = (deploymentID: string) => openChanges(`/api/deployments/${encodeURIComponent(deploymentID)}/changes`, 'deployment')
   const openSalesforceConnection = () => {
     setToast(null)
     setSalesforceConnectionError('')
@@ -660,16 +657,16 @@ function App() {
   }
   const continueSavedDeployment = () => setWorkflowPhase(resumeWorkflowPhase(plan, connections, run))
 
-  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} checkingConnections={checkingConnections} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={() => setDeploymentConfirmationOpen(true)} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
+  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run} onPhaseChange={setWorkflowPhase}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} checkingConnections={checkingConnections} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={() => setDeploymentConfirmationOpen(true)} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onViewChanges={openCompletedRunChanges} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
   const content = screen === 'overview'
     ? <OverviewPage plan={plan} connections={connections} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
     : screen === 'history'
-      ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onOpenDeployment={openHistoricalDeployment} onCloseDeployment={() => navigateTo('history')}/>
+      ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onCloseDeployment={() => navigateTo('history')} onOpenDestination={openDestination} onViewChanges={openDeploymentChanges}/>
       : screen === 'settings'
         ? <SettingsPage defaults={deploymentDefaults} connections={connections} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
         : workflow
 
-  return <div className="app-shell"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><main id="workspace" className="workspace">{content}</main>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {changesRunID && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} onClose={() => setChangesRunID(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</div>
+  return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{content}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import '@unofficialbox/box-open-elements/metric-card'
 import type { ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun } from '../types'
 import { DeploymentHistoryTable } from '../components/DeploymentHistoryTable'
 import { EmptyProviderConnection, ProviderConnectionPanel, ProviderConnectionRow } from '../components/ProviderConnectionPanel'
@@ -28,6 +29,12 @@ const isCurrentWeek = (value: string) => {
 
 const connectionFor = (name: string, connections: ConnectionSummary[]) => connections.find((connection) => connection.name.toLowerCase() === name.toLowerCase())
 
+const completedDeploymentForPlan = (plan: DeploymentPlan, deployments: DeploymentSummary[], run: DispatchRun | null) => {
+  if (run) return run.action === 'deploy' && run.status === 'completed'
+  const planName = plan.name.trim().toLowerCase()
+  return plan.exists && Boolean(planName) && deployments.some((deployment) => deployment.name.trim().toLowerCase() === planName)
+}
+
 function OverviewActionButton({ icon, label, disabled = false, onPress }: { icon: 'arrow-right' | 'gear'; label: string; disabled?: boolean; onPress: () => void }) {
   const ref = useRef<HTMLElement>(null)
   const onPressRef = useRef(onPress)
@@ -54,16 +61,19 @@ function ConnectionHealth({ plan, connections, onBoxConnection, onSalesforceConn
     const records = component.id === 'box' ? connection?.connections ?? [] : component.id === 'salesforce' ? connection?.orgs ?? [] : []
     const selected = records.find((record) => record.selected)
     const title = component.name
-    const primary = selected && 'username' in selected ? selected.alias || selected.username || 'Salesforce org' : selected && 'identity' in selected ? selected.alias || selected.identity || 'Box connection' : connection?.selection || component.name
-    const details = selected && 'orgId' in selected ? [[selected.kind, selected.orgId ? `Org ID ${selected.orgId}` : ''].filter(Boolean).join(' · ')] : selected && 'identity' in selected ? [selected.identity || selected.subjectType || 'Box account'] : [connection?.authType || 'No selected environment']
+    const primary = selected && 'kind' in selected ? selected.alias || selected.username || 'Salesforce org' : selected && 'identity' in selected ? selected.alias || selected.identity || 'Box connection' : connection?.selection || component.name
+    const details = selected && 'kind' in selected
+      ? [selected.domain || '', [selected.kind, selected.orgId ? `Org ID ${selected.orgId}` : ''].filter(Boolean).join(' · ')].filter(Boolean)
+      : selected && 'identity' in selected
+        ? [selected.domain || '', selected.identity || selected.subjectType || 'Box account'].filter(Boolean)
+        : [connection?.authType || 'No selected environment']
     const actions = <div className="overview-provider-actions"><OverviewActionButton icon="arrow-right" label={`Open ${title}`} disabled={!connection?.launchUrl} onPress={() => onOpenProvider(component.id)}/><OverviewActionButton icon="gear" label={`Configure ${title}`} disabled={!onConnection} onPress={onConnection ?? (() => undefined)}/></div>
     return <ProviderConnectionPanel key={component.id} provider={component.id} title={title} count={records.length || (connection?.configured ? 1 : 0)} compact actions={actions}>{connection?.configured ? <ProviderConnectionRow primary={primary} details={details} ready={ready}/> : <EmptyProviderConnection provider={component.name} compact/>}</ProviderConnectionPanel>
   })}</div></section></box-card>
 }
 
-function CurrentDeployment({ plan, connections, run, onContinue, onViewHistory }: Pick<OverviewPageProps, 'plan' | 'connections' | 'run' | 'onContinue' | 'onViewHistory'>) {
+function CurrentDeployment({ plan, connections, run, deploymentComplete, onContinue, onViewHistory }: Pick<OverviewPageProps, 'plan' | 'connections' | 'run' | 'onContinue' | 'onViewHistory'> & { deploymentComplete: boolean }) {
   const running = run?.status === 'queued' || run?.status === 'running'
-  const deploymentComplete = run?.action === 'deploy' && run.status === 'completed'
   const action = run?.action === 'deploy' ? 'Deployment' : 'Validation'
   const status = running ? `${action} in progress` : plan.exists ? 'Saved deployment' : 'No deployment selected'
   const configured = plan.components.filter((component) => component.ready).length
@@ -84,7 +94,7 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
   const completedThisWeek = deployments.filter((deployment) => isCurrentWeek(deployment.completedAt)).length
   const latest = deployments[0]
   const allReady = plan.exists && selectedSystems > 0 && verifiedSystems === selectedSystems
-  const deploymentComplete = run?.action === 'deploy' && run.status === 'completed'
+  const deploymentComplete = completedDeploymentForPlan(plan, deployments, run)
   const headingCopy = deploymentComplete ? 'No deployment is currently in progress.' : plan.exists ? allReady ? 'Ready to validate and deploy.' : 'Connect remaining systems before validation.' : 'Choose a solution to start a deployment.'
   return <section className="overview-page" aria-label="Overview">
     <header className="overview-heading"><div><h1>Overview</h1><p>{headingCopy}</p></div><box-button label="New deployment" tone="primary" onClick={onNewDeployment}></box-button></header>
@@ -95,12 +105,12 @@ export function OverviewPage({ plan, connections, deployments, run, onNewDeploym
       <Metric label="Latest deployment" value={latest ? 'Complete' : 'No runs'} detail={latest ? formatDeploymentDate(latest.completedAt) : 'Run a deployment to see history'}/>
     </section>
     <section className="overview-dashboard">
-      <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} onContinue={onContinue} onViewHistory={onViewHistory}/><DeploymentHistory deployments={deployments}/></div>
+      <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} run={run} deploymentComplete={deploymentComplete} onContinue={onContinue} onViewHistory={onViewHistory}/><DeploymentHistory deployments={deployments}/></div>
       <aside className="overview-secondary"><ConnectionHealth plan={plan} connections={connections} onBoxConnection={onBoxConnection} onSalesforceConnection={onSalesforceConnection} onOpenProvider={onOpenProvider}/></aside>
     </section>
   </section>
 }
 
 function Metric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'success' }) {
-  return <div className={`overview-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
+  return <box-metric-card className={`overview-metric ${tone}`} heading={label} value={value} message={detail}></box-metric-card>
 }

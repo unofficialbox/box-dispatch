@@ -648,7 +648,16 @@ func deployPlanRun(ctx context.Context, plan config.SolutionPlan, items []lifecy
 		items[index] = result
 		emitDeploymentResult(result, emit)
 	}
-	if _, err := audit.ExportDeployment(plan.PackagePath, plan.Name, before, items, startedAt, time.Now().UTC()); err != nil {
+	environmentIDs := map[string]string{}
+	if settings, err := loadConnections(); err == nil {
+		if selected, ok := settings.SelectedBoxConnection(); ok {
+			environmentIDs["box"] = selected.Enterprise
+		}
+		if selected, ok := settings.SelectedSalesforceOrg(); ok {
+			environmentIDs["salesforce"] = selected.OrgID
+		}
+	}
+	if _, err := audit.ExportDeployment(plan.PackagePath, plan.Name, before, items, environmentIDs, startedAt, time.Now().UTC()); err != nil {
 		return items, fmt.Errorf("record deployment audit: %w", err)
 	}
 	return items, nil

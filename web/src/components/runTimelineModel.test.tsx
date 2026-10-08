@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { RunTimeline } from './RunTimeline'
 import { presentProviderProgress } from './runTimelineModel'
 import { latestActivityEvents } from './liveActivityModel'
+import type { TimelineEvent } from '@unofficialbox/box-open-elements/patterns/timeline'
 
 describe('presentProviderProgress', () => {
   it('keeps Salesforce active while a managed package is still installing', () => {
@@ -32,7 +33,7 @@ describe('presentProviderProgress', () => {
   })
 
   it('renders each recent provider update in the live activity feed', () => {
-    render(<RunTimeline providers={[{
+    const { container } = render(<RunTimeline providers={[{
       id: 'box', name: 'Box', state: 'active', components: [], updates: [
         { sequence: 1, at: '2026-08-24T00:00:00Z', type: 'activity', provider: 'box', message: 'Inspecting the Box workspace', status: 'running', progressState: 'activity' },
         { sequence: 2, at: '2026-08-24T00:00:01Z', type: 'activity', provider: 'box', message: 'Checking metadata templates', status: 'running', component: 'Metadata Template:Contract', progressState: 'running' },
@@ -40,10 +41,13 @@ describe('presentProviderProgress', () => {
     }]} />)
 
     expect(screen.getByRole('region', { name: 'Recent validation activity' })).toBeTruthy()
-    expect(screen.getByText('Inspecting the Box workspace')).toBeTruthy()
-    expect(screen.getByText('Checking metadata templates')).toBeTruthy()
-    expect(document.querySelector('box-badge[label="Working"][tone="inprogress"]')).toBeTruthy()
-    expect(document.querySelector('box-spinner[aria-label="Working"][size="small"]')).toBeTruthy()
+    const timeline = container.querySelector('box-timeline') as HTMLElement & { events: TimelineEvent[] }
+    expect(timeline.tabIndex).toBe(0)
+    expect(timeline.getAttribute('aria-label')).toBe('Live validation log')
+    expect(timeline.events).toEqual([
+      expect.objectContaining({ action: 'Box', summary: 'Inspecting the Box workspace', badge: 'Update', tone: 'neutral' }),
+      expect.objectContaining({ action: 'Metadata Template:Contract', summary: 'Checking metadata templates', badge: 'Working', tone: 'brand' }),
+    ])
   })
 
   it('tails the newest live activity update', () => {

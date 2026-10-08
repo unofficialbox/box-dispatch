@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import type { TableCellValue, TableRow } from '@unofficialbox/box-open-elements/table'
 import { OverviewPage } from './OverviewPage'
 import type { ConnectionSummary, DeploymentPlan } from '../types'
 
@@ -22,14 +23,17 @@ const connections: ConnectionSummary[] = [
   { name: 'Salesforce', configured: true, verified: true },
 ]
 
+const cells = (row: TableRow) => row.cells as Record<string, TableCellValue>
+
 describe('OverviewPage', () => {
   it('does not present healthy connections as an existing deployment plan', () => {
     const { container } = render(<OverviewPage plan={plan} connections={connections} deployments={[]} run={null} onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()} />)
 
     expect(screen.getByText('Choose a solution to start a deployment.')).toBeTruthy()
-    expect(screen.getByText('Not started')).toBeTruthy()
-    expect(screen.getByText('No runs')).toBeTruthy()
-    expect(screen.getAllByText('Choose a solution').length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('box-metric-card[heading="Active deployment"]')?.getAttribute('value')).toBe('Not started')
+    expect(container.querySelector('box-metric-card[heading="Latest deployment"]')?.getAttribute('value')).toBe('No runs')
+    expect(screen.getByText('Choose a solution')).toBeTruthy()
+    expect(container.querySelector('box-metric-card[heading="Active deployment"]')?.getAttribute('message')).toBe('Choose a solution')
     expect(screen.queryByText('CLM deployment')).toBeNull()
     expect(screen.queryByText('Your deployment plan and connections are ready.')).toBeNull()
     expect(container.querySelector('.overview-current [data-provider-logo]')).toBeNull()
@@ -57,10 +61,11 @@ describe('OverviewPage', () => {
   it('uses concise provider labels rather than logos in deployment history', () => {
     const { container } = render(<OverviewPage plan={{ ...plan, exists: true, name: 'Northstar CLM' }} connections={connections} deployments={[{ id: 'deployment-1', name: 'Northstar CLM', strategy: 'reuse', completedAt: '2026-08-25T17:00:00Z', providers: [{ name: 'box', status: 'succeeded' }, { name: 'salesforce', status: 'succeeded' }] }]} run={null} onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()} />)
 
-    const table = within(container).getByRole('table', { name: 'Recent deployments' })
+    const table = container.querySelector('box-table.deployment-history-table') as HTMLElement & { rows: TableRow[] }
     expect(table).toBeTruthy()
     expect(container.querySelector('.overview-history-table [data-provider-logo]')).toBeNull()
-    expect(within(table).getByText('Box, Salesforce')).toBeTruthy()
+    expect(cells(table.rows[0]).systems).toBe('Box, Salesforce')
+    expect(cells(table.rows[0]).deployment).toMatchObject({ kind: 'link', text: 'Northstar CLM', href: '#history/deployment-1' })
   })
 
   it('moves a completed deployment out of the active deployment state', () => {
@@ -77,23 +82,52 @@ describe('OverviewPage', () => {
     expect(within(container).queryByText('Saved deployment')).toBeNull()
     expect(container.querySelector('box-button[label="Continue deployment"]')).toBeNull()
     const activeMetric = container.querySelector<HTMLElement>('.overview-metric:first-child')!
-    expect(activeMetric.textContent).toContain('Active deployment')
-    expect(activeMetric.textContent).toContain('None')
-    expect(activeMetric.textContent).not.toContain('Complete')
+    expect(activeMetric.getAttribute('heading')).toBe('Active deployment')
+    expect(activeMetric.getAttribute('value')).toBe('None')
     const currentDeployment = container.querySelector<HTMLElement>('.overview-current')!
     expect(currentDeployment.querySelector('box-badge[label="Complete"]')).toBeNull()
     expect(currentDeployment.textContent).toContain('The latest deployment, Experience Cloud E2E, completed successfully and is available in history.')
     const latestMetric = container.querySelector<HTMLElement>('.overview-metric:last-child')!
-    expect(latestMetric.textContent).toContain('Latest deployment')
+    expect(latestMetric.getAttribute('heading')).toBe('Latest deployment')
     const historyButton = container.querySelector<HTMLElement>('box-button[label="View history"]')
     fireEvent.click(historyButton!)
     expect(onViewHistory).toHaveBeenCalledOnce()
   })
 
+  it('uses immutable history when a completed run is not restored after refresh', () => {
+    const completed = { id: 'deployment-1', name: 'clmDemo1', strategy: 'reuse', completedAt: '2026-08-28T02:12:39Z', providers: [{ name: 'box', status: 'present' }, { name: 'salesforce', status: 'present' }] }
+    const { container } = render(<OverviewPage
+      plan={{ ...plan, exists: true, name: 'clmDemo1' }}
+      connections={connections}
+      deployments={[completed]}
+      run={null}
+      onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()}
+    />)
+
+    expect(within(container).getByText('No deployment is currently in progress.')).toBeTruthy()
+    expect(within(container).getByText('No deployment in progress')).toBeTruthy()
+    expect(container.querySelector('box-button[label="Continue deployment"]')).toBeNull()
+    expect(container.querySelector<HTMLElement>('.overview-metric:first-child')?.getAttribute('value')).toBe('None')
+  })
+
+  it('keeps a failed current run resumable even when an older deployment has the same name', () => {
+    const completed = { id: 'deployment-1', name: 'clmDemo1', strategy: 'reuse', completedAt: '2026-08-27T02:12:39Z', providers: [{ name: 'box', status: 'present' }] }
+    const { container } = render(<OverviewPage
+      plan={{ ...plan, exists: true, name: 'clmDemo1' }}
+      connections={connections}
+      deployments={[completed]}
+      run={{ id: 'deploy-failed', deployment: 'clmDemo1', action: 'deploy', status: 'failed', providers: [{ name: 'box', status: 'failed' }] }}
+      onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()}
+    />)
+
+    expect(container.querySelector('box-button[label="Continue deployment"]')).toBeTruthy()
+    expect(container.querySelector<HTMLElement>('.overview-metric:first-child')?.getAttribute('value')).toBe('Active')
+  })
+
   it('summarizes the same selected environments and saved counts shown in Settings', () => {
     const detailedConnections: ConnectionSummary[] = [
-      { name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/', connections: [{ id: 'box-1', alias: 'Production Box', identity: 'owner@example.com', status: 'Ready', selected: true }, { id: 'box-2', alias: 'Demo Box', status: 'Not ready', selected: false }] },
-      { name: 'Salesforce', configured: true, verified: true, launchUrl: 'https://example.my.salesforce.com/', orgs: [{ id: 'sf-1', alias: 'CLM Scratch', username: 'test@example.com', orgId: '00D123', kind: 'Scratch org', status: 'Ready', selected: true }] },
+      { name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/', connections: [{ id: 'box-1', alias: 'Production Box', identity: 'owner@example.com', domain: 'acme.app.box.com', status: 'Ready', selected: true }, { id: 'box-2', alias: 'Demo Box', status: 'Not ready', selected: false }] },
+      { name: 'Salesforce', configured: true, verified: true, launchUrl: 'https://example.my.salesforce.com/', orgs: [{ id: 'sf-1', alias: 'CLM Scratch', username: 'test@example.com', domain: 'example.scratch.my.salesforce.com', orgId: '00D123', kind: 'Scratch org', status: 'Ready', selected: true }] },
     ]
     const onOpenProvider = vi.fn()
     const onSalesforceConnection = vi.fn()
@@ -102,6 +136,8 @@ describe('OverviewPage', () => {
     const health = container.querySelector<HTMLElement>('.overview-connection-health')!
     expect(within(health).getByText('Production Box')).toBeTruthy()
     expect(within(health).getByText('CLM Scratch')).toBeTruthy()
+    expect(within(health).getByText('acme.app.box.com')).toBeTruthy()
+    expect(within(health).getByText('example.scratch.my.salesforce.com')).toBeTruthy()
     expect(within(health).getByText('2 saved connections')).toBeTruthy()
     expect(within(health).getByText('1 saved connection')).toBeTruthy()
     expect(health.querySelector('box-badge[label="Selected"]')).toBeNull()

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 import { ProviderLogo } from '../components/ProviderLogo'
+import { StrategyTileGroup } from '../components/StrategyTileGroup'
 import { readinessLabel, type ConnectionSummary, type DeploymentPlan } from '../types'
 
 type ProviderID = 'box' | 'salesforce'
@@ -33,7 +34,7 @@ export function ConfigurePage({ plan, connections, notice, checkingConnections, 
     <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose a strategy, providers, and components.</p></div></header>
     <box-split-view className="configure-workspace" label="Deployment configuration and selected provider details" ratio={0.66}>
       <div slot="primary">
-        <section className="strategy-section" aria-labelledby="strategy-title"><h3 id="strategy-title">Deployment strategy</h3><div className="strategy-picker" role="radiogroup" aria-label="Deployment strategy"><button type="button" role="radio" aria-checked={plan.strategy === 'reuse'} className={plan.strategy === 'reuse' ? 'selected' : ''} onClick={() => onStrategyChange('reuse')}><strong>Reuse existing</strong><span>Keep matching configuration and apply only what is missing.</span></button><button type="button" role="radio" aria-checked={plan.strategy === 'create_new'} className={plan.strategy === 'create_new' ? 'selected' : ''} onClick={() => onStrategyChange('create_new')}><strong>Create new</strong><span>Create a new named configuration set for this deployment.</span></button></div></section>
+        <section className="strategy-section"><StrategyTileGroup value={plan.strategy} legend="Deployment strategy" onChange={onStrategyChange}/></section>
         <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/><ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback={salesforceIncluded ? 'Selected for this deployment' : 'Not included in this deployment'} connection={connections.find((connection) => connection.name === 'Salesforce')} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/></div>
         <ComponentScope provider={selectedProviderID} title={selectedTitle} included={selectedProviderID === 'box' || salesforceIncluded} selectedComponents={selectedComponents} onToggle={onToggleComponent}/>
       </div>

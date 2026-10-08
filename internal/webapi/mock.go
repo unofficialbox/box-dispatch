@@ -106,8 +106,9 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 		deployments = append([]audit.DeploymentRecord{{
 			DeploymentID: completedAt.Format("20060102T150405Z"), Name: plan.Name, TemplateID: plan.TemplateID,
 			Strategy: plan.Strategy, StartedAt: startedAt, CompletedAt: completedAt,
-			Duration:  completedAt.Sub(startedAt).Round(time.Millisecond).String(),
-			Providers: mockProviderRecords(result),
+			Duration:        completedAt.Sub(startedAt).Round(time.Millisecond).String(),
+			ChangesRecorded: true,
+			Providers:       mockProviderRecords(result),
 		}}, deployments...)
 		mu.Unlock()
 		return result, nil
@@ -221,7 +222,7 @@ func mockConnectionSettings() config.ConnectionSettings {
 		BoxCCGAlias:           "box.user@example.test",
 		BoxDefaultConnection:  "box-dispatch-ccg",
 		VerifiedConnections: map[string]config.VerifiedConnection{
-			"box":        {VerifiedAt: verifiedAt, Selection: "box-dispatch-ccg", Identity: "box.user@example.test", Account: "123456", AuthType: "CCG"},
+			"box":        {VerifiedAt: verifiedAt, Selection: "box-dispatch-ccg", Identity: "box.user@example.test", Account: "123456", Enterprise: "EID-mock", Host: "https://acme.app.box.com/", AuthType: "CCG"},
 			"salesforce": {VerifiedAt: verifiedAt, Selection: "salesforce-mock", Identity: "admin@example.test", OrgID: "00D-mock", OrgStatus: "Ready", OrgType: "persistent", AuthType: "Salesforce OAuth"},
 		},
 	}
@@ -262,10 +263,15 @@ func mockValidationChanges(provider string) []salesforceapi.MetadataFileDiff {
 func mockProviderRecords(items []lifecycle.Item) []audit.ProviderRecord {
 	records := make([]audit.ProviderRecord, 0, len(items))
 	for _, item := range items {
-		records = append(records, audit.ProviderRecord{
+		record := audit.ProviderRecord{
 			Provider: item.Provider, StatusBefore: lifecycle.StatusMissing, StatusAfter: item.Status,
 			Detail: item.Detail, Deployed: append([]string(nil), item.Present...), PresentAfter: append([]string(nil), item.Present...),
-		})
+			Changes: append([]salesforceapi.MetadataFileDiff(nil), item.Changes...),
+		}
+		if item.Provider == "salesforce" {
+			record.Resources = []lifecycle.ResourceReference{{Provider: "salesforce", Component: "Salesforce org", Kind: "organization", Name: "admin@example.test", ID: "00D-mock", URL: "https://example.my.salesforce.com"}}
+		}
+		records = append(records, record)
 	}
 	return records
 }

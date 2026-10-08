@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -29,25 +31,28 @@ type DeploymentRecord struct {
 	Rollback            solution.RollbackSettings             `json:"rollback"`
 	ComponentStrategies map[string]solution.ComponentStrategy `json:"component_strategies,omitempty"`
 	Artifacts           map[string]string                     `json:"artifact_sha256"`
+	ChangesRecorded     bool                                  `json:"changes_recorded,omitempty"`
 	Providers           []ProviderRecord                      `json:"providers"`
 	SourcePath          string                                `json:"-"`
 }
 
 type ProviderRecord struct {
-	Provider       string                        `json:"provider"`
-	StatusBefore   lifecycle.Status              `json:"status_before"`
-	StatusAfter    lifecycle.Status              `json:"status_after"`
-	Detail         string                        `json:"detail"`
-	Deployed       []string                      `json:"deployed,omitempty"`
-	PresentBefore  []string                      `json:"present_before,omitempty"`
-	PresentAfter   []string                      `json:"present_after,omitempty"`
-	Remaining      []string                      `json:"remaining,omitempty"`
-	AdapterPending []string                      `json:"adapter_pending,omitempty"`
-	Experimental   []string                      `json:"experimental,omitempty"`
-	Resources      []lifecycle.ResourceReference `json:"resources,omitempty"`
+	Provider       string                           `json:"provider"`
+	EnvironmentID  string                           `json:"environment_id,omitempty"`
+	StatusBefore   lifecycle.Status                 `json:"status_before"`
+	StatusAfter    lifecycle.Status                 `json:"status_after"`
+	Detail         string                           `json:"detail"`
+	Deployed       []string                         `json:"deployed,omitempty"`
+	PresentBefore  []string                         `json:"present_before,omitempty"`
+	PresentAfter   []string                         `json:"present_after,omitempty"`
+	Remaining      []string                         `json:"remaining,omitempty"`
+	AdapterPending []string                         `json:"adapter_pending,omitempty"`
+	Experimental   []string                         `json:"experimental,omitempty"`
+	Resources      []lifecycle.ResourceReference    `json:"resources,omitempty"`
+	Changes        []salesforceapi.MetadataFileDiff `json:"changes,omitempty"`
 }
 
-func ExportDeployment(root, name string, before, after []lifecycle.Item, startedAt, completedAt time.Time) (string, error) {
+func ExportDeployment(root, name string, before, after []lifecycle.Item, environmentIDs map[string]string, startedAt, completedAt time.Time) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("package directory is required")
 	}
@@ -85,7 +90,8 @@ func ExportDeployment(root, name string, before, after []lifecycle.Item, started
 		Rollback:            settings.Box.Rollback,
 		ComponentStrategies: settings.Box.ComponentStrategies,
 		Artifacts:           map[string]string{},
-		Providers:           providerRecords(before, after),
+		ChangesRecorded:     true,
+		Providers:           providerRecords(before, after, environmentIDs),
 	}
 	for _, relative := range []string{solution.ManifestFile, manifest.DeploymentConfig, ".dispatch/package.json"} {
 		if digest, digestErr := fileDigest(filepath.Join(root, filepath.FromSlash(relative))); digestErr == nil {
@@ -155,6 +161,16 @@ func (r DeploymentRecord) DeployedResources() []lifecycle.ResourceReference {
 	return resources
 }
 
+// FileChanges returns the bounded, preview-safe before/after snapshot captured
+// during validation and persisted with the deployment audit record.
+func (r DeploymentRecord) FileChanges() []salesforceapi.MetadataFileDiff {
+	changes := []salesforceapi.MetadataFileDiff{}
+	for _, provider := range r.Providers {
+		changes = append(changes, provider.Changes...)
+	}
+	return changes
+}
+
 func ListDeployments() ([]DeploymentRecord, error) {
 	directory, err := globalAuditDirectory()
 	if err != nil {
@@ -198,12 +214,13 @@ func globalAuditDirectory() (string, error) {
 	return filepath.Join(root, "dispatch", "audit"), nil
 }
 
-func providerRecords(before, after []lifecycle.Item) []ProviderRecord {
+func providerRecords(before, after []lifecycle.Item, environmentIDs map[string]string) []ProviderRecord {
 	records := make([]ProviderRecord, 0, len(after))
 	for _, current := range after {
 		previous := findProvider(before, current.Provider)
 		records = append(records, ProviderRecord{
 			Provider:       current.Provider,
+			EnvironmentID:  strings.TrimSpace(environmentIDs[current.Provider]),
 			StatusBefore:   previous.Status,
 			StatusAfter:    current.Status,
 			Detail:         current.Detail,
@@ -214,6 +231,7 @@ func providerRecords(before, after []lifecycle.Item) []ProviderRecord {
 			AdapterPending: append([]string(nil), current.AdapterPending...),
 			Experimental:   append([]string(nil), current.Experimental...),
 			Resources:      append([]lifecycle.ResourceReference(nil), current.Resources...),
+			Changes:        append([]salesforceapi.MetadataFileDiff(nil), previous.Changes...),
 		})
 	}
 	return records

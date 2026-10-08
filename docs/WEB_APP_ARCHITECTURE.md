@@ -18,7 +18,8 @@ flowchart LR
     Engine --> SalesforceREST["Salesforce REST API"]
     SalesforceREST --> SalesforceEligibility["UIBundle eligibility preflight"]
     Engine --> SalesforceMetadata["Salesforce Metadata API adapter"]
-    Engine --> Audit["Credential-free audit records"]
+    Engine --> ChangeSnapshot["Bounded before / after previews"]
+    ChangeSnapshot --> Audit["Credential-free audit records"]
     API --> Audit
 ```
 
@@ -94,7 +95,7 @@ credentials from `.env`:
 | Endpoint | Purpose | Deliberately excluded |
 | --- | --- | --- |
 | `GET /api/health` | active profile and server time | environment values |
-| `GET /api/connections` | sanitized configured and verified connection state, including selected usernames and safe provider launch destinations | tokens, CCG secret, client ID, URL paths or queries |
+| `GET /api/connections` | sanitized configured and verified connection state, including selected usernames, recognizable provider hostnames, and safe launch destinations | tokens, CCG secret, client ID, URL paths or queries |
 | `GET /api/connections/salesforce/options` | safe list of locally connected Salesforce orgs, plus legacy CLI aliases during migration | tokens, instance URLs, and credentials |
 | `PUT /api/connections/salesforce` | select one authenticated legacy Salesforce alias and require it to be revalidated | arbitrary targets, raw provider output, credentials |
 | `PUT /api/connections/salesforce/rest` | save a target-org and/or Dev Hub REST connection in the owner-only local connection store | tokens, client secret, or raw credentials in the response |
@@ -116,7 +117,8 @@ credentials from `.env`:
 | `GET /api/connections/box/oauth/{id}` | poll sanitized Box login status | authorization codes, tokens, PKCE verifier |
 | `POST /api/connections/box/check` | recheck the selected Box connection and refresh its verification snapshot | CCG secret, refresh token, access token |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
-| `GET /api/deployments/{id}` | a run's safe component counts | diagnostics, resources, source paths |
+| `GET /api/deployments/{id}` | a run's safe component counts and names, plus provider environment IDs and launch destinations | diagnostics, full resource inventories, source paths |
+| `GET /api/deployments/{id}/changes` | the bounded before/after file preview captured with a completed deployment | credentials, unchanged files, binary contents, oversized text |
 | `GET /api/plan` | saved BCL plan and selected-provider readiness | package path, credentials, provider identity |
 | `PUT /api/plan` | save a supported template/provider draft to BCL | package path and all deployment execution |
 | `GET /api/defaults` | owner-only workspace defaults used to initialize new deployments | credentials, readiness, and prior deployment identity |
@@ -170,10 +172,15 @@ Network sender addresses without ignoring unrelated configuration drift. After d
 Dispatch retrieves the affected components again and refuses to report success until
 the resulting Salesforce configuration matches. Validation emits a structured event
 for every selected component as discovery and semantic comparison complete. After a
-successful validation with drift, the browser offers an optional file-change review.
-It loads the Box Open Elements diff viewer only when opened, presents one file at a
-time in a split “Current org” / “Packaged change” comparison, and still lists binary
-or files larger than 512 KB without sending their contents to the browser. The legacy Salesforce CLI adapter
+successful validation, the browser offers a file-change review before deployment, on
+the completion summary, and from every new immutable deployment audit. The exact bounded
+validation snapshot is reused at every stage so the operator reviews the same evidence
+before and after the change. It loads the Box Open Elements diff viewer only when opened,
+presents one file at a time in a split “Current org” / “Validated package” comparison
+before deployment and a “Before deployment” / “After deployment” comparison afterward,
+and still lists binary or files larger than 512 KB without sending their contents to the
+browser. Older audit records explicitly show that no change preview was recorded rather
+than inferring one. The legacy Salesforce CLI adapter
 is used only for stored configurations that have not migrated credentials; it is not an
 interactive Dispatch user experience.
 
