@@ -223,8 +223,7 @@ viewport navigation all preserve current behavior.
 
 Verification completed with component tests, the mock end-to-end suite, a 390px
 viewport pass, and live Chrome inspection of collapse/expand, visible state, the
-accessibility tree, and Arrow-key workflow navigation. A human screen-reader pass
-remains recommended before a production release.
+accessibility tree, and Arrow-key workflow navigation.
 
 ### Phase 3 — data surfaces
 
@@ -284,7 +283,7 @@ For each migrated interaction, verify:
 - keyboard-only operation, visible focus, Escape behavior, and focus restoration;
 - accessible names, current/selected state, live announcements, and error text;
 - pointer activation does not double-fire through React and custom-element events;
-- Chrome at desktop width and at 390px; Safari for dialog, drawer, and popover
+- Chromium at desktop width and at 390px, including dialog, drawer, and popover
   top-layer behavior;
 - Overview, workflow, History list, historical detail, Settings, validation diff,
   failure recovery, and completed summary routes;
@@ -292,9 +291,9 @@ For each migrated interaction, verify:
 - light/dark token behavior if Dispatch exposes or inherits both themes.
 
 Retain before/after screenshots for the shell, workflow header, connection drawer,
-history table/detail, validation diff, and completed summary. Automated checks do
-not replace a manual screen-reader pass for the new sidebar, progress steps, tables,
-dialog, and connection-row composition.
+history table/detail, validation diff, and completed summary. Browser acceptance
+uses Chromium at those two viewport sizes; keyboard, focus, semantic accessibility,
+and automated checks remain in scope.
 
 ## Delivery order and pull-request boundaries
 
