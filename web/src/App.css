@@ -130,7 +130,7 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .app-shell::part(frame) { grid-template-columns: auto minmax(0, 1fr); }
 .app-shell::part(nav) { z-index: 5; padding: 0; border-right: 0; background: transparent; }
 .app-shell::part(main) { min-width: 0; padding: 0; }
-.sidebar { min-height: 100vh; color: #fff; }
+.sidebar { display: block; min-height: 100vh; padding: 0; color: #fff; }
 .sidebar::part(sidebar) { inline-size: 224px; min-height: 100vh; padding: 24px 12px 18px; border: 0; border-radius: 0; background: linear-gradient(180deg, #061b40, #001b42); }
 .sidebar[collapsed]::part(sidebar) { inline-size: 82px; padding-inline: 12px; }
 .sidebar::part(body) { gap: 16px; overflow: hidden; }
@@ -204,6 +204,12 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .configuration-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #dce5ef; }
 .configuration-footer .notice { max-width: 470px; margin: 0; }
 .configuration-actions { display: flex; gap: 10px; }
+
+@media (max-width: 760px) {
+  .sidebar::part(header), .sidebar::part(footer) { display: none; }
+  .sidebar [data-nav-label] { display: none; }
+  .sidebar .nav-link { justify-content: center; }
+}
 
 /* Reusable stage navigation keeps every pre-deployment handoff predictable. */
 .stage-navigation { display: flex; gap: 10px; }
