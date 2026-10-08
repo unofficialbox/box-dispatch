@@ -15,14 +15,16 @@ describe('SummaryPage', () => {
 
     expect(screen.getByText('Northstar CLM is ready')).toBeTruthy()
     const box = screen.getByText('Box workspace').closest('li')?.querySelector('box-button[label="Open"]')
-    const boxSettings = screen.getByRole('link', { name: 'Open Box App & Settings' })
-    const clmApp = screen.getByRole('link', { name: 'Open Contract Lifecycle Management' })
-    const experienceSite = screen.getByRole('link', { name: 'Open Experience Cloud site' })
+    const boxSettings = container.querySelector('box-link-button[label="Open Box App & Settings"]')!
+    const clmApp = container.querySelector('box-link-button[label="Open Contract Lifecycle Management"]')!
+    const experienceSite = container.querySelector('box-link-button[label="Open Experience Cloud site"]')!
     expect(box).toBeTruthy()
     expect(box?.getAttribute('tone')).toBe('primary')
     expect(boxSettings.classList.contains('summary-destination-link')).toBe(true)
     expect(clmApp.classList.contains('summary-destination-link')).toBe(true)
     expect(experienceSite.classList.contains('summary-destination-link')).toBe(true)
+    expect(boxSettings.getAttribute('target')).toBe('_blank')
+    expect(boxSettings.getAttribute('rel')).toBe('noreferrer')
     expect(boxSettings.getAttribute('href')).toBe('/api/connections/salesforce/open?destination=box-settings')
     expect(clmApp.getAttribute('href')).toBe('/api/connections/salesforce/open?destination=clm-app')
     expect(experienceSite.getAttribute('href')).toBe('/api/connections/salesforce/open?destination=experience-site&site=0DB1')

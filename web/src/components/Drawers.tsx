@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { Alert } from '@unofficialbox/box-open-elements-react/alert'
+import { Select } from '@unofficialbox/box-open-elements-react/select'
+import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
+import '@unofficialbox/box-open-elements/accordion'
 import type { ConnectionSummary, RunDiagnostic, SalesforceOAuthJob, ScratchOrgJob, BoxOAuthJob } from '../types'
 import { ProviderLogo } from './ProviderLogo'
-
-type ValueElement = HTMLElement & { value: string }
 
 function useDrawerClose(onClose: () => void) {
   const ref = useRef<HTMLElement>(null)
@@ -15,18 +17,6 @@ function useDrawerClose(onClose: () => void) {
     drawer.addEventListener('open-changed', handleOpenChanged)
     return () => drawer.removeEventListener('open-changed', handleOpenChanged)
   }, [onClose])
-  return ref
-}
-
-function useValueChanged(onChange: (value: string) => void) {
-  const ref = useRef<ValueElement>(null)
-  useEffect(() => {
-    const field = ref.current
-    if (!field) return
-    const handleValueChanged = (event: Event) => onChange((event as CustomEvent<{ value: string }>).detail.value)
-    field.addEventListener('value-changed', handleValueChanged)
-    return () => field.removeEventListener('value-changed', handleValueChanged)
-  }, [onChange])
   return ref
 }
 
@@ -67,6 +57,7 @@ function DrawerSwitch({ checked, label, description, disabled = false, onChange 
 }
 
 type DrawerElement = HTMLElement & { close: () => void }
+const diagnosticDetailItems = [{ label: 'Technical details', value: 'technical' }]
 
 export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiagnostic | null; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
@@ -79,10 +70,9 @@ export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiag
         </dl>}
         <h3>Recommended next steps</h3>
         <ol>{diagnostic.nextSteps.map((step) => <li key={step}>{step}</li>)}</ol>
-        {diagnostic.technicalDetail && <details className="diagnostic-detail">
-          <summary>Technical details</summary>
-          <pre>{diagnostic.technicalDetail}</pre>
-        </details>}
+        {diagnostic.technicalDetail && <box-accordion className="diagnostic-detail" label="Diagnostic technical details" items={diagnosticDetailItems} value="">
+          <pre slot="panel-technical">{diagnostic.technicalDetail}</pre>
+        </box-accordion>}
       </>}
     </section>
   </box-drawer>
@@ -95,8 +85,6 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
   const [alias, setAlias] = useState('')
   const [installManagedPackage, setInstallManagedPackage] = useState(true)
   const [addMode, setAddMode] = useState<'existing' | 'scratch' | null>((connection?.orgs?.length ?? 0) > 0 ? null : 'existing')
-  const loginHostRef = useValueChanged((value) => setLoginHost(value === 'sandbox' ? 'sandbox' : 'production'))
-  const aliasRef = useValueChanged(setAlias)
   const orgs = connection?.orgs ?? []
   const selected = orgs.find((org) => org.selected) ?? orgs[0]
   const loggingIn = oauthJob?.status === 'pending'
@@ -105,7 +93,7 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
   const canCreateScratch = Boolean(connection?.devHubConfigured)
   return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Salesforce connections" position="right" size="large" busy={loading}>
     <section className="drawer-content salesforce-environments">
-      {error && <div className="drawer-inline-error" role="alert"><strong>Salesforce connection needs attention</strong><p>{error}</p></div>}
+      {error && <Alert className="drawer-inline-error" heading="Salesforce connection needs attention" message={error} tone="error" open/>}
       {orgs.length > 0 && <section className="saved-connection-summary salesforce-current-org" aria-label="Connected Salesforce orgs">
         <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="salesforce" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.username || 'Salesforce org'}</h3></div></header>
         {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.username || selected.alias || 'the selected Salesforce user'}</span></div>}
@@ -142,14 +130,14 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
           <DrawerButton label={loggingIn && oauthJob?.role !== 'devhub' ? 'Waiting for Salesforce…' : 'Connect org'} tone="primary" disabled={loading || loggingIn} onPress={() => { void onLogin(loginHost, 'org') }}/>
           <DrawerButton label={loggingIn && oauthJob?.role === 'devhub' ? 'Waiting for Salesforce…' : 'Connect Dev Hub'} disabled={loading || loggingIn} onPress={() => { void onLogin(loginHost, 'devhub') }}/>
         </div>
-        <box-select ref={loginHostRef} label="Sign-in endpoint" value={loginHost} options={[{ label: 'Production', value: 'production' }, { label: 'Sandbox', value: 'sandbox' }]} required></box-select>
+        <Select label="Sign-in endpoint" value={loginHost} options={[{ label: 'Production', value: 'production' }, { label: 'Sandbox', value: 'sandbox' }]} required onValueChanged={(event) => setLoginHost(event.detail.value === 'sandbox' ? 'sandbox' : 'production')}/>
         {oauthJob?.status === 'pending' && <p className="scratch-job scratch-job-queued" role="status" aria-live="polite">{oauthJob.message}</p>}
       </section>}
       {addMode === 'scratch' && <section className="drawer-section connection-mode-panel scratch-org-section">
         <div><h3>Create a scratch org</h3><p>{canCreateScratch ? 'Dispatch creates, selects, and verifies a 30-day org from your Dev Hub.' : 'Connect a Dev Hub before creating a scratch org.'}</p></div>
         {canCreateScratch
           ? <>
-              <box-text-field className="scratch-org-alias" ref={aliasRef} label="Scratch org alias" value={alias}></box-text-field>
+              <TextField className="scratch-org-alias" label="Scratch org alias" value={alias} onValueChanged={(event) => setAlias(event.detail.value)}/>
               <div className="scratch-package-option"><DrawerSwitch checked={installManagedPackage} disabled={creating || preparing} onChange={setInstallManagedPackage} label="Install Box for Salesforce automatically" description="Dispatch checks version 5.43 first, then installs it only when needed."/></div>
               <DrawerButton label={creating ? 'Creating scratch org…' : 'Create and use scratch org'} tone="primary" disabled={loading || creating || preparing} onPress={() => onCreateScratch(alias, installManagedPackage)}/>
               {scratchJob && scratchJob.status !== 'failed' && <div className={`scratch-job scratch-job-${scratchJob.status}`} role="status" aria-live="polite"><strong>{scratchJob.message}</strong>{scratchJob.packageMessage && <span>{scratchJob.packageMessage}</span>}{scratchJob.packageRequestId && <small>Salesforce request {scratchJob.packageRequestId}</small>}</div>}
@@ -172,7 +160,7 @@ export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLo
   const canLogin = Boolean(connection?.oauthConfigured)
   return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Box connections" position="right" size="large" busy={loading}>
     <section className="drawer-content box-environments">
-      {error && <div className="drawer-inline-error" role="alert"><strong>Box connection needs attention</strong><p>{error}</p></div>}
+      {error && <Alert className="drawer-inline-error" heading="Box connection needs attention" message={error} tone="error" open/>}
       {apps.length > 0 && <section className="saved-connection-summary selected-environment-summary" aria-label="Selected Box environment">
         <header className="connection-section-heading current-environment-heading"><ProviderLogo provider="box" size="standard"/><div><span className="eyebrow">Selected environment</span><h3>{selected?.alias || selected?.identity || 'Box account'}</h3></div></header>
         {selected && <div className="connection-identity"><span className={`connection-state-dot ${connection?.verified ? 'ready' : ''}`} aria-hidden="true"></span><span>{connection?.verified ? 'Verified' : 'Not verified'} as {selected.identity || selected.alias || 'the selected Box user'}</span></div>}

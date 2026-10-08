@@ -67,7 +67,7 @@ describe('SettingsPage', () => {
     expect(view.getByRole('radio', { name: /Insurance Claims Management/ }).hasAttribute('disabled')).toBe(true)
     expect(container.querySelectorAll('box-badge[label="Coming soon"]')).toHaveLength(3)
     expect(view.getByText('https://example.com/clm')).toBeTruthy()
-    fireEvent.click(view.getByRole('radio', { name: /Create new/ }))
+    fireEvent(container.querySelector('box-tile-group')!, new CustomEvent('tile-change', { detail: { selected: ['create_new'] } }))
     fireEvent(container.querySelector('box-switch[label="Salesforce"]')!, new CustomEvent('checked-changed', { detail: { checked: false } }))
     fireEvent.click(container.querySelector('box-button[label="Save defaults"]')!)
 

@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 import { fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { BoxConnectionDrawer, SalesforceConnectionDrawer } from './Drawers'
+import { BoxConnectionDrawer, DiagnosticsDrawer, SalesforceConnectionDrawer } from './Drawers'
 
 const resolveTrue = async () => true
 
 describe('connection drawers', () => {
+  it('uses the shared accordion for technical diagnostics', () => {
+    const { container } = render(<DiagnosticsDrawer diagnostic={{ title: 'Validation failed', summary: 'Provider error', code: 'AUTH', nextSteps: ['Reconnect'], technicalDetail: 'raw diagnostic' }} onClose={vi.fn()}/>)
+    const accordion = container.querySelector('box-accordion.diagnostic-detail') as HTMLElement & { items: Array<{ label: string; value: string }> }
+    expect(accordion).toBeTruthy()
+    expect(accordion.items).toEqual([{ label: 'Technical details', value: 'technical' }])
+    expect(accordion.getAttribute('value')).toBe('')
+    expect(accordion.querySelector('pre[slot="panel-technical"]')?.textContent).toBe('raw diagnostic')
+    expect(container.querySelector('details')).toBeNull()
+  })
+
   it('opens the selected Salesforce environment with a concise label', () => {
     const onOpen = vi.fn()
     const { container } = render(<SalesforceConnectionDrawer

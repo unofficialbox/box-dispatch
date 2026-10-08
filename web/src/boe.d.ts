@@ -3,11 +3,53 @@ import type * as React from 'react'
 declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
+      'box-app-shell': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        heading?: string
+        navLabel?: string
+        asideLabel?: string
+      }
+      'box-nav-sidebar': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        collapsed?: boolean
+        label?: string
+      }
+      'box-sidebar-toggle-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        controls?: string
+        direction?: 'left' | 'right'
+        disabled?: boolean
+        expanded?: boolean
+        label?: string
+      }
+      'box-breadcrumb': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        items?: import('@unofficialbox/box-open-elements/breadcrumb').BreadcrumbItem[]
+        label?: string
+        maxItems?: number
+      }
+      'box-progress-steps': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        items?: import('@unofficialbox/box-open-elements/progress-steps').ProgressStepItem[]
+        label?: string
+        value?: string
+      }
       'box-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
         tone?: 'primary' | 'neutral' | 'danger'
         disabled?: boolean
         isLoading?: boolean
+      }
+      'box-link-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        href?: string
+        label?: string
+        rel?: string
+        target?: string
+        tone?: 'primary' | 'neutral' | 'danger'
+      }
+      'box-accordion': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        borderless?: boolean
+        items?: Array<{ content?: string; summary?: string; label: string; value: string }>
+        label?: string
+        multiple?: boolean
+        plainPanels?: boolean
+        value?: string
+        values?: string[]
       }
       'box-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         icon?: string
@@ -18,6 +60,28 @@ declare module 'react' {
       'box-card': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         eyebrow?: string
         heading?: string
+      }
+      'box-section': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        heading?: string
+        eyebrow?: string
+        description?: string
+      }
+      'box-fact-list': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        rows?: Array<{ label: string; value: string }>
+      }
+      'box-tile-group': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        legend?: string
+        multiple?: boolean
+        name?: string
+        options?: import('@unofficialbox/box-open-elements/tile-group').TileOption[]
+        value?: string
+      }
+      'box-search-field': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        label?: string
+        value?: string
+        placeholder?: string
+        disabled?: boolean
+        loading?: boolean
       }
       'box-metric-card': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         eyebrow?: string
@@ -31,6 +95,12 @@ declare module 'react' {
       'box-run-trace': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         heading?: string
         steps?: import('@unofficialbox/box-open-elements/patterns/run').RunStep[]
+      }
+      'box-timeline': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        heading?: string
+        events?: import('@unofficialbox/box-open-elements/patterns/timeline').TimelineEvent[]
+        composable?: boolean
+        hasMore?: boolean
       }
       'box-table': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string

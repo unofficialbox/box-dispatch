@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import '@unofficialbox/box-open-elements/fact-list'
 
 export function DetailsRail({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return <aside className="details-rail" aria-live="polite">
@@ -13,10 +14,5 @@ export function DetailsRail({ title, description, children }: { title: string; d
 }
 
 export function DetailList({ rows }: { rows: Array<[string, string]> }) {
-  return <dl className="detail-list">
-    {rows.map(([label, value]) => {
-      const valueClass = value.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')
-      return <div className={`detail-row detail-row-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`} key={label}><dt>{label}</dt><dd className={`detail-value detail-value-${valueClass}`}>{value}</dd></div>
-    })}
-  </dl>
+  return <box-fact-list className="detail-list" rows={rows.map(([label, value]) => ({ label, value }))}></box-fact-list>
 }

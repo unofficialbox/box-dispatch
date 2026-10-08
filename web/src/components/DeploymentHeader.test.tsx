@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { DeploymentHeader } from './DeploymentHeader'
 import type { DeploymentPlan, DispatchRun } from '../types'
@@ -33,27 +33,40 @@ describe('DeploymentHeader', () => {
     expect(environment?.getAttribute('label')).toBe('Environment')
     expect(environment?.getAttribute('value')).toBe('development')
     expect(container.querySelector('button.environment')).toBeNull()
+    const breadcrumb = container.querySelector('box-breadcrumb') as (HTMLElement & { items: Array<{ label: string; href?: string }> }) | null
+    expect(breadcrumb?.items).toEqual([
+      { label: 'Deployments', href: '#workspace', value: 'deployments' },
+      { label: 'Northstar CLM rollout', value: 'current' },
+    ])
   })
 
-  it('shows a failed validation as a red failed step', () => {
+  it('maps failed validation and unavailable deployment phases into BOE step states', () => {
     const { container } = render(<DeploymentHeader plan={plan} activePhase="Review" run={failedValidation} onPhaseChange={vi.fn()} />)
 
-    const validate = screen.getByRole('button', { name: 'Validate, failed' })
-    const step = validate.closest('li')
-    const symbol = validate.querySelector('.workflow-node-symbol')
+    const progress = container.querySelector('box-progress-steps') as (HTMLElement & { items: Array<{ label: string; status?: string }>; value: string }) | null
 
-    expect(step?.classList.contains('active')).toBe(true)
-    expect(step?.classList.contains('failed')).toBe(true)
-    expect(symbol?.textContent).toBe('×')
-    expect(symbol?.getAttribute('aria-hidden')).toBe('true')
-    expect(container.querySelector('.workflow-indicator li.failed')).toBe(step)
+    expect(progress?.value).toBe('Review')
+    expect(progress?.items.find((item) => item.label === 'Validate')?.status).toBe('failed')
+    expect(progress?.items.find((item) => item.label === 'Deploy')?.status).toBe('disabled')
+    expect(progress?.items.find((item) => item.label === 'Summary')?.status).toBe('disabled')
   })
 
-  it('adds a completed Summary step after deployment', () => {
+  it('marks deployment and summary complete after deployment', () => {
     const completedDeployment: DispatchRun = { id: 'deploy-1', action: 'deploy', status: 'completed', providers: [] }
-    render(<DeploymentHeader plan={plan} activePhase="Summary" run={completedDeployment} onPhaseChange={vi.fn()} />)
+    const { container } = render(<DeploymentHeader plan={plan} activePhase="Summary" run={completedDeployment} onPhaseChange={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: 'Deploy, complete' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Summary, complete' })).toBeTruthy()
+    const progress = container.querySelector('box-progress-steps') as (HTMLElement & { items: Array<{ label: string; status?: string }>; value: string }) | null
+    expect(progress?.value).toBe('Summary')
+    expect(progress?.items.find((item) => item.label === 'Deploy')?.status).toBe('complete')
+    expect(progress?.items.find((item) => item.label === 'Summary')?.status).toBe('complete')
+  })
+
+  it('forwards BOE step changes to workflow navigation', () => {
+    const onPhaseChange = vi.fn()
+    const { container } = render(<DeploymentHeader plan={plan} activePhase="Choose" run={null} onPhaseChange={onPhaseChange} />)
+    const progress = container.querySelector('box-progress-steps')
+
+    fireEvent(progress!, new CustomEvent('value-changed', { detail: { value: 'Connect' } }))
+    expect(onPhaseChange).toHaveBeenCalledWith('Connect')
   })
 })
