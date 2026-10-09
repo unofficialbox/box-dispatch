@@ -52,6 +52,7 @@ offer a selection target.
 | Components | `box-card` | Summary and detail surfaces. |
 | Components | `box-switch` | Provider and component enablement. |
 | Components | `box-badge` | Live and verified state labels. |
+| Components | `box-status-icon` | Shared execution and outcome glyphs in review and completed-deployment summaries. |
 | Components | `box-progress-bar` | Connection and run progress. |
 | Components | `box-spinner` | Loading states for historical deployment data and other asynchronous surfaces. |
 | Components | `box-metric-card` | Overview summary metrics and readiness state. |

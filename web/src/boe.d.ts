@@ -134,6 +134,10 @@ declare module 'react' {
         label?: string
         tone?: 'neutral' | 'info' | 'brand' | 'success' | 'error' | 'warning' | 'inprogress'
       }
+      'box-status-icon': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        kind?: import('@unofficialbox/box-open-elements/foundations/status').StatusKind
+        label?: string
+      }
       'box-progress-bar': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
         max?: number

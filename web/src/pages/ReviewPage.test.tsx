@@ -29,5 +29,7 @@ describe('ReviewPage', () => {
     const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Deployment', value: 'Box CLM' })
     expect(facts.rows).toContainEqual({ label: 'Solution', value: 'CLM deployment' })
+    expect(container.querySelectorAll('box-status-icon[kind="done"][label="Ready"]')).toHaveLength(2)
+    expect(container.textContent).not.toContain('✓')
   })
 })

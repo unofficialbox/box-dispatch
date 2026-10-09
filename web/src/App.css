@@ -675,11 +675,10 @@ body { background: #fff; }
 .summary-workspace { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(280px, .78fr); gap: 0; max-width: var(--dispatch-content-max); margin: 28px auto 0; }
 .summary-surface { display: block; min-height: 430px; }
 .summary-surface::part(card) { min-height: 430px; padding: 58px 48px 48px 0; border: 0; border-radius: 0; box-shadow: none; }
-.summary-success-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; color: #fff; background: var(--dispatch-green); font-size: 24px; font-weight: 750; }
+.summary-status-icon { display: inline-flex; margin: 10px 0 2px 6px; }
+.summary-status-icon::part(glyph) { display: inline-flex; transform: scale(1.75); transform-origin: center; }
 .summary-eyebrow { margin: 24px 0 0; color: var(--dispatch-green); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.summary-surface-attention .summary-success-mark { background: var(--dispatch-red); }
 .summary-surface-attention .summary-eyebrow { color: var(--dispatch-red); }
-.summary-surface-recorded .summary-success-mark { background: var(--dispatch-blue); }
 .summary-surface-recorded .summary-eyebrow { color: var(--dispatch-blue); }
 .summary-surface h2 { margin: 7px 0 0; color: var(--dispatch-navy); font-size: clamp(30px, 3vw, 42px); letter-spacing: -1.2px; }
 .summary-lede { max-width: 620px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 16px; line-height: 1.55; }
@@ -935,7 +934,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .plan-group h3 { font-size: 15px; }
 .plan-row { grid-template-columns: 138px minmax(0, 1fr); padding: 10px 0; border-top-color: var(--dispatch-rule-soft); font-size: 13px; }
 .plan-value-ready { display: inline-flex; align-items: center; gap: 8px; color: var(--dispatch-green); }
-.plan-value-ready::before { content: '✓'; display: inline-grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: #fff; background: var(--dispatch-green); font-size: 11px; }
+.plan-value-ready box-status-icon { flex: 0 0 auto; }
 .review-surface .notice { margin-top: 16px; }
 .review-surface .action-row { margin-top: 14px; padding-top: 15px; border-top-color: var(--dispatch-rule); }
 
