@@ -496,7 +496,7 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .settings-connection-list { display: grid; }
 .settings-connection-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 13px 16px; border-bottom: 1px solid var(--dispatch-rule-soft); }
 .settings-connection-row:last-child { border-bottom: 0; }
-.settings-connection-copy { min-width: 0; }
+.settings-connection-copy { flex: 1 1 0; min-width: 0; }
 .settings-connection-row strong, .settings-connection-row small { display: block; }
 .settings-connection-row strong { overflow: hidden; color: var(--dispatch-navy); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-connection-row small { overflow-wrap: anywhere; margin-top: 3px; color: var(--dispatch-muted); font-size: 11px; line-height: 1.35; }
@@ -968,7 +968,8 @@ box-drawer::part(close) { box-sizing: border-box; }
 .provider-connection-panel--compact .provider-logo--box img { width: 34px; }
 .provider-connection-panel--compact .provider-logo--salesforce img { width: 38px; }
 .overview-provider-actions { display: flex; flex: none; align-items: center; gap: 6px; }
-.provider-connection-panel--compact .settings-connection-row { min-height: 66px; padding: 12px 13px; }
+.provider-connection-panel--compact .settings-connection-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px; min-height: 66px; padding: 12px 13px; }
+.provider-connection-panel--compact .settings-connection-actions { min-width: 0; justify-self: end; }
 .provider-connection-panel--compact .settings-connection-row strong { font-size: 12px; }
 .provider-connection-panel--compact .settings-connection-status { align-items: flex-end; flex-direction: column; gap: 4px; }
 .overview-history-table { margin-top: 16px; }

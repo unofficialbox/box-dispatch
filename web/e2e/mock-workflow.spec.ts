@@ -376,10 +376,27 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
 })
 
 test('returns an authentication failure to a resumable connection step and recovers', async ({ page }) => {
-  await page.request.post('/api/packages', { data: { name: 'Recovery CLM rollout', templateId: 'clm', components: ['box', 'salesforce'], strategy: 'reuse' } })
   await page.route('**/api/connections/salesforce/check', async (route) => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Salesforce session expired. Reconnect the selected Salesforce org.' }) })
   })
+  await page.request.post('/api/packages', { data: { name: 'Recovery CLM rollout', templateId: 'clm', components: ['box', 'salesforce'], strategy: 'reuse' } })
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  const salesforcePanel = page.locator('.provider-connection-panel--compact[aria-label="Salesforce"]')
+  const notReadyBadge = salesforcePanel.locator('box-badge[label="Not ready"]')
+  await expect(notReadyBadge).toBeVisible()
+  const statusBounds = await salesforcePanel.evaluate((panel) => {
+    const badge = panel.querySelector('box-badge[label="Not ready"]')!.getBoundingClientRect()
+    const row = panel.querySelector('.settings-connection-row')!.getBoundingClientRect()
+    return {
+      insetRight: row.right - badge.right,
+      insideLeftEdge: badge.left >= row.left,
+    }
+  })
+  expect(statusBounds.insetRight).toBeGreaterThanOrEqual(12)
+  expect(statusBounds.insideLeftEdge).toBe(true)
+
   await page.goto('/#workspace')
   await expect(page.getByRole('heading', { name: 'Confirm connections' })).toBeVisible()
   await expect(page.locator('box-resource-row.connection-resource-row[label="Salesforce"] box-badge')).toHaveAttribute('label', 'Needs attention')
