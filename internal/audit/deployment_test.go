@@ -41,8 +41,8 @@ func TestDeployedResourcesIsEmptyWithoutRecordedResources(t *testing.T) {
 }
 
 func TestProviderRecordsCaptureDeploymentEnvironment(t *testing.T) {
-	records := providerRecords(nil, []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}, map[string]string{"box": " 5105484 "})
-	if len(records) != 1 || records[0].EnvironmentID != "5105484" {
+	records := providerRecords(nil, []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}, map[string]ProviderEnvironment{"box": {ID: " 5105484 ", Domain: " ACME.APP.BOX.COM "}})
+	if len(records) != 1 || records[0].EnvironmentID != "5105484" || records[0].EnvironmentDomain != "acme.app.box.com" {
 		t.Fatalf("provider records = %#v", records)
 	}
 }

@@ -96,6 +96,7 @@ type boxConnectionOption struct {
 	SubjectType   string `json:"subjectType,omitempty"`
 	ClientIDHint  string `json:"clientIdHint,omitempty"`
 	SubjectIDHint string `json:"subjectIdHint,omitempty"`
+	EnterpriseID  string `json:"enterpriseId,omitempty"`
 	Domain        string `json:"domain,omitempty"`
 }
 
@@ -112,7 +113,7 @@ func presentBoxConnectionOptions(settings config.ConnectionSettings) []boxConnec
 			ID: app.ID, Alias: app.Alias, Status: connectionReadiness(app.VerifiedAt != ""),
 			Selected: app.ID == settings.BoxSelectedConnectionID, Identity: app.Identity,
 			SubjectType: app.SubjectType, ClientIDHint: identifierHint(app.ClientID),
-			SubjectIDHint: identifierHint(app.SubjectID), Domain: safeConnectionHostname(app.Hostname),
+			SubjectIDHint: identifierHint(app.SubjectID), EnterpriseID: app.Enterprise, Domain: safeConnectionHostname(app.Hostname),
 		})
 	}
 	return options

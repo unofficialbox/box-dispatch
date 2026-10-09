@@ -22,6 +22,7 @@ export type DeploymentProviderDetail = Omit<ProviderSummary, 'remainingCount' | 
   manualItemCount: number
   deployedComponents: string[]
   environmentId?: string
+  environmentDomain?: string
   launchUrl?: string
 }
 
@@ -162,6 +163,7 @@ export type BoxConnectionOption = {
   subjectType?: string
   clientIdHint?: string
   subjectIdHint?: string
+  enterpriseId?: string
   domain?: string
 }
 
