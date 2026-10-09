@@ -69,7 +69,7 @@ offer a selection target.
 | Components | `box-link-button` | Historical-deployment return navigation and completed-run external destination actions. |
 | Components | `box-accordion` | The single technical-detail disclosure in run diagnostics. |
 | Patterns | `box-timeline` | The compact 12-event validation/deployment activity tail. |
-| Patterns | `box-run-trace` | Live provider and component validation/deployment activity. |
+| Patterns | `box-run-trace` | Live provider and component validation/deployment activity. Its public running state supplies the marker, status text, summary, token colors, and reduced-motion behavior; Dispatch does not patch the component shadow root. |
 
 The published React adapter now provides wrappers for buttons, dialogs, selects,
 comboboxes, text and number fields, checkboxes, tabs, cards, alerts, toasts, drawers,
