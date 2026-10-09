@@ -359,7 +359,11 @@ func summarizeRun(run *deploymentRun) runResponse {
 		if run.action == runActionDeploy && (run.status == runQueued || run.status == runRunning) {
 			status = deploymentProviderStatus(run.events, item.Provider)
 		}
-		providers = append(providers, providerSummary{Name: item.Provider, Status: string(status)})
+		providers = append(providers, providerSummary{
+			Name: item.Provider, Status: string(status),
+			RemainingCount:  len(item.Missing),
+			ManualItemCount: len(item.AdapterPending) + len(item.Experimental),
+		})
 	}
 	return runResponse{ID: run.id, Deployment: run.plan.Name, ChangeCount: changeCount, Action: run.action, Status: run.status, CreatedAt: run.createdAt, StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: providers, Resources: resources}
 }

@@ -33,4 +33,29 @@ describe('SummaryPage', () => {
     fireEvent.click(container.querySelector('box-button[label="Review changes"]')!)
     expect(onViewChanges).toHaveBeenCalledWith('deploy-1')
   })
+
+  it('does not call a deployment complete when work remains', () => {
+    const plan: DeploymentPlan = { exists: true, name: 'Northstar CLM', templateId: 'clm', template: 'CLM deployment', repository: 'example/repo', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }] }
+    const run: DispatchRun = { id: 'deploy-2', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present', remainingCount: 1, manualItemCount: 1 }] }
+    const { container } = render(<SummaryPage plan={plan} connections={[]} run={run} onOpenProvider={vi.fn()} onViewChanges={vi.fn()} onOverview={vi.fn()} />)
+
+    expect(screen.getByText('Northstar CLM needs attention')).toBeTruthy()
+    expect(screen.getByText('Deployment needs attention')).toBeTruthy()
+    expect(screen.getByText(/Some components remain or require manual work/)).toBeTruthy()
+    expect(container.querySelector('.summary-surface-attention')).toBeTruthy()
+    const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
+    expect(facts.rows).toContainEqual({ label: 'Status', value: 'Needs attention' })
+    expect(screen.queryByText('Every selected system finished successfully.')).toBeNull()
+  })
+
+  it('does not infer success when provider results were not recorded', () => {
+    const plan: DeploymentPlan = { exists: true, name: 'Northstar CLM', templateId: 'clm', template: 'CLM deployment', repository: 'example/repo', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }] }
+    const run: DispatchRun = { id: 'deploy-3', action: 'deploy', status: 'completed', providers: [] }
+    const { container } = render(<SummaryPage plan={plan} connections={[]} run={run} onOpenProvider={vi.fn()} onViewChanges={vi.fn()} onOverview={vi.fn()} />)
+
+    expect(screen.getByText('Northstar CLM was recorded')).toBeTruthy()
+    expect(screen.getByText('Deployment recorded')).toBeTruthy()
+    const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
+    expect(facts.rows).toContainEqual({ label: 'Status', value: 'Recorded' })
+  })
 })

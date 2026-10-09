@@ -74,7 +74,7 @@ describe('OverviewPage', () => {
       plan={{ ...plan, exists: true, name: 'Experience Cloud E2E' }}
       connections={connections}
       deployments={[]}
-      run={{ id: 'deploy-complete', deployment: 'Experience Cloud E2E', action: 'deploy', status: 'completed', providers: [] }}
+      run={{ id: 'deploy-complete', deployment: 'Experience Cloud E2E', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present', remainingCount: 0, manualItemCount: 0 }, { name: 'salesforce', status: 'present', remainingCount: 0, manualItemCount: 0 }] }}
       onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={onViewHistory}
     />)
 
@@ -92,6 +92,23 @@ describe('OverviewPage', () => {
     const historyButton = container.querySelector<HTMLElement>('box-button[label="View history"]')
     fireEvent.click(historyButton!)
     expect(onViewHistory).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a deployment with unfinished work active and reports the latest outcome accurately', () => {
+    const partial = { id: 'deployment-partial', name: 'clmDemo1', strategy: 'reuse', completedAt: new Date().toISOString(), providers: [{ name: 'box', status: 'present', remainingCount: 1, manualItemCount: 0 }] }
+    const { container } = render(<OverviewPage
+      plan={{ ...plan, exists: true, name: 'clmDemo1' }}
+      connections={connections}
+      deployments={[partial]}
+      run={null}
+      onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()}
+    />)
+
+    expect(container.querySelector<HTMLElement>('.overview-metric:first-child')?.getAttribute('value')).toBe('Active')
+    expect(container.querySelector('box-button[label="Continue deployment"]')).toBeTruthy()
+    expect(container.querySelector<HTMLElement>('.overview-metric:nth-child(3)')?.getAttribute('value')).toBe('0')
+    expect(container.querySelector<HTMLElement>('.overview-metric:last-child')?.getAttribute('value')).toBe('Needs attention')
+    expect(within(container).queryByText('No deployment in progress')).toBeNull()
   })
 
   it('uses immutable history when a completed run is not restored after refresh', () => {

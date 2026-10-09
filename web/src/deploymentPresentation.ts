@@ -18,9 +18,10 @@ export const formatDeploymentDate = (value?: string) => {
   return dateFormatter.format(date)
 }
 
-export const deploymentOutcome = (deployment: DeploymentSummary) => {
+export const deploymentOutcome = (deployment: Pick<DeploymentSummary, 'providers'>) => {
+  const unfinished = deployment.providers.some((provider) => (provider.remainingCount ?? 0) > 0 || (provider.manualItemCount ?? 0) > 0)
   const statuses = deployment.providers.map((provider) => provider.status.trim().toLowerCase())
-  if (statuses.length > 0 && statuses.every((status) => ['completed', 'present', 'ready', 'succeeded', 'success'].includes(status))) return { label: 'Complete', tone: 'success' as const }
+  if (!unfinished && statuses.length > 0 && statuses.every((status) => ['completed', 'present', 'ready', 'succeeded', 'success'].includes(status))) return { label: 'Complete', tone: 'success' as const }
   if (statuses.length > 0) return { label: 'Needs attention', tone: 'error' as const }
   return { label: 'Recorded', tone: 'info' as const }
 }

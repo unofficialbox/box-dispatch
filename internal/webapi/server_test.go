@@ -27,7 +27,10 @@ func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
 				DeploymentID: "run-42", Name: "Northstar CLM rollout", TemplateID: "clm", Strategy: "reuse-existing",
 				SourcePath: "/private/audit.json", PackageRoot: "/private/package",
 				CompletedAt: time.Date(2026, 8, 21, 15, 0, 0, 0, time.UTC),
-				Providers:   []audit.ProviderRecord{{Provider: "salesforce", StatusAfter: lifecycle.StatusPresent, Detail: "raw CLI output"}},
+				Providers: []audit.ProviderRecord{{
+					Provider: "salesforce", StatusAfter: lifecycle.StatusPresent, Detail: "raw CLI output",
+					Remaining: []string{"Permission Set:Contract Manager"}, AdapterPending: []string{"Record Page:Contract"},
+				}},
 			}}, nil
 		},
 	})
@@ -48,7 +51,7 @@ func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &summaries); err != nil {
 		t.Fatal(err)
 	}
-	if len(summaries) != 1 || summaries[0].ID != "run-42" || summaries[0].Name != "Northstar CLM rollout" || summaries[0].Providers[0].Status != string(lifecycle.StatusPresent) {
+	if len(summaries) != 1 || summaries[0].ID != "run-42" || summaries[0].Name != "Northstar CLM rollout" || summaries[0].Providers[0].Status != string(lifecycle.StatusPresent) || summaries[0].Providers[0].RemainingCount != 1 || summaries[0].Providers[0].ManualItemCount != 1 {
 		t.Fatalf("summaries = %#v", summaries)
 	}
 }

@@ -79,7 +79,8 @@ describe('HistoryPage', () => {
     const facts = [...container.querySelectorAll('box-fact-list')].find((element) => (element as HTMLElement & { rows: Array<{ label: string; value: string }> }).rows?.some((row) => row.label === 'Run ID')) as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Run ID', value: 'web-run-1' })
     expect(facts.rows).toContainEqual({ label: 'Duration', value: '2m0s' })
-    expect(container.querySelectorAll('box-badge[label="Complete"]')).toHaveLength(3)
+    expect(container.querySelectorAll('box-badge[label="Complete"]')).toHaveLength(1)
+    expect(container.querySelectorAll('box-badge[label="Needs attention"]')).toHaveLength(2)
     const componentTable = container.querySelector('box-table.deployment-component-table') as HTMLElement & { rows: TableRow[] }
     await waitFor(() => expect(componentTable.rows).toHaveLength(2))
     expect(componentTable.rows.map((row) => cells(row).component)).toEqual(['Metadata Template:Contract', 'UIBundle:clmreactapp'])
