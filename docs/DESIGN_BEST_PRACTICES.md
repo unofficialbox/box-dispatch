@@ -337,6 +337,9 @@ progress indicators, steppers, diff viewers, and notifications.
   parts; do not retain selectors for inaccessible shadow markup.
 - Before deleting a selector, confirm that its exact class is absent from static,
   conditional, and generated class names.
+- Consolidate repeated live declarations only when the selector, property,
+  importance, and responsive or at-rule context are identical. Preserve the final
+  declaration in cascade order as the authoritative value.
 - Re-run interaction tests plus desktop and narrow visual checks after cleanup. A
   successful CSS build alone does not prove that a fallback or responsive state was
   preserved.

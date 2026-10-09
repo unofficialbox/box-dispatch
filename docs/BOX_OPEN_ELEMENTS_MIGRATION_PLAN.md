@@ -252,8 +252,9 @@ Status: **Complete within the current component contracts**
    follow-up exact-class audit also removed the remaining pre-migration breadcrumb,
    path, resource-row, provider-card, drawer-button, table, and activity selectors.
 4. Consolidate the remaining CSS into page layout and Dispatch-specific composition
-   rules; use only published parts for component-level treatment. **Complete for the
-   Phase 3–4 surfaces.**
+   rules; use only published parts for component-level treatment. **Complete.** An
+   exact-cascade cleanup also removed earlier declarations superseded under the same
+   selector, importance, and at-rule context.
 5. Update the component-gap document with the final adopted/retained inventory.
    **Complete.** No new Phase 3–4 upstream gap was found.
 
