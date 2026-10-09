@@ -248,7 +248,9 @@ Status: **Complete within the current component contracts**
    navigation use `box-link-button`; technical diagnostics use `box-accordion`.
 3. Remove selectors in `App.css` that no longer target migrated table, file-list,
    activity-feed, metric, summary, and provider-summary markup. **Complete for the
-   migrated surfaces.** The former drawer-close bridge was removed in 0.28.1.
+   migrated surfaces.** The former drawer-close bridge was removed in 0.28.1. A
+   follow-up exact-class audit also removed the remaining pre-migration breadcrumb,
+   path, resource-row, provider-card, drawer-button, table, and activity selectors.
 4. Consolidate the remaining CSS into page layout and Dispatch-specific composition
    rules; use only published parts for component-level treatment. **Complete for the
    Phase 3–4 surfaces.**
