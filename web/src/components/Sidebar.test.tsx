@@ -24,6 +24,14 @@ describe('Sidebar', () => {
     expect(container.querySelector('box-nav-sidebar')?.hasAttribute('collapsed')).toBe(false)
   })
 
+  it('keeps explicit route names when collapsed styles hide the visual labels', () => {
+    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
+
+    for (const name of ['Overview', 'Deployments', 'Deployment history', 'Settings']) {
+      expect(within(container).getByRole('link', { name }).getAttribute('aria-label')).toBe(name)
+    }
+  })
+
   it('persists the compact preference while keeping the library toggle reachable', () => {
     const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
     const sidebar = container.querySelector('box-nav-sidebar')
