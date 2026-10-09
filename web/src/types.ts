@@ -1,6 +1,11 @@
 export type Phase = 'Choose' | 'Connect' | 'Configure' | 'Review' | 'Deploy' | 'Summary'
 
-export type ProviderSummary = { name: string; status: string }
+export type ProviderSummary = {
+  name: string
+  status: string
+  remainingCount?: number
+  manualItemCount?: number
+}
 
 export type DeploymentSummary = {
   id: string
@@ -10,7 +15,7 @@ export type DeploymentSummary = {
   providers: ProviderSummary[]
 }
 
-export type DeploymentProviderDetail = ProviderSummary & {
+export type DeploymentProviderDetail = Omit<ProviderSummary, 'remainingCount' | 'manualItemCount'> & {
   deployedCount: number
   presentCount: number
   remainingCount: number

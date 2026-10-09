@@ -1099,8 +1099,10 @@ type deploymentDetail struct {
 }
 
 type providerSummary struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	RemainingCount  int    `json:"remainingCount"`
+	ManualItemCount int    `json:"manualItemCount"`
 }
 
 type providerDetail struct {
@@ -1300,7 +1302,11 @@ func ensureEndOfJSON(decoder *json.Decoder) error {
 func summarizeDeployment(record audit.DeploymentRecord) deploymentSummary {
 	providers := make([]providerSummary, 0, len(record.Providers))
 	for _, provider := range record.Providers {
-		providers = append(providers, providerSummary{Name: provider.Provider, Status: string(provider.StatusAfter)})
+		providers = append(providers, providerSummary{
+			Name: provider.Provider, Status: string(provider.StatusAfter),
+			RemainingCount:  len(provider.Remaining),
+			ManualItemCount: len(provider.AdapterPending) + len(provider.Experimental),
+		})
 	}
 	name := strings.TrimSpace(record.Name)
 	if name == "" {

@@ -3,7 +3,7 @@ import '@unofficialbox/box-open-elements/metric-card'
 import type { ConnectionSummary, DeploymentPlan, DeploymentSummary, DispatchRun } from '../types'
 import { DeploymentHistoryTable } from '../components/DeploymentHistoryTable'
 import { EmptyProviderConnection, ProviderConnectionPanel, ProviderConnectionRow } from '../components/ProviderConnectionPanel'
-import { displayStrategy, formatDeploymentDate } from '../deploymentPresentation'
+import { deploymentOutcome, displayStrategy, formatDeploymentDate } from '../deploymentPresentation'
 
 type OverviewPageProps = {
   plan: DeploymentPlan
@@ -31,9 +31,9 @@ const isCurrentWeek = (value: string) => {
 const connectionFor = (name: string, connections: ConnectionSummary[]) => connections.find((connection) => connection.name.toLowerCase() === name.toLowerCase())
 
 const completedDeploymentForPlan = (plan: DeploymentPlan, deployments: DeploymentSummary[], run: DispatchRun | null) => {
-  if (run) return run.action === 'deploy' && run.status === 'completed'
+  if (run) return run.action === 'deploy' && run.status === 'completed' && deploymentOutcome(run).label === 'Complete'
   const planName = plan.name.trim().toLowerCase()
-  return plan.exists && Boolean(planName) && deployments.some((deployment) => deployment.name.trim().toLowerCase() === planName)
+  return plan.exists && Boolean(planName) && deployments.some((deployment) => deployment.name.trim().toLowerCase() === planName && deploymentOutcome(deployment).label === 'Complete')
 }
 
 function OverviewActionButton({ icon, label, disabled = false, onPress }: { icon: 'arrow-right' | 'gear'; label: string; disabled?: boolean; onPress: () => void }) {
@@ -92,8 +92,9 @@ function DeploymentHistory({ deployments }: Pick<OverviewPageProps, 'deployments
 export function OverviewPage({ plan, connections, connectionsRefreshing = false, deployments, run, onNewDeployment, onContinue, onBoxConnection, onSalesforceConnection, onOpenProvider, onViewHistory }: OverviewPageProps) {
   const selectedSystems = plan.components.length
   const verifiedSystems = plan.components.filter((component) => connectionFor(component.name, connections)?.verified).length
-  const completedThisWeek = deployments.filter((deployment) => isCurrentWeek(deployment.completedAt)).length
+  const completedThisWeek = deployments.filter((deployment) => isCurrentWeek(deployment.completedAt) && deploymentOutcome(deployment).label === 'Complete').length
   const latest = deployments[0]
+  const latestOutcome = latest ? deploymentOutcome(latest) : null
   const allReady = plan.exists && selectedSystems > 0 && verifiedSystems === selectedSystems
   const deploymentComplete = completedDeploymentForPlan(plan, deployments, run)
   const headingCopy = deploymentComplete ? 'No deployment is currently in progress.' : plan.exists ? allReady ? 'Ready to validate and deploy.' : 'Connect remaining systems before validation.' : 'Choose a solution to start a deployment.'
@@ -103,7 +104,7 @@ export function OverviewPage({ plan, connections, connectionsRefreshing = false,
       <Metric label="Active deployment" value={deploymentComplete ? 'None' : plan.exists ? 'Active' : 'Not started'} detail={deploymentComplete ? 'Start a new deployment' : plan.exists ? displayStrategy(plan.strategy) : 'Choose a solution'}/>
       <Metric label="Connections" value={connectionsRefreshing ? 'Checking' : `${verifiedSystems} of ${selectedSystems}`} detail={connectionsRefreshing ? 'Refreshing live status' : verifiedSystems === selectedSystems && selectedSystems > 0 ? 'Ready' : 'Need attention'} tone={!connectionsRefreshing && verifiedSystems === selectedSystems && selectedSystems > 0 ? 'success' : 'neutral'}/>
       <Metric label="Completed this week" value={String(completedThisWeek)} detail="Deployment records"/>
-      <Metric label="Latest deployment" value={latest ? 'Complete' : 'No runs'} detail={latest ? formatDeploymentDate(latest.completedAt) : 'Run a deployment to see history'}/>
+      <Metric label="Latest deployment" value={latestOutcome?.label ?? 'No runs'} detail={latest ? formatDeploymentDate(latest.completedAt) : 'Run a deployment to see history'} tone={latestOutcome?.tone === 'success' ? 'success' : 'neutral'}/>
     </section>
     <section className="overview-dashboard">
       <div className="overview-primary"><CurrentDeployment plan={plan} connections={connections} connectionsRefreshing={connectionsRefreshing} run={run} deploymentComplete={deploymentComplete} onContinue={onContinue} onViewHistory={onViewHistory}/><DeploymentHistory deployments={deployments}/></div>

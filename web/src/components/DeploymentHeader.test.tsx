@@ -52,11 +52,23 @@ describe('DeploymentHeader', () => {
   })
 
   it('marks deployment and summary complete after deployment', () => {
-    const completedDeployment: DispatchRun = { id: 'deploy-1', action: 'deploy', status: 'completed', providers: [] }
+    const completedDeployment: DispatchRun = { id: 'deploy-1', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present', remainingCount: 0, manualItemCount: 0 }] }
     const { container } = render(<DeploymentHeader plan={plan} activePhase="Summary" run={completedDeployment} />)
 
     const path = container.querySelector('box-path') as (HTMLElement & { states: string[] }) | null
+    expect(container.querySelector('box-badge[label="Deployment complete"][tone="success"]')).toBeTruthy()
     expect(path?.getAttribute('current')).toBe('Summary')
     expect(path?.states).toEqual(['complete', 'complete', 'complete', 'complete', 'complete', 'current'])
+  })
+
+  it('marks the summary as needing attention when deployment work remains', () => {
+    const partialDeployment: DispatchRun = { id: 'deploy-2', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present', remainingCount: 1, manualItemCount: 1 }] }
+    const { container } = render(<DeploymentHeader plan={plan} activePhase="Summary" run={partialDeployment} />)
+
+    const path = container.querySelector('box-path') as (HTMLElement & { states: string[] }) | null
+    expect(container.querySelector('box-badge[label="Needs attention"][tone="error"]')).toBeTruthy()
+    expect(path?.getAttribute('current')).toBe('Summary')
+    expect(path?.hasAttribute('has-error')).toBe(true)
+    expect(path?.states.at(-1)).toBe('error')
   })
 })

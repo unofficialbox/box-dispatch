@@ -673,6 +673,10 @@ body { background: #fff; }
 .summary-surface::part(card) { min-height: 430px; padding: 58px 48px 48px 0; border: 0; border-radius: 0; box-shadow: none; }
 .summary-success-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; color: #fff; background: var(--dispatch-green); font-size: 24px; font-weight: 750; }
 .summary-eyebrow { margin: 24px 0 0; color: var(--dispatch-green); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.summary-surface-attention .summary-success-mark { background: var(--dispatch-red); }
+.summary-surface-attention .summary-eyebrow { color: var(--dispatch-red); }
+.summary-surface-recorded .summary-success-mark { background: var(--dispatch-blue); }
+.summary-surface-recorded .summary-eyebrow { color: var(--dispatch-blue); }
 .summary-surface h2 { margin: 7px 0 0; color: var(--dispatch-navy); font-size: clamp(30px, 3vw, 42px); letter-spacing: -1.2px; }
 .summary-lede { max-width: 620px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 16px; line-height: 1.55; }
 .summary-destinations { max-width: 720px; margin-top: 34px; }

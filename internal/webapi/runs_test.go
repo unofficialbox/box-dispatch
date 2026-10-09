@@ -264,8 +264,11 @@ func TestSummarizeRunIncludesDeployedResources(t *testing.T) {
 		action: runActionDeploy,
 		status: runCompleted,
 		items: []lifecycle.Item{{
-			Provider: "salesforce",
-			Status:   lifecycle.StatusPresent,
+			Provider:       "salesforce",
+			Status:         lifecycle.StatusPresent,
+			Missing:        []string{"Permission Set:Contract Manager"},
+			AdapterPending: []string{"Record Page:Contract"},
+			Experimental:   []string{"Agent:Contract Review"},
 			Resources: []lifecycle.ResourceReference{{
 				Provider:  "salesforce",
 				Component: "Salesforce Experience",
@@ -280,6 +283,9 @@ func TestSummarizeRunIncludesDeployedResources(t *testing.T) {
 	response := summarizeRun(run)
 	if len(response.Resources) != 1 || response.Resources[0].Kind != "experience_site" || response.Resources[0].URL != "https://example.my.site.com/clm" {
 		t.Fatalf("resources = %#v", response.Resources)
+	}
+	if len(response.Providers) != 1 || response.Providers[0].RemainingCount != 1 || response.Providers[0].ManualItemCount != 2 {
+		t.Fatalf("providers = %#v", response.Providers)
 	}
 }
 
