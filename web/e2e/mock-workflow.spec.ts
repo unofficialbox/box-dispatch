@@ -14,6 +14,17 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   const sidebar = page.locator('box-nav-sidebar')
   await expect(sidebar).not.toHaveAttribute('collapsed', '')
   const expandedWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
+  const expandedNavigationRows = await sidebar.locator('.nav-route').evaluateAll((rows) => rows.map((row) => {
+    const icon = row.querySelector<HTMLElement>('[data-nav-icon]')!.getBoundingClientRect()
+    const label = row.querySelector<HTMLElement>('[data-nav-label]')!.getBoundingClientRect()
+    return {
+      iconBeforeLabel: icon.right < label.left,
+      centerDelta: Math.abs((icon.top + icon.height / 2) - (label.top + label.height / 2)),
+      rowTextAlign: getComputedStyle(row).textAlign,
+      labelTextAlign: getComputedStyle(row.querySelector<HTMLElement>('[data-nav-label]')!).textAlign,
+    }
+  }))
+  expect(expandedNavigationRows.every(({ iconBeforeLabel, centerDelta, rowTextAlign, labelTextAlign }) => iconBeforeLabel && centerDelta < 0.5 && rowTextAlign === 'left' && labelTextAlign === 'left')).toBe(true)
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' }).click()
   await expect(sidebar).toHaveAttribute('collapsed', '')
   await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(expandedWidth)

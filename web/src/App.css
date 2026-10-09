@@ -1042,7 +1042,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .sidebar::part(sidebar) { inline-size: 248px; padding: 22px 14px 18px; background: linear-gradient(180deg, #071d43 0%, #031632 100%); }
 .sidebar[collapsed]::part(sidebar) { inline-size: 76px; padding-inline: 10px; }
 .sidebar::part(header) { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 18px; }
-.sidebar::part(body) { gap: 6px; }
+.sidebar::part(body) { align-items: stretch; gap: 6px; }
 .brand { min-height: 52px; min-width: 0; padding: 4px; border-radius: 10px; }
 .brand:hover, .brand:focus-visible { background: rgb(255 255 255 / 7%); }
 .brand-icon { width: 42px; height: 42px; }
@@ -1050,12 +1050,14 @@ box-drawer::part(close) { box-sizing: border-box; }
 .brand-name { display: block; color: #fff; font-size: 19px; font-weight: 750; letter-spacing: -.45px; }
 .brand-copy small { color: #91a9cf; font-size: 10px; font-weight: 650; letter-spacing: .03em; }
 .nav-group-label { color: #7f99c1; }
-.nav-link { min-height: 46px; padding-inline: 11px; color: #c2d2eb; font-size: 13px; font-weight: 650; text-align: left; }
+.nav-link { display: flex; min-height: 46px; align-items: center; justify-content: flex-start; gap: 12px; padding-inline: 11px; color: #c2d2eb; font-size: 13px; font-weight: 650; line-height: 1.2; text-align: left; }
 .nav-link:hover, .nav-link:focus-visible { color: #fff; background: rgb(55 124 230 / 18%); }
 .nav-link.active { color: #fff; background: rgb(45 116 226 / 34%); box-shadow: inset 3px 0 #5ca2ff, inset 0 0 0 1px rgb(140 188 255 / 12%); }
-.nav-link [data-nav-icon] { width: 24px; height: 24px; }
+.nav-link [data-nav-icon] { width: 24px; height: 24px; flex: 0 0 24px; }
+.nav-link [data-nav-label] { min-width: 0; flex: 1 1 auto; text-align: left; }
 .sidebar[collapsed] .brand { width: 48px; padding-inline: 3px; }
 .sidebar[collapsed] .brand-copy { display: none; }
+.sidebar[collapsed] .nav-link { justify-content: center; gap: 0; }
 .sidebar-context { display: grid; gap: 3px; padding: 2px 8px 0; color: #92a9ca; }
 .sidebar-context strong { color: #dbe7f8; font-size: 11px; }
 .sidebar-context span { font-size: 10px; }
