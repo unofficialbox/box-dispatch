@@ -23,7 +23,7 @@ export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, on
     <button className={`nav-link nav-button ${activeView === 'workflow' ? 'active' : ''}`} type="button" onClick={onNewDeployment} aria-current={activeView === 'workflow' ? 'page' : undefined} aria-label="Deployments" title="Deployments"><span data-nav-icon><RailIcon name="rocket" /></span><span data-nav-label>Deployments</span></button>
     <button className={`nav-link nav-button ${activeView === 'history' ? 'active' : ''}`} type="button" onClick={onHistory} aria-current={activeView === 'history' ? 'page' : undefined} aria-label="Deployment history" title="History"><span data-nav-icon><RailIcon name="clock2" /></span><span data-nav-label>History</span></button>
     <button className={`nav-link nav-button ${activeView === 'settings' ? 'active' : ''}`} type="button" onClick={onSettings} aria-current={activeView === 'settings' ? 'page' : undefined} aria-label="Settings" title="Settings"><span data-nav-icon><RailIcon name="settings" /></span><span data-nav-label>Settings</span></button>
-    <box-sidebar-toggle-button ref={toggleRef} className="sidebar-toggle" controls="dispatch-navigation" label={collapsed ? 'Expand navigation' : 'Collapse navigation'} expanded={!collapsed}></box-sidebar-toggle-button>
+    <box-sidebar-toggle-button ref={toggleRef} className="sidebar-toggle" slot="header" controls="dispatch-navigation" label={collapsed ? 'Expand navigation' : 'Collapse navigation'} expanded={!collapsed}></box-sidebar-toggle-button>
     <a className="nav-link nav-help" href="#help" aria-label="Help" title="Help"><span data-nav-icon><RailIcon name="help" /></span><span data-nav-label>Help</span></a>
   </box-nav-sidebar>
 }

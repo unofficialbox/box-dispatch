@@ -29,15 +29,17 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.27.0.
+The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.28.1.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
 work must remain distinct from functionality available in the installed package.
 
-Version 0.6.0 contains several items that were previously tracked as accepted gaps or
-enhancements. Dispatch adopted those APIs in the same upgrade and removed the local
-substitutes where the published contract matched the approved workflow.
+Versions 0.28.0 and 0.28.1 resolve the dialog, drawer, solution-tile, sidebar-toggle,
+and application-shell issues previously tracked here. Dispatch adopted those APIs
+and removed the matching local substitutes. Resource Row is also published, but its
+selectable-row contract does not match Dispatch's current read-only connection
+summaries, so those remain application composition.
 
 ## Adopted in Dispatch
 
@@ -52,7 +54,9 @@ substitutes where the published contract matched the approved workflow.
 | Components | `box-spinner` | Loading states for historical deployment data and other asynchronous surfaces. |
 | Components | `box-metric-card` | Overview summary metrics and readiness state. |
 | Components | `box-drawer` | Connection editing and run diagnostics, including large sizing, busy state, sticky footer actions, focus management, Escape/backdrop dismissal, and controlled open state. |
+| Components | React `Dialog` adapter / `box-dialog` | Deployment confirmation, including disabled and busy confirmation while Salesforce package preparation is active. |
 | Components | `box-text-field` and `box-select` | Box credentials and authenticated Salesforce-org selection, including autocomplete, password reveal, loading, and empty-state support. |
+| Components | `box-tile-group` | Deployment strategy, solution selection, and Settings defaults with per-option metadata, availability, and status. |
 | Components | `box-split-view` | Connect and Configure master-detail page structure. |
 | Components | `box-app-shell`, `box-nav-sidebar`, and `box-sidebar-toggle-button` | Application landmarks, responsive shell structure, compact route navigation, and explicit expand/collapse state. |
 | Components | `box-breadcrumb` | Deployment location and workspace return navigation. |
@@ -76,11 +80,12 @@ Dispatch keeps a narrow JSX declaration boundary for those elements.
 | --- | --- | --- | --- |
 | Components | `box-progress-steps` | Published 0.27.0 provides controlled navigation and per-step complete, current, pending, blocked, failed, and disabled states, keyboard navigation, public parts, and `value-changed`. | Adopted. Dispatch maps workflow eligibility into the published states and uses public parts to present the element as the approved horizontal workflow. |
 | Components | `box-table` | Escaped text, badge, and link cells plus expansion, loading, empty, error, sorting, and selection are supported. | Adopted for all current Dispatch data surfaces. Deployment history intentionally uses concise provider names rather than logos, so its cells fit the safe published descriptors. |
-| Components | `box-drawer` | Controlled state, focus behavior, sticky footer, size presets, busy state, mobile presentation, and cancelable dismissal are present. Version 0.27.0 promotes an internal native dialog without relocating the host, preserving React's delegated event root. | Adopted for connection and diagnostics workflows; `DrawerButton` uses React click handlers. |
+| Components | `box-drawer` | Controlled state, focus behavior, sticky footer, size presets, busy state, mobile presentation, cancelable dismissal, and `hide-close-button` are present. | Adopted for connection and diagnostics workflows. Connection drawers use the public close-affordance API instead of a CSS part override. |
 | Components | `box-text-field` | Shared field contract, autocomplete, password reveal, loading, and valid states are present. | Adopted for connection forms. |
 | Components | `box-select` | Shared field contract, loading and empty states, options, single/multiple values, and `value-changed` are present. | Adopted for authenticated-org and subject selection. |
 | Components | `box-split-view` | Controlled ratio, optional resizing, and `ratio-changed` are present. | Adopted as the Connect and Configure layout primitive. Selection and detail behavior remain application composition. |
-| Components | `box-nav-sidebar` | Structured navigation items, collapsible behavior, slots, responsive parts, and accessible collapsed-row naming are present. | Adopted with application-owned hash routing and active state. The toggle stays in the always-visible body until issue #359 resolves the collapsed-header recipe. |
+| Components | `box-nav-sidebar` | Structured navigation items, collapsible behavior, slots, responsive parts, accessible collapsed-row naming, and a reachable collapsed header toggle are present. | Adopted with application-owned hash routing and active state. The toggle now uses the documented header slot. |
+| Components | `box-resource-row` | Selectable resource identity, metadata, status, and secondary-action regions are published. | Available for future selectable connection lists. Not used for current read-only summary rows because disabling its selection also dims the entire resource. |
 | Components | `box-stage-path` | Read-only horizontal lifecycle steps are published. | Do not use for editable wizard navigation because it does not expose eligibility-gated step activation. |
 | Components | `box-progress-ring` | A minimum 48px ring that includes a percentage and label. | Use only when showing aggregate progress. It is intentionally not used as a per-row activity marker because repeated 0%-100% rings make the live log harder to scan. |
 
@@ -94,14 +99,11 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.27.0 review
+## Remaining enhancements after the 0.28.1 review
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
 | P1 | Foundations | TypeScript custom-element declarations | JSX tag maps and typed event maps for React and TypeScript consumers. | Maintain the narrow local `boe.d.ts` boundary and native event listeners. Remove redundant declarations after adoption. |
-| P2 | Components | `box-drawer` close affordance control | A `closable` property or equivalent slot/configuration to opt out of the built-in header Close control when a workflow presents one explicit footer Close action. | Use the published drawer and its footer slot; hide only the duplicate header part on connection drawers until a public configuration is available. |
-| P1 | Components | `box-nav-sidebar` collapsed toggle reachability ([#359](https://github.com/unofficialbox/box-open-elements/issues/359)) | Keep the companion toggle reachable after collapse; the published header-slot recipe currently hides the control with the header. | Keep `box-sidebar-toggle-button` in the always-visible body and push it toward the footer with light-DOM layout. |
-| P1 | Components | `box-app-shell` + `box-nav-sidebar` landmark composition ([#360](https://github.com/unofficialbox/box-open-elements/issues/360)) | Avoid nested navigation landmarks when the sidebar is placed in the shell's documented nav slot. | Use distinct outer and inner labels so the landmarks remain distinguishable until a single-landmark composition is published. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Foundations | `box-run-trace` marker geometry tokens | The pattern's connector position is coupled to its internal step padding. Public marker/connector inset tokens, or an invariant that part-level step padding preserves alignment, would let consuming products tune density without breaking the trace geometry. | Dispatch currently overrides the published `step` and `marker` parts together with the step connector pseudo-element in `App.css`. The mock end-to-end suite checks marker centres and connector edge alignment. Recheck these coupled overrides on every package upgrade until geometry tokens are published. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
@@ -148,7 +150,7 @@ those remaining components, including `box-spinner`, `box-badge`,
 1. Use the published drawer, field, select, split-view, metric-card, table, timeline, run-trace, section, card, fact-list, and progress APIs where their verified contracts fit.
 2. Use `box-progress-steps` for workflow state and interaction; limit Dispatch styling to the published parts needed for the approved horizontal composition.
 3. Replace local JSX declarations with official React JSX tag maps if they are published.
-4. Remove the sidebar-toggle body workaround after issue #359 is released and adopted.
+4. Use the published sidebar header-toggle and single-navigation-landmark composition; do not restore the former body-slot or nested-landmark workarounds.
 5. Re-run this source-level intake on each Box Open Elements upgrade and update this document with published-version evidence.
 
 ## Adoption rule

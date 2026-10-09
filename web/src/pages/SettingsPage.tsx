@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert } from '@unofficialbox/box-open-elements-react/alert'
 import { EmptyProviderConnection, ProviderConnectionPanel, ProviderConnectionRow } from '../components/ProviderConnectionPanel'
+import { SolutionTileGroup } from '../components/SolutionTileGroup'
 import { StrategyTileGroup } from '../components/StrategyTileGroup'
 import type { ConnectionSummary, DeploymentDefaults } from '../types'
 
@@ -24,18 +25,15 @@ const defaultSolutions = [
 ] as const
 
 function DefaultSolutionList({ selectedID, disabled = false, readOnly = false, onSelect }: { selectedID: string; disabled?: boolean; readOnly?: boolean; onSelect?: (id: string) => void }) {
-  return <fieldset className="settings-default-solutions">
-    <legend>Default solution</legend>
-    <div className="settings-default-solution-list" role="radiogroup" aria-label="Default solution">
-      {defaultSolutions.map((solution) => {
-        const selected = solution.available && selectedID === solution.id
-        return <button key={solution.id} type="button" role="radio" aria-checked={selected} className={`settings-default-solution-row${selected ? ' selected' : ''}${solution.available ? '' : ' coming-soon'}`} disabled={disabled || readOnly || !solution.available} onClick={() => onSelect?.(solution.id)}>
-          <span className="settings-default-solution-copy"><strong>{solution.name}</strong><small>{solution.description}</small></span>
-          <box-badge label={selected ? 'Selected' : solution.available ? 'Available' : 'Coming soon'} tone={selected ? 'info' : 'neutral'}></box-badge>
-        </button>
-      })}
-    </div>
-  </fieldset>
+  const options = defaultSolutions.map((solution) => ({
+    id: solution.id,
+    label: solution.name,
+    description: solution.description,
+    disabled: !solution.available,
+    disabledReason: solution.available ? undefined : 'Not available yet',
+    status: { label: solution.available && selectedID === solution.id ? 'Selected' : solution.available ? 'Available' : 'Coming soon', tone: solution.available && selectedID === solution.id ? 'success' as const : 'neutral' as const },
+  }))
+  return <SolutionTileGroup className="settings-default-solution-list" legend="Default solution" name="default-solution" options={options} value={selectedID} disabled={disabled || readOnly} onChange={onSelect}/>
 }
 
 function DefaultSystemSwitch({ checked, disabled, label, description, onChange }: { checked: boolean; disabled?: boolean; label: string; description: string; onChange?: (checked: boolean) => void }) {

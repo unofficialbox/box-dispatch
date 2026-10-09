@@ -91,7 +91,7 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
   const creating = scratchJob?.status === 'queued' || scratchJob?.status === 'creating'
   const preparing = scratchJob?.status === 'preparing'
   const canCreateScratch = Boolean(connection?.devHubConfigured)
-  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Salesforce connections" position="right" size="large" busy={loading}>
+  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Salesforce connections" position="right" size="large" busy={loading} hideCloseButton>
     <section className="drawer-content salesforce-environments">
       {error && <Alert className="drawer-inline-error" heading="Salesforce connection needs attention" message={error} tone="error" open/>}
       {orgs.length > 0 && <section className="saved-connection-summary salesforce-current-org" aria-label="Connected Salesforce orgs">
@@ -158,7 +158,7 @@ export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLo
   const [addingConnection, setAddingConnection] = useState(apps.length === 0)
   const loggingIn = oauthJob?.status === 'pending'
   const canLogin = Boolean(connection?.oauthConfigured)
-  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Box connections" position="right" size="large" busy={loading}>
+  return <box-drawer ref={drawerRef} className="connection-drawer" open heading="Box connections" position="right" size="large" busy={loading} hideCloseButton>
     <section className="drawer-content box-environments">
       {error && <Alert className="drawer-inline-error" heading="Box connection needs attention" message={error} tone="error" open/>}
       {apps.length > 0 && <section className="saved-connection-summary selected-environment-summary" aria-label="Selected Box environment">
