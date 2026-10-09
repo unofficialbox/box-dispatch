@@ -284,6 +284,8 @@ Use a consistent sequence:
 ### Color
 
 - Use the brand color for navigation, links, and primary actions.
+- Show active navigation with a restrained background plus text and icon contrast.
+  Avoid decorative left-edge accent bars that compete with the item content.
 - Use green only for positive state, not as a decorative card background.
 - Use red for errors and destructive actions.
 - Use neutral grays and soft rules for structure.

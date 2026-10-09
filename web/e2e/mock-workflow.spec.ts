@@ -25,6 +25,12 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     }
   }))
   expect(expandedNavigationRows.every(({ iconBeforeLabel, centerDelta, rowTextAlign, labelTextAlign }) => iconBeforeLabel && centerDelta < 0.5 && rowTextAlign === 'left' && labelTextAlign === 'left')).toBe(true)
+  const activeNavigationStyle = await sidebar.locator('.nav-route.active').evaluate((row) => ({
+    beforeContent: getComputedStyle(row, '::before').content,
+    boxShadow: getComputedStyle(row).boxShadow,
+  }))
+  expect(activeNavigationStyle.beforeContent).toBe('none')
+  expect(activeNavigationStyle.boxShadow).not.toContain('3px 0px')
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' }).click()
   await expect(sidebar).toHaveAttribute('collapsed', '')
   await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(expandedWidth)

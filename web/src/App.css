@@ -11,7 +11,6 @@ button, select { font: inherit; }
 .nav-link { width: 100%; padding: 11px 12px; border: 0; border-radius: 6px; color: #51627c; background: transparent; font-size: 14px; font-weight: 650; text-align: left; text-decoration: none; cursor: pointer; }
 .nav-link:hover, .nav-link:focus-visible { color: #0057be; background: #f2f7ff; outline: none; }
 .nav-link.active { position: relative; color: #0057be; background: #eef6ff; }
-.nav-link.active::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 0; width: 3px; border-radius: 3px; background: #0061d3; }
 .nav-button { margin-top: 12px; color: #fff; background: #0061d3; text-align: center; }
 .nav-button:hover, .nav-button:focus-visible { color: #fff; background: #0057be; }
 .sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; padding: 16px 8px 0; border-top: 1px solid #e6edf5; font-size: 12px; }
@@ -84,7 +83,6 @@ h1, h2, h3, p { margin-top: 0; } h1 { margin-bottom: 0; font-size: clamp(28px, 3
 .nav-link > span:first-child { font-size: 21px; line-height: 1; }
 .nav-link:hover, .nav-link:focus-visible { color: #fff; background: rgba(48, 123, 240, .2); }
 .nav-link.active { color: #fff; background: rgba(32, 107, 219, .42); box-shadow: inset 0 0 0 1px rgba(146, 192, 255, .15); }
-.nav-link.active::before { display: none; }
 .nav-button { margin-top: 0; color: #d7e6ff; background: transparent; }
 .nav-button:hover, .nav-button:focus-visible { color: #fff; background: rgba(48, 123, 240, .2); }
 
@@ -878,7 +876,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .connect-workspace::part(split-view), .configure-workspace::part(split-view) { grid-template-columns: minmax(0, 2.05fr) minmax(280px, .78fr) !important; gap: 0; }
 .connection-list { gap: 0; margin-top: 0; border-top: 1px solid var(--dispatch-rule); }
 .connection-card::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); border-radius: 0; background: #fff; }
-.connection-card.selected::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); background: var(--dispatch-surface-selected); box-shadow: inset 3px 0 var(--dispatch-blue); }
+.connection-card.selected::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); background: var(--dispatch-surface-selected); box-shadow: none; }
 .connection-row, .connection-row.ready { min-height: 84px; padding: 14px 18px; }
 .connection-state { width: 24px; height: 24px; }
 .connection-action { min-width: 112px; }
@@ -900,7 +898,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .strategy-section h3 { margin-bottom: 10px; font-size: 15px; }
 .configuration-list { margin-top: 16px; border-top: 1px solid var(--dispatch-rule); }
 .configuration-card::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); border-radius: 0; background: #fff; }
-.configuration-card.selected::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); background: var(--dispatch-surface-selected); box-shadow: inset 3px 0 var(--dispatch-blue); }
+.configuration-card.selected::part(card) { border: 0; border-bottom: 1px solid var(--dispatch-rule); background: var(--dispatch-surface-selected); box-shadow: none; }
 .configuration-provider { min-height: 79px; padding: 11px 16px; }
 .configuration-mark { border-radius: 7px; }
 .configuration-copy > strong { font-size: 15px; }
@@ -1052,7 +1050,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .nav-group-label { color: #7f99c1; }
 .nav-link { display: flex; min-height: 46px; align-items: center; justify-content: flex-start; gap: 12px; padding-inline: 11px; color: #c2d2eb; font-size: 13px; font-weight: 650; line-height: 1.2; text-align: left; }
 .nav-link:hover, .nav-link:focus-visible { color: #fff; background: rgb(55 124 230 / 18%); }
-.nav-link.active { color: #fff; background: rgb(45 116 226 / 34%); box-shadow: inset 3px 0 #5ca2ff, inset 0 0 0 1px rgb(140 188 255 / 12%); }
+.nav-link.active { color: #fff; background: rgb(45 116 226 / 34%); box-shadow: inset 0 0 0 1px rgb(140 188 255 / 12%); }
 .nav-link [data-nav-icon] { width: 24px; height: 24px; flex: 0 0 24px; }
 .nav-link [data-nav-label] { min-width: 0; flex: 1 1 auto; text-align: left; }
 .sidebar[collapsed] .brand { width: 48px; padding-inline: 3px; }
