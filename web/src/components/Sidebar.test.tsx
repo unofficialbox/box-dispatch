@@ -28,6 +28,7 @@ describe('Sidebar', () => {
     const toggle = container.querySelector('box-sidebar-toggle-button')
 
     expect(toggle?.getAttribute('label')).toBe('Expand navigation')
+    expect(toggle?.getAttribute('slot')).toBe('header')
     fireEvent(toggle!, new CustomEvent('toggle', { detail: { expanded: true } }))
     expect(sidebar?.hasAttribute('collapsed')).toBe(false)
     expect(toggle?.getAttribute('label')).toBe('Collapse navigation')

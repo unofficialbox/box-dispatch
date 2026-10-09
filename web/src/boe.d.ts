@@ -139,6 +139,7 @@ declare module 'react' {
         position?: 'left' | 'right' | 'bottom'
         size?: 'small' | 'medium' | 'large' | 'full'
         busy?: boolean
+        hideCloseButton?: boolean
       }
       'box-diff-viewer': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         heading?: string

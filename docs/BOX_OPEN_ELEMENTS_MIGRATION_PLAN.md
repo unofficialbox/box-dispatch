@@ -11,30 +11,30 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements `main` branch at package version `0.27.0`, reviewed on
-  October 7, 2026.
+- the Box Open Elements packages at version `0.28.1`, reviewed on October 9, 2026.
 
-Phase 0 upgraded both packages to 0.27.0. Several components that Dispatch currently
-implements itself are available at that baseline but were not available, or did not
-have the same contract, in the original 0.12.0 version.
+Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
+React packages in lockstep and adopts the component contracts released in 0.28.0.
 
 ## Implementation status
 
 - **Phase 0 complete:** core and React adapter upgraded together to 0.27.0; lockfile,
   embedded browser assets, frontend tests, end-to-end tests, and the full Go gate are
   current.
+- **0.28.1 follow-up complete:** confirmation dialogs, rich solution/default tiles,
+  drawer close-affordance control, the collapsed sidebar toggle, and shell navigation
+  landmarks now use the published APIs instead of Dispatch workarounds.
 - **Phase 1 complete within the published component contracts:** fact lists,
   strategy tiles, history filters, React field adapters, alerts, spinners, status
   badges, and toast integration are migrated and verified.
 - **Phase 2 complete:** the application shell, sidebar, breadcrumb, and workflow
-  navigation use the published 0.27 components, with issues #359 and #360 tracking
-  the two remaining shell-composition constraints.
+  navigation use the published components. Version 0.28 resolves the former
+  collapsed-toggle and nested-navigation constraints.
 - **Phases 3 and 4 complete:** deployment data, validation-file selection, live
   activity, metrics, provider summaries, and completed-run composition now use
   the published table, timeline, metric, card, section, and fact-list contracts.
-- The confirmation dialog and rich solution tiles remain custom until the published
-  components can preserve their required behavior.
-- Upstream gaps remain tracked in issues #354, #355, #357, and #358.
+- The connection summary rows remain Dispatch composition. The published Resource
+  Row is selectable; these summaries are intentionally read-only.
 
 ## Decision rules
 
@@ -68,9 +68,9 @@ have the same contract, in the original 0.12.0 version.
 
 | Current Dispatch surface | Box Open Elements target | Decision |
 | --- | --- | --- |
-| Solution cards in `ChoosePage` | `box-tile-group` | Retain the custom rows for now. The current options require sector and availability metadata that cannot sit outside each repeated option without weakening the association. Issue #358 tracks concise per-option metadata/status. |
+| Solution cards in `ChoosePage` | `box-tile-group` | Replaced in 0.28.1 using published per-option description and metadata. Dispatch retains the solution data and selected value. |
 | Strategy buttons in `ConfigurePage` and `SettingsPage` | `box-tile-group` | Replaced in Phase 1 with a shared event-integration component and native radio semantics. |
-| Default-solution rows in `SettingsPage` | `box-tile-group` | Retain with the Choose-page solution cards pending issue #358; do not discard the per-option availability state merely to adopt the primitive. |
+| Default-solution rows in `SettingsPage` | `box-tile-group` | Replaced in 0.28.1 using published status and disabled-reason fields, preserving availability context. |
 | Native history search input | `box-search-field` | Replaced in Phase 1 and bound to `value-changed`; the component owns its clear behavior. |
 | Native history selects | React `Select` adapter / `box-select` | Replaced in Phase 1. The adapter owns property synchronization and native custom-event binding. |
 | History filter layout and clear behavior | `box-filter-bar` only if its query, sort, view, and chip model fits | Prototype rather than force. The current filters are four independent fields; composing `box-search-field`, `box-select`, and `box-button` is acceptable if `box-filter-bar` would distort the model. |
@@ -80,7 +80,7 @@ have the same contract, in the original 0.12.0 version.
 
 | Current Dispatch surface | Box Open Elements target | Decision |
 | --- | --- | --- |
-| `DeploymentConfirmationDialog` | React `Dialog` adapter / `box-dialog` | Retain the custom dialog for now. Dispatch must keep confirmation unavailable while Salesforce package preparation is active, but `box-dialog` cannot disable or hold its confirm action and closes immediately on confirm. Issue #357 tracks disabled and busy confirmation states. |
+| `DeploymentConfirmationDialog` | React `Dialog` adapter / `box-dialog` | Replaced in 0.28.1. The published disabled/busy confirm contract keeps deployment unavailable while Salesforce package preparation is active. |
 | Inline connection and defaults errors | React `Alert` adapter / `box-alert` | Replaced in Phase 1 while preserving the app-owned error messages. |
 | Custom status pills in `DeploymentHeader` and `ReviewPage` | `box-badge` | Replaced in Phase 1 with explicit success, error, and in-progress tones. |
 | Loading and unavailable history detail states | `box-spinner` and React `Alert` adapter | Replaced in Phase 1 with distinct status and alert semantics. Empty-state migration remains scoped to later data-surface work. |
@@ -89,7 +89,7 @@ have the same contract, in the original 0.12.0 version.
 | Provider count lists in deployment history | `box-fact-list` | Replaced in Phase 4. The published fact list preserves the recorded labels and values while provider cards retain the comparison grouping. |
 | Native diagnostic `<details>` | `box-accordion` | Replace for the single technical-detail disclosure. Issue #313 already tracks richer multi-open/live-summary behavior; do not create a duplicate. |
 | `AppToast` integration wrapper | React `Toast` adapter | Migrated in Phase 1. Retain only the small app notice model and the top-layer placement integration. |
-| Connection drawer close affordance | Existing `box-drawer`, pending an upstream API | Retain the public `::part(close)` override only as a temporary bridge. Issue #355 requests an explicit API for hiding the built-in header Close control when a footer Close/Done action is present. |
+| Connection drawer close affordance | `box-drawer` `hide-close-button` | Adopted in 0.28.1; the temporary `::part(close)` override is removed. |
 
 ### Tables, lists, and run output
 
@@ -117,31 +117,20 @@ independent action:
 trailing status/action region. Placing **Open**, **Remove**, or **Configure** inside
 the option activation target would create ambiguous nested interaction.
 
-This is a genuine reusable gap, now tracked in
-[box-open-elements #354](https://github.com/unofficialbox/box-open-elements/issues/354).
+Issue [box-open-elements #354](https://github.com/unofficialbox/box-open-elements/issues/354)
+delivered Resource Row. Its selectable resource model fits future master-detail
+connection lists, but not the current non-selectable summary rows.
 
-Until that issue is resolved:
+For the current summary rows:
 
 - keep one shared Dispatch connection-row composition;
 - use `box-card`, `box-badge`, `box-button` / `box-icon-button`, and provider logos
   inside it;
 - preserve separate focus targets for selection and secondary actions; and
-- do not fork `box-datalist-item` or add provider-specific behavior upstream.
+- do not force selection semantics into a read-only status summary.
 
-The drawer audit found one separate component-level gap: connection drawers have a
-single explicit footer **Close** action, but `box-drawer` always renders its header
-Close button. Dispatch currently hides that public part with CSS. An explicit,
-backward-compatible component API is tracked in
-[box-open-elements #355](https://github.com/unofficialbox/box-open-elements/issues/355).
-
-Two additional Phase 1 contract gaps are tracked upstream:
-
-- [box-open-elements #357](https://github.com/unofficialbox/box-open-elements/issues/357)
-  requests disabled and busy confirmation states so an asynchronous precondition can
-  keep a dialog open and prevent premature confirmation.
-- [box-open-elements #358](https://github.com/unofficialbox/box-open-elements/issues/358)
-  requests concise per-option metadata/status for tile groups so solution choices can
-  preserve sector and availability context.
+Issues #355, #357, #358, #359, and #360 are resolved and adopted in the 0.28.1
+upgrade. No local CSS or behavior workaround remains for those contracts.
 
 ## Components that should remain Dispatch-owned
 
@@ -180,27 +169,23 @@ Exit gate: the existing application behaves the same on 0.27.0.
 
 Status: **Complete within the current component contracts**
 
-1. Retain `DeploymentConfirmationDialog` pending issue #357.
+1. Replace `DeploymentConfirmationDialog` with the React adapter. **Complete in 0.28.1.**
 2. Replace inline errors and history loading/failure states. **Complete.**
 3. Replace `DetailList` with `box-fact-list`; retain the intentionally horizontal
    provider statistics. **Complete.**
-4. Replace strategy choices with `box-tile-group`; retain rich solution choices
-   pending issue #358. **Complete within the current component contract.**
+4. Replace strategy and rich solution choices with `box-tile-group`.
+   **Complete in 0.28.1, including metadata, status, and disabled reasons.**
 5. Replace history search/select controls. **Complete.**
 6. Move the deployment-name and drawer value fields plus toast event/property
    synchronization to React adapters. **Complete.**
 
-Keep the drawer header-close CSS bridge until issue #355 is released; do not replace
-it with shadow-DOM queries.
+Connection drawers now use `hide-close-button`; no shadow-DOM query or part-hiding
+bridge is required. The published dialog retains modal focus containment, Escape
+cancellation, focus restoration, and a disabled/busy confirmation action. These
+behaviors remain covered by the mock end-to-end suite.
 
-The retained confirmation composition uses a native modal `<dialog>` for focus
-containment, background inertness, Escape cancellation, and focus restoration while
-Dispatch continues to own its disabled confirmation action. These keyboard behaviors
-are covered by the mock end-to-end suite.
-
-Exit gate: repeated fact-list CSS and replaceable custom radio-card behavior are
-removed. The remaining dialog and rich solution-card implementations are explicit
-exceptions pending issues #357 and #358.
+Exit gate: repeated fact-list CSS, custom radio-card behavior, and the custom modal
+implementation are removed.
 
 ### Phase 2 — shell and navigation
 
@@ -209,10 +194,8 @@ Status: **Complete within the current component contracts**
 1. Introduce `box-app-shell` around the current application content. **Complete.**
 2. Move the current rail into `box-nav-sidebar` without changing routes. **Complete.**
 3. Add `box-sidebar-toggle-button` and verify collapsed accessible names.
-   **Complete with a documented workaround.** Issue #359 tracks the upstream
-   header-slot reachability gap; Dispatch keeps the toggle in the body until then.
-   Issue #360 tracks the nested navigation landmarks produced by the documented
-   shell/sidebar composition; distinct labels keep them understandable meanwhile.
+   **Complete.** In 0.28.1 the toggle uses the header slot and stays reachable when
+   collapsed; App Shell yields the navigation landmark to the slotted sidebar.
 4. Replace breadcrumbs with `box-breadcrumb`. **Complete.**
 5. Prototype and then replace `WorkflowIndicator` with `box-progress-steps`.
    **Complete.** The public state/event contract fits; Dispatch uses published
@@ -255,7 +238,7 @@ Status: **Complete within the current component contracts**
    navigation use `box-link-button`; technical diagnostics use `box-accordion`.
 3. Remove selectors in `App.css` that no longer target migrated table, file-list,
    activity-feed, metric, summary, and provider-summary markup. **Complete for the
-   migrated surfaces.** The documented issue #355 bridge remains.
+   migrated surfaces.** The former drawer-close bridge was removed in 0.28.1.
 4. Consolidate the remaining CSS into page layout and Dispatch-specific composition
    rules; use only published parts for component-level treatment. **Complete for the
    Phase 3–4 surfaces.**

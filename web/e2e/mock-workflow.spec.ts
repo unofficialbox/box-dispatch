@@ -5,6 +5,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
+  await expect(page.getByRole('navigation')).toHaveCount(1)
   const sidebar = page.locator('box-nav-sidebar')
   await expect(sidebar).toHaveAttribute('collapsed', '')
   const collapsedWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
@@ -184,16 +185,19 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await page.getByRole('button', { name: 'Continue to deployment' }).click()
   await expect(page.getByRole('heading', { name: 'Start deployment?' })).toBeVisible()
+  const confirmationHost = page.locator('box-dialog[heading="Start deployment?"]')
   const confirmation = page.getByRole('dialog', { name: 'Start deployment?' })
   await expect(confirmation).toBeVisible()
   expect(await confirmation.evaluate((dialog) => dialog.matches(':modal'))).toBe(true)
   await page.getByRole('button', { name: 'Overview', exact: true, includeHidden: true }).evaluate((button) => button.focus())
-  expect(await confirmation.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true)
+  expect(await confirmationHost.evaluate((host) => document.activeElement === host && host.shadowRoot?.activeElement?.getAttribute('part') === 'dialog')).toBe(true)
   for (let index = 0; index < 4; index++) {
     await page.keyboard.press('Tab')
-    // Native modal navigation may visit browser chrome (reported as body),
-    // but must never focus the inert workspace controls.
-    expect(await confirmation.evaluate((dialog) => document.activeElement === document.body || dialog.contains(document.activeElement))).toBe(true)
+    expect(await confirmationHost.evaluate((host) => {
+      const surface = host.shadowRoot?.querySelector('[part="dialog"]')
+      const active = host.shadowRoot?.activeElement
+      return document.activeElement === host && Boolean(active && surface?.contains(active))
+    })).toBe(true)
   }
   await page.keyboard.press('Escape')
   await expect(confirmation).toHaveCount(0)
@@ -264,12 +268,13 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
     const rect = (element: Element) => element.getBoundingClientRect()
     const title = rect(document.querySelector('.title-row h1')!)
     const status = rect(document.querySelector('.meta-status')!)
-    const options = [...document.querySelectorAll('.solution-option')].map((option) => {
+    const solutionGroup = document.querySelector<HTMLElement>('box-tile-group.solution-list')!
+    const group = rect(solutionGroup)
+    const options = [...solutionGroup.shadowRoot!.querySelectorAll<HTMLElement>('[part="tile"]')].map((option) => {
       const row = rect(option)
-      const marker = rect(option.querySelector('.choice-marker')!)
       return {
-        markerInset: marker.left - row.left,
-        clipped: marker.left < row.left || marker.right > row.right,
+        inset: row.left - group.left,
+        clipped: row.left < group.left || row.right > group.right,
       }
     })
     return {
@@ -280,7 +285,8 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   })
   expect(layout.overflow).toBeLessThanOrEqual(1)
   expect(layout.titleStatusCenterDelta).toBeLessThan(0.01)
-  expect(layout.options.every((option) => option.markerInset >= 14 && !option.clipped)).toBe(true)
+  expect(layout.options.length).toBeGreaterThan(0)
+  expect(layout.options.every((option) => option.inset >= 0 && !option.clipped)).toBe(true)
 
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
@@ -303,25 +309,25 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
   await expect(defaults.getByText('Readiness')).toHaveCount(0)
   await expect(page.getByText('Package configuration')).toHaveCount(0)
   await expect(defaults.locator('box-select[label="Default solution"]')).toHaveCount(0)
-  await expect(defaults.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(defaults.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ })).toBeChecked()
   await expect(defaults.getByRole('radio', { name: /Citizen Services/ })).toBeDisabled()
   await expect(defaults.getByRole('radio', { name: /Life Sciences eTMF/ })).toBeDisabled()
   await expect(defaults.getByRole('radio', { name: /Insurance Claims Management/ })).toBeDisabled()
-  await expect(defaults.locator('box-badge[label="Coming soon"]')).toHaveCount(3)
+  await expect(defaults.locator('box-tile-group.settings-default-solution-list').getByText('Coming soon', { exact: true })).toHaveCount(3)
   await expect(defaults.getByText('Strategy', { exact: true })).toHaveCount(0)
   await expect(defaults.getByText('Systems', { exact: true })).toHaveCount(0)
   await expect(defaults.getByText('Source', { exact: true })).toHaveCount(0)
 
   await defaults.locator('box-button[label="Edit defaults"]').click()
   await expect(defaults.locator('box-select[label="Default solution"]')).toHaveCount(0)
-  await expect(defaults.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(defaults.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ })).toBeChecked()
   await expect(defaults.getByRole('radio', { name: /Citizen Services/ })).toBeDisabled()
   await expect(defaults.getByRole('radio', { name: /Life Sciences eTMF/ })).toBeDisabled()
   await expect(defaults.getByRole('radio', { name: /Insurance Claims Management/ })).toBeDisabled()
-  await expect(defaults.locator('box-badge[label="Coming soon"]')).toHaveCount(3)
+  await expect(defaults.locator('box-tile-group.settings-default-solution-list').getByText('Coming soon', { exact: true })).toHaveCount(3)
   await expect(defaults.getByText('Source', { exact: true })).toBeVisible()
   await expect(defaults.getByRole('link', { name: 'https://github.com/unofficialbox/box-bedrock-for-clm' })).toBeVisible()
-  await defaults.locator('box-tile-group').locator('[part="tile"][data-option-id="create_new"]').click()
+  await defaults.locator('box-tile-group.strategy-picker').locator('[part="tile"][data-option-id="create_new"]').click()
   await defaults.locator('box-switch[label="Salesforce"]').evaluate((control) => {
     control.dispatchEvent(new CustomEvent('checked-changed', { detail: { checked: false } }))
   })
@@ -340,7 +346,7 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
 
   await page.getByRole('button', { name: 'Deployments' }).click()
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
-  await expect(page.locator('.solution-option[aria-checked="true"]')).toContainText('Contract Lifecycle Management')
+  await expect(page.locator('box-tile-group.solution-list').locator('[part="tile"][data-selected="true"]')).toContainText('Contract Lifecycle Management')
   await expect(page.locator('box-switch[label="Salesforce"]')).not.toHaveAttribute('checked')
 
   await page.request.put('/api/defaults', { data: { templateId: 'clm', strategy: 'reuse', components: ['box', 'salesforce'] } })

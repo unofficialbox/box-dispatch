@@ -8,13 +8,11 @@ const plan: DeploymentPlan = { exists: true, name: 'Northstar CLM', templateId: 
 
 describe('DeploymentConfirmationDialog', () => {
   afterEach(cleanup)
-  it('routes native Escape cancellation through the controlled close action', () => {
+  it('routes Box Open Elements cancellation through the controlled close action', () => {
     const onCancel = vi.fn()
     const { container } = render(<DeploymentConfirmationDialog plan={plan} packagePreparing={false} onCancel={onCancel} onConfirm={vi.fn()}/>)
-    const event = new Event('cancel', { cancelable: true })
-    fireEvent(container.querySelector('dialog')!, event)
+    fireEvent(container.querySelector('box-dialog')!, new CustomEvent('cancel'))
     expect(onCancel).toHaveBeenCalledOnce()
-    expect(event.defaultPrevented).toBe(true)
   })
 
   it('summarizes the validated target before deployment', () => {
@@ -22,14 +20,16 @@ describe('DeploymentConfirmationDialog', () => {
     const { container } = render(<DeploymentConfirmationDialog plan={plan} packagePreparing={false} onCancel={vi.fn()} onConfirm={onConfirm}/>)
     expect(screen.getByText('Northstar CLM')).toBeTruthy()
     expect(screen.getByText('Box, Salesforce')).toBeTruthy()
-    const start = container.querySelector<HTMLElement>('box-button[label="Start deployment"]')
-    fireEvent.click(start!)
+    fireEvent(container.querySelector('box-dialog')!, new CustomEvent('confirm'))
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 
   it('waits for background managed-package setup', () => {
     const { container } = render(<DeploymentConfirmationDialog plan={plan} packagePreparing packageMessage="Salesforce reports in progress" onCancel={vi.fn()} onConfirm={vi.fn()}/>)
     expect(screen.getByText('Salesforce setup is still running')).toBeTruthy()
-    expect(container.querySelector('box-button[label="Waiting for Salesforce…"][disabled]')).toBeTruthy()
+    const dialog = container.querySelector('box-dialog')
+    expect(dialog?.hasAttribute('confirm-disabled')).toBe(true)
+    expect(dialog?.hasAttribute('confirm-busy')).toBe(true)
+    expect(dialog?.getAttribute('confirm-busy-label')).toBe('Waiting for Salesforce…')
   })
 })

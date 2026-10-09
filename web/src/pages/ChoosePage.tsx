@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
 import { ProviderLogo } from '../components/ProviderLogo'
+import { SolutionTileGroup } from '../components/SolutionTileGroup'
 import type { SolutionTemplate } from '../types'
 
 type SwitchElement = HTMLElement & { checked: boolean }
@@ -25,11 +26,12 @@ export function ChoosePage({ templates, selectedTemplateID, selectedComponents, 
   const hasName = deploymentName.trim().length > 0
   const nameLength = [...deploymentName].length
   const nameIsValid = hasName && nameLength <= 80
+  const solutionOptions = templates.map((template) => ({ id: template.id, label: template.name, description: template.description, meta: template.sector || 'Solution' }))
   return <section className="choose-layout choose-stage" aria-label="Choose deployment">
     <article className="task-surface choose-card">
       <header className="task-heading"><div><h2>Choose a solution</h2><p>Select one solution and the systems Dispatch should configure.</p></div></header>
       <section className="deployment-name-field" aria-labelledby="deployment-name-heading"><div><h3 id="deployment-name-heading">Name this deployment</h3><p>Use a name that will make this deployment easy to find later.</p></div><TextField label="Name this deployment" value={deploymentName} placeholder="For example, Northstar CLM rollout" required invalid={deploymentName.length > 0 && !nameIsValid} errorMessage={nameLength > 80 ? 'Use 80 characters or fewer.' : undefined} onValueChanged={(event) => onDeploymentNameChange(event.detail.value)}/></section>
-      <div className="solution-list" role="radiogroup" aria-label="Solutions">{templates.map((template) => <button className={`solution-option ${template.id === selectedTemplateID ? 'selected' : ''}`} type="button" role="radio" aria-checked={template.id === selectedTemplateID} key={template.id} onClick={() => onTemplateChange(template.id)} disabled={assembling}><span className="choice-marker" aria-hidden="true">{template.id === selectedTemplateID ? '✓' : ''}</span><span><strong>{template.name}</strong><small>{template.description}</small></span><span className="template-sector">{template.sector || 'Solution'}</span></button>)}</div>
+      <SolutionTileGroup className="solution-list" legend="Solutions" name="deployment-solution" options={solutionOptions} value={selectedTemplateID} disabled={assembling} onChange={onTemplateChange}/>
       <section className="system-selection" aria-labelledby="systems-title"><header><h3 id="systems-title">Systems</h3><p>Box is required. Add Salesforce when the solution includes CRM metadata.</p></header><div className="system-grid"><div className="system-option required"><SystemProvider provider="box" name="Box" description="Content platform"/><ProviderSwitch checked disabled label="Box" description="Required"/><em>Required</em></div><div className="system-option"><SystemProvider provider="salesforce" name="Salesforce" description="CRM records and workflows"/><ProviderSwitch checked={selectedComponents.includes('salesforce')} disabled={assembling} label="Salesforce" description="Optional" onToggle={onToggleSalesforce}/><em>Optional</em></div><div className="system-option unavailable" aria-disabled="true"><SystemProvider provider="databricks" name="Databricks" description="Data intelligence"/><ProviderSwitch checked={false} disabled label="Databricks" description="Coming soon"/><em>Coming soon</em></div><div className="system-option unavailable" aria-disabled="true"><SystemProvider provider="amazon bedrock" name="Amazon Bedrock" description="AgentCore integration"/><ProviderSwitch checked={false} disabled label="Amazon Bedrock" description="Coming soon"/><em>Coming soon</em></div></div></section>
       <footer className="choose-actions"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label={assembling ? 'Preparing package…' : 'Prepare package'} tone="primary" disabled={assembling || !nameIsValid} onClick={onAssemble}></box-button></div></footer>
     </article>

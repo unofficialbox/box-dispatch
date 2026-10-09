@@ -18,7 +18,6 @@ const connectionActions = {
 describe('SettingsPage', () => {
   it('lists every saved connection and deployment defaults without connection readiness', () => {
     const { container } = render(<SettingsPage defaults={defaults} connections={connections} onSaveDefaults={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} {...connectionActions}/>)
-    const view = within(container)
 
     expect(screen.getByText('Production Box')).toBeTruthy()
     expect(screen.getByText('Sandbox Box')).toBeTruthy()
@@ -28,12 +27,10 @@ describe('SettingsPage', () => {
     expect(screen.getByText('example.scratch.my.salesforce.com')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Defaults' })).toBeTruthy()
     expect(screen.getByText('Starting configuration for new deployments. Each deployment can override these choices.')).toBeTruthy()
-    expect(view.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ }).getAttribute('aria-checked')).toBe('true')
-    expect(view.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('radio', { name: /Citizen Services/ }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('radio', { name: /Life Sciences eTMF/ }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('radio', { name: /Insurance Claims Management/ }).hasAttribute('disabled')).toBe(true)
-    expect(container.querySelectorAll('box-badge[label="Coming soon"]')).toHaveLength(3)
+    const solutions = container.querySelector<HTMLElement & { options: Array<{ id: string; disabled?: boolean; status?: { label: string } }> }>('box-tile-group.settings-default-solution-list')!
+    expect(solutions.getAttribute('value')).toBe('clm')
+    expect(solutions.options.every((option) => option.disabled)).toBe(true)
+    expect(solutions.options.filter((option) => option.status?.label === 'Coming soon')).toHaveLength(3)
     expect(container.querySelector('box-select[label="Default solution"]')).toBeNull()
     expect(screen.queryByText('https://example.com/clm')).toBeNull()
     expect(screen.queryByText('Box, Salesforce')).toBeNull()
@@ -61,13 +58,12 @@ describe('SettingsPage', () => {
 
     fireEvent.click(container.querySelector('box-button[label="Edit defaults"]')!)
     expect(container.querySelector('box-select[label="Default solution"]')).toBeNull()
-    expect(view.getByRole('radio', { name: /Contract Lifecycle Management \(CLM\)/ }).getAttribute('aria-checked')).toBe('true')
-    expect(view.getByRole('radio', { name: /Citizen Services/ }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('radio', { name: /Life Sciences eTMF/ }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('radio', { name: /Insurance Claims Management/ }).hasAttribute('disabled')).toBe(true)
-    expect(container.querySelectorAll('box-badge[label="Coming soon"]')).toHaveLength(3)
+    const solutions = container.querySelector<HTMLElement & { options: Array<{ id: string; disabled?: boolean; status?: { label: string } }> }>('box-tile-group.settings-default-solution-list')!
+    expect(solutions.getAttribute('value')).toBe('clm')
+    expect(solutions.options.find((option) => option.id === 'clm')?.disabled).toBe(false)
+    expect(solutions.options.filter((option) => option.status?.label === 'Coming soon')).toHaveLength(3)
     expect(view.getByText('https://example.com/clm')).toBeTruthy()
-    fireEvent(container.querySelector('box-tile-group')!, new CustomEvent('tile-change', { detail: { selected: ['create_new'] } }))
+    fireEvent(container.querySelector('box-tile-group.strategy-picker')!, new CustomEvent('tile-change', { detail: { selected: ['create_new'] } }))
     fireEvent(container.querySelector('box-switch[label="Salesforce"]')!, new CustomEvent('checked-changed', { detail: { checked: false } }))
     fireEvent.click(container.querySelector('box-button[label="Save defaults"]')!)
 
