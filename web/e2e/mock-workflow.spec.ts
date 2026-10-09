@@ -72,6 +72,26 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(workflow).toHaveAttribute('current', 'Choose')
   await expect(workflow.locator('[part="stage"][data-stage-id="Deploy"]')).toHaveAttribute('data-state', 'upcoming')
   await expect(workflow.locator('[part="stage"][data-stage-id="Summary"]')).toHaveAttribute('data-state', 'upcoming')
+  const solutionGroup = page.locator('box-tile-group.solution-list')
+  const selectedSolutionBorder = await solutionGroup.evaluate((group) => {
+    const selected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')!
+    const unselected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="false"]')!
+    const selectedStyle = getComputedStyle(selected)
+    const unselectedStyle = getComputedStyle(unselected)
+    return {
+      selectedID: selected.dataset.optionId,
+      selectedColors: [selectedStyle.borderTopColor, selectedStyle.borderRightColor, selectedStyle.borderBottomColor, selectedStyle.borderLeftColor],
+      selectedWidths: [selectedStyle.borderTopWidth, selectedStyle.borderRightWidth, selectedStyle.borderBottomWidth, selectedStyle.borderLeftWidth],
+      unselectedColor: unselectedStyle.borderTopColor,
+    }
+  })
+  expect(selectedSolutionBorder.selectedWidths).toEqual(['1px', '1px', '1px', '1px'])
+  expect(new Set(selectedSolutionBorder.selectedColors).size).toBe(1)
+  expect(selectedSolutionBorder.selectedColors[0]).not.toBe(selectedSolutionBorder.unselectedColor)
+  await solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLInputElement>('[part="tile"][data-selected="false"] [part="control"]')!.click())
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).not.toBe(selectedSolutionBorder.selectedID)
+  await solutionGroup.evaluate((group, selectedID) => group.shadowRoot!.querySelector<HTMLInputElement>(`[part="tile"][data-option-id="${selectedID}"] [part="control"]`)!.click(), selectedSolutionBorder.selectedID)
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).toBe(selectedSolutionBorder.selectedID)
   const nameFieldLayout = await page.evaluate(() => {
     const section = document.querySelector('.deployment-name-field')!.getBoundingClientRect()
     const field = document.querySelector('.deployment-name-field box-text-field')!.getBoundingClientRect()

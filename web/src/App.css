@@ -860,7 +860,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .solution-list { margin-top: 16px; border-color: var(--dispatch-rule); border-radius: 7px; }
 .solution-list::part(group) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; border-top: 1px solid var(--dispatch-rule); }
 .solution-list::part(legend) { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
-.solution-list::part(tile) { min-height: 84px; gap: 4px; padding: 14px 18px; border: 0; border-bottom: 1px solid var(--dispatch-rule); border-radius: 0; }
+.solution-list::part(tile) { min-height: 84px; gap: 4px; padding: 14px 18px; border-radius: 7px; }
 .solution-list::part(tile-label) { color: var(--dispatch-navy); font-size: 15px; letter-spacing: -.08px; }
 .solution-list::part(tile-description) { max-width: 760px; color: var(--dispatch-muted); font-size: 12px; line-height: 1.4; }
 .solution-list::part(tile-meta) { color: var(--dispatch-muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
