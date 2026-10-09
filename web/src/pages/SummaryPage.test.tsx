@@ -11,15 +11,21 @@ describe('SummaryPage', () => {
     const onOpenProvider = vi.fn()
     const onViewChanges = vi.fn()
     const onOverview = vi.fn()
-    const { container } = render(<SummaryPage plan={plan} connections={[{ name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/' }, { name: 'Salesforce', configured: true, verified: true, launchUrl: '/api/connections/salesforce/open' }]} run={run} onOpenProvider={onOpenProvider} onViewChanges={onViewChanges} onOverview={onOverview} />)
+    const { container } = render(<SummaryPage plan={plan} connections={[{ name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/', connections: [{ id: 'box-1', alias: 'Production Box', status: 'Ready', selected: true, domain: 'acme.app.box.com', enterpriseId: '5105484' }] }, { name: 'Salesforce', configured: true, verified: true, launchUrl: '/api/connections/salesforce/open', orgs: [{ id: 'sf-1', alias: 'CLM Scratch', kind: 'Scratch org', status: 'Ready', selected: true, domain: 'example.my.salesforce.com', orgId: '00D123' }] }]} run={run} onOpenProvider={onOpenProvider} onViewChanges={onViewChanges} onOverview={onOverview} />)
 
     expect(screen.getByText('Northstar CLM is ready')).toBeTruthy()
-    const box = screen.getByText('Box workspace').closest('li')?.querySelector('box-button[label="Open"]')
+    expect(screen.getByText('acme.app.box.com')).toBeTruthy()
+    expect(screen.getByText('Enterprise ID 5105484')).toBeTruthy()
+    expect(screen.getByText('example.my.salesforce.com')).toBeTruthy()
+    expect(screen.getByText('Org ID 00D123')).toBeTruthy()
+    const box = container.querySelector('box-button[label="Open Box"]')
+    const salesforce = container.querySelector('box-button[label="Open Salesforce"]')
     const boxSettings = container.querySelector('box-link-button[label="Open Box App & Settings"]')!
     const clmApp = container.querySelector('box-link-button[label="Open Contract Lifecycle Management"]')!
     const experienceSite = container.querySelector('box-link-button[label="Open Experience Cloud site"]')!
     expect(box).toBeTruthy()
-    expect(box?.getAttribute('tone')).toBe('primary')
+    expect(salesforce).toBeTruthy()
+    expect(container.querySelector('box-button[label*="5105484"], box-button[label*="00D123"]')).toBeNull()
     expect(boxSettings.classList.contains('summary-destination-link')).toBe(true)
     expect(clmApp.classList.contains('summary-destination-link')).toBe(true)
     expect(experienceSite.classList.contains('summary-destination-link')).toBe(true)
@@ -30,6 +36,8 @@ describe('SummaryPage', () => {
     expect(experienceSite.getAttribute('href')).toBe('/api/connections/salesforce/open?destination=experience-site&site=0DB1')
     fireEvent.click(box!)
     expect(onOpenProvider).toHaveBeenCalledWith('box')
+    fireEvent.click(salesforce!)
+    expect(onOpenProvider).toHaveBeenCalledWith('salesforce')
     fireEvent.click(container.querySelector('box-button[label="Review changes"]')!)
     expect(onViewChanges).toHaveBeenCalledWith('deploy-1')
   })

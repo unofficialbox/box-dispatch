@@ -751,7 +751,7 @@ func TestSalesforceAvailabilityCheckClearsStaleVerificationAfterRefreshFailure(t
 
 func TestDeploymentDetailCountsWithoutDiagnostics(t *testing.T) {
 	settings := config.ConnectionSettings{}
-	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "box-1", Alias: "Production Box", Enterprise: "5105484"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "box-1", Alias: "Production Box", Enterprise: "5105484", Hostname: "https://current.app.box.com"}, true)
 	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{ID: "sf-1", Alias: "CLM Scratch", OrgID: "00D123", InstanceURL: "https://scratch.example.my.salesforce.com", AccessToken: "private-token"}, true)
 	handler := NewHandlerWithOptions(ServerOptions{
 		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
@@ -760,11 +760,11 @@ func TestDeploymentDetailCountsWithoutDiagnostics(t *testing.T) {
 				DeploymentID: "run-42", SourcePath: "/private/audit.json", PackageRoot: "/private/package",
 				ChangesRecorded: true,
 				Providers: []audit.ProviderRecord{{
-					Provider: "box", EnvironmentID: "recorded-eid", StatusAfter: lifecycle.StatusMissing, Detail: "secret-adjacent diagnostic",
+					Provider: "box", EnvironmentID: "recorded-eid", EnvironmentDomain: "recorded.app.box.com", StatusAfter: lifecycle.StatusMissing, Detail: "secret-adjacent diagnostic",
 					Deployed: []string{"one"}, PresentAfter: []string{"one", "two"}, Remaining: []string{"three"},
 					AdapterPending: []string{"four"}, Experimental: []string{"five"},
 				}, {
-					Provider: "salesforce", StatusAfter: lifecycle.StatusPresent,
+					Provider: "salesforce", EnvironmentID: "00D123", EnvironmentDomain: "recorded.my.salesforce.com", StatusAfter: lifecycle.StatusPresent,
 					Deployed: []string{"UIBundle:clmreactapp"}, PresentAfter: []string{"UIBundle:clmreactapp"},
 					Changes:   []salesforceapi.MetadataFileDiff{{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}},
 					Resources: []lifecycle.ResourceReference{{Provider: "salesforce", Component: "Salesforce org", Kind: "organization", ID: "00D123", URL: "https://scratch.example.my.salesforce.com"}},
@@ -793,15 +793,30 @@ func TestDeploymentDetailCountsWithoutDiagnostics(t *testing.T) {
 	if provider.DeployedCount != 1 || provider.PresentCount != 2 || provider.RemainingCount != 1 || provider.ManualItemCount != 2 {
 		t.Fatalf("provider detail = %#v", provider)
 	}
-	if len(provider.DeployedComponents) != 1 || provider.DeployedComponents[0] != "one" || provider.EnvironmentID != "recorded-eid" || provider.LaunchURL != "https://app.box.com/" {
+	if len(provider.DeployedComponents) != 1 || provider.DeployedComponents[0] != "one" || provider.EnvironmentID != "recorded-eid" || provider.EnvironmentDomain != "recorded.app.box.com" || provider.LaunchURL != "https://app.box.com/" {
 		t.Fatalf("box deployment details = %#v", provider)
 	}
 	salesforce := detail.Providers[1]
-	if salesforce.EnvironmentID != "00D123" || salesforce.LaunchURL != "/api/connections/salesforce/open" || len(salesforce.DeployedComponents) != 1 {
+	if salesforce.EnvironmentID != "00D123" || salesforce.EnvironmentDomain != "recorded.my.salesforce.com" || salesforce.LaunchURL != "/api/connections/salesforce/open" || len(salesforce.DeployedComponents) != 1 {
 		t.Fatalf("salesforce deployment details = %#v", salesforce)
 	}
 	if !detail.ChangesRecorded || detail.ChangeCount != 1 {
 		t.Fatalf("deployment change summary = %#v", detail)
+	}
+}
+
+func TestDeploymentEnvironmentDoesNotBorrowCurrentIdentity(t *testing.T) {
+	settings := config.ConnectionSettings{}
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "box-current", Enterprise: "current-eid", Hostname: "https://current.app.box.com"}, true)
+	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{ID: "sf-current", OrgID: "current-org", InstanceURL: "https://current.my.salesforce.com", AccessToken: "token"}, true)
+
+	boxID, boxDomain, boxLaunchURL := deploymentEnvironment(audit.ProviderRecord{Provider: "box"}, settings)
+	if boxID != "" || boxDomain != "" || boxLaunchURL != "" {
+		t.Fatalf("legacy Box record borrowed current identity: %q %q %q", boxID, boxDomain, boxLaunchURL)
+	}
+	salesforceID, salesforceDomain, salesforceLaunchURL := deploymentEnvironment(audit.ProviderRecord{Provider: "salesforce", EnvironmentID: "current-org"}, settings)
+	if salesforceID != "current-org" || salesforceDomain != "" || salesforceLaunchURL != "/api/connections/salesforce/open" {
+		t.Fatalf("legacy Salesforce record borrowed current domain: %q %q %q", salesforceID, salesforceDomain, salesforceLaunchURL)
 	}
 }
 
@@ -831,7 +846,7 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 			return config.ConnectionSettings{
 				SalesforceAlias: "scratch-org", SalesforceOrgStatus: "Active", SalesforceExpirationDate: "2026-09-20",
 				BoxCCGAlias: "Legal Box", BoxCCGClientID: "client-id", BoxCCGClientSecret: "private-secret", BoxCCGSubjectType: "enterprise", BoxCCGSubjectID: "123",
-				BoxConnections:          []config.BoxAppConnection{{ID: "box-1", Alias: "Legal Box", ClientID: "client-id", ClientSecret: "private-secret", SubjectType: "enterprise", SubjectID: "123", VerifiedAt: "2026-08-21", Identity: "operator@example.com", Hostname: "https://acme.app.box.com/path?secret=value"}},
+				BoxConnections:          []config.BoxAppConnection{{ID: "box-1", Alias: "Legal Box", ClientID: "client-id", ClientSecret: "private-secret", SubjectType: "enterprise", SubjectID: "123", VerifiedAt: "2026-08-21", Identity: "operator@example.com", Enterprise: "5105484", Hostname: "https://acme.app.box.com/path?secret=value"}},
 				BoxSelectedConnectionID: "box-1",
 				SalesforceOrgs:          []config.SalesforceOrgConnection{{ID: "sf-1", Alias: "scratch-org", InstanceURL: "https://dispatch.scratch.my.salesforce.com/services/data", Status: "Active"}},
 				SalesforceSelectedOrgID: "sf-1",
@@ -852,7 +867,7 @@ func TestConnectionsRedactCredentials(t *testing.T) {
 			t.Fatalf("response leaked %q: %s", forbidden, body)
 		}
 	}
-	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") || !strings.Contains(body, "Legal Box") || !strings.Contains(body, "Ending in t-id") || !strings.Contains(body, "operator@example.com") || !strings.Contains(body, "acme.app.box.com") || !strings.Contains(body, "dispatch.scratch.my.salesforce.com") || strings.Contains(body, "/services/data") || strings.Contains(body, "secret=value") {
+	if !strings.Contains(body, "client credentials") || !strings.Contains(body, "scratch-org") || !strings.Contains(body, "Legal Box") || !strings.Contains(body, "Ending in t-id") || !strings.Contains(body, "operator@example.com") || !strings.Contains(body, "5105484") || !strings.Contains(body, "acme.app.box.com") || !strings.Contains(body, "dispatch.scratch.my.salesforce.com") || strings.Contains(body, "/services/data") || strings.Contains(body, "secret=value") {
 		t.Fatalf("response omitted safe connection state: %s", body)
 	}
 }

@@ -268,7 +268,13 @@ func mockProviderRecords(items []lifecycle.Item) []audit.ProviderRecord {
 			Detail: item.Detail, Deployed: append([]string(nil), item.Present...), PresentAfter: append([]string(nil), item.Present...),
 			Changes: append([]salesforceapi.MetadataFileDiff(nil), item.Changes...),
 		}
+		if item.Provider == "box" {
+			record.EnvironmentID = "EID-mock"
+			record.EnvironmentDomain = "acme.app.box.com"
+		}
 		if item.Provider == "salesforce" {
+			record.EnvironmentID = "00D-mock"
+			record.EnvironmentDomain = "example.my.salesforce.com"
 			record.Resources = []lifecycle.ResourceReference{{Provider: "salesforce", Component: "Salesforce org", Kind: "organization", Name: "admin@example.test", ID: "00D-mock", URL: "https://example.my.salesforce.com"}}
 		}
 		records = append(records, record)

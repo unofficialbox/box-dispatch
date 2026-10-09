@@ -64,8 +64,8 @@ describe('HistoryPage', () => {
       changesRecorded: true,
       changeCount: 2,
       providers: [
-        { name: 'box', status: 'present', deployedCount: 1, presentCount: 8, remainingCount: 0, manualItemCount: 1, deployedComponents: ['Metadata Template:Contract'], environmentId: '5105484', launchUrl: 'https://app.box.com/' },
-        { name: 'salesforce', status: 'present', deployedCount: 1, presentCount: 24, remainingCount: 0, manualItemCount: 0, deployedComponents: ['UIBundle:clmreactapp'], environmentId: '00D123', launchUrl: '/api/connections/salesforce/open' },
+        { name: 'box', status: 'present', deployedCount: 1, presentCount: 8, remainingCount: 0, manualItemCount: 1, deployedComponents: ['Metadata Template:Contract'], environmentId: '5105484', environmentDomain: 'acme.app.box.com', launchUrl: 'https://app.box.com/' },
+        { name: 'salesforce', status: 'present', deployedCount: 1, presentCount: 24, remainingCount: 0, manualItemCount: 0, deployedComponents: ['UIBundle:clmreactapp'], environmentId: '00D123', environmentDomain: 'example.my.salesforce.com', launchUrl: '/api/connections/salesforce/open' },
       ],
     }
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(detail), { status: 200, headers: { 'Content-Type': 'application/json' } }))
@@ -87,6 +87,10 @@ describe('HistoryPage', () => {
     const providerFacts = [...container.querySelectorAll('.history-provider-card box-fact-list')] as Array<HTMLElement & { rows: Array<{ label: string; value: string }> }>
     expect(providerFacts[1].rows).toContainEqual({ label: 'Present', value: '24' })
     const providerCards = container.querySelectorAll('.history-provider-card')
+    expect(screen.getByText('acme.app.box.com')).toBeTruthy()
+    expect(screen.getByText('Enterprise ID 5105484')).toBeTruthy()
+    expect(screen.getByText('example.my.salesforce.com')).toBeTruthy()
+    expect(screen.getByText('Org ID 00D123')).toBeTruthy()
     expect(providerCards[0].querySelector('header box-button[label="Open Box"]')).toBeTruthy()
     expect(providerCards[1].querySelector('header box-button[label="Open Salesforce"]')).toBeTruthy()
     expect(container.querySelector('box-button[label*="5105484"], box-button[label*="00D123"]')).toBeNull()

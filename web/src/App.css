@@ -476,8 +476,12 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .history-change-unavailable { align-items: center; color: var(--dispatch-muted); display: inline-flex; font-size: 12px; font-weight: 700; min-height: 32px; }
 .history-provider-cards { display: grid; gap: 12px; }
 .history-provider-card::part(card) { padding: 18px; border-color: var(--dispatch-rule); border-radius: 9px; box-shadow: none; }
-.history-provider-card header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.history-provider-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .history-provider-card header strong { color: var(--dispatch-navy); font-size: 16px; }
+.history-provider-identity { display: grid; min-width: 0; gap: 3px; }
+.history-provider-identity span, .history-provider-identity small { overflow-wrap: anywhere; color: var(--dispatch-muted); line-height: 1.35; }
+.history-provider-identity span { font-size: 13px; font-weight: 650; }
+.history-provider-identity small { font-size: 11px; }
 .history-provider-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .history-provider-card box-fact-list { display: block; margin-top: 16px; }
 .history-components { margin-top: 28px; }
@@ -679,23 +683,25 @@ body { background: #fff; }
 .summary-surface-recorded .summary-eyebrow { color: var(--dispatch-blue); }
 .summary-surface h2 { margin: 7px 0 0; color: var(--dispatch-navy); font-size: clamp(30px, 3vw, 42px); letter-spacing: -1.2px; }
 .summary-lede { max-width: 620px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 16px; line-height: 1.55; }
-.summary-destinations { max-width: 720px; margin-top: 34px; }
-.summary-destinations::part(section) { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
-.summary-destinations::part(header) { margin-bottom: 12px; }
-.summary-destinations::part(title) { color: var(--dispatch-navy); font-size: 18px; }
-.summary-destinations::part(description) { color: var(--dispatch-muted); font-size: 13px; }
-.summary-destinations ul { overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--dispatch-rule); border-radius: 14px; list-style: none; background: #fff; }
-.summary-destinations li { display: flex; min-height: 78px; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 18px; border-bottom: 1px solid var(--dispatch-rule); }
-.summary-destinations li:last-child { border-bottom: 0; }
-.summary-destinations li > div { display: grid; gap: 4px; min-width: 0; }
-.summary-destinations strong { color: var(--dispatch-navy); font-size: 15px; }
-.summary-destinations span { color: var(--dispatch-muted); font-size: 13px; line-height: 1.35; }
+.summary-targets, .summary-destinations { max-width: 720px; margin-top: 34px; }
+.summary-destinations { margin-top: 24px; }
+.summary-targets::part(section), .summary-destinations::part(section) { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+.summary-targets::part(header), .summary-destinations::part(header) { margin-bottom: 12px; }
+.summary-targets::part(title), .summary-destinations::part(title) { color: var(--dispatch-navy); font-size: 18px; }
+.summary-targets::part(description), .summary-destinations::part(description) { color: var(--dispatch-muted); font-size: 13px; }
+.summary-targets ul, .summary-destinations ul { overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--dispatch-rule); border-radius: 14px; list-style: none; background: #fff; }
+.summary-targets li, .summary-destinations li { display: flex; min-height: 78px; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 18px; border-bottom: 1px solid var(--dispatch-rule); }
+.summary-targets li:last-child, .summary-destinations li:last-child { border-bottom: 0; }
+.summary-targets li > div, .summary-destinations li > div { display: grid; gap: 4px; min-width: 0; }
+.summary-targets strong, .summary-destinations strong { color: var(--dispatch-navy); font-size: 15px; }
+.summary-targets span, .summary-destinations span { overflow-wrap: anywhere; color: var(--dispatch-muted); font-size: 13px; line-height: 1.35; }
+.summary-targets small { overflow-wrap: anywhere; color: var(--dispatch-muted); font-size: 11px; line-height: 1.35; }
 .summary-destination-link { display: block; min-width: 72px; flex: 0 0 auto; }
 .summary-destination-link::part(link) { min-height: 38px; justify-content: center; padding: 0 16px; margin: 0; border: 1px solid #0061d5; border-radius: 999px; color: #fff; background: #0061d5; font-size: 14px; font-weight: 750; }
 .summary-destination-link::part(link):hover { border-color: #0057be; color: #fff; background: #0057be; }
 .summary-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 @media (max-width: 1000px) { .summary-workspace { grid-template-columns: 1fr; }.summary-surface::part(card) { min-height: 0; padding-right: 0; }.summary-workspace .details-rail { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--dispatch-rule); border-left: 0; } }
-@media (max-width: 640px) { .summary-surface::part(card) { padding: 34px 0 16px; }.summary-destinations li { align-items: flex-start; flex-direction: column; gap: 12px; }.summary-destination-link, .summary-destinations box-button { width: 100%; }.summary-actions { align-items: stretch; flex-direction: column; }.summary-actions box-button { width: 100%; } }
+@media (max-width: 640px) { .summary-surface::part(card) { padding: 34px 0 16px; }.summary-targets li, .summary-destinations li { align-items: flex-start; flex-direction: column; gap: 12px; }.summary-targets box-button, .summary-destination-link, .summary-destinations box-button { width: 100%; }.summary-actions { align-items: stretch; flex-direction: column; }.summary-actions box-button { width: 100%; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

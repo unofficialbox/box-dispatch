@@ -1114,6 +1114,7 @@ type providerDetail struct {
 	ManualItemCount    int      `json:"manualItemCount"`
 	DeployedComponents []string `json:"deployedComponents"`
 	EnvironmentID      string   `json:"environmentId,omitempty"`
+	EnvironmentDomain  string   `json:"environmentDomain,omitempty"`
 	LaunchURL          string   `json:"launchUrl,omitempty"`
 }
 
@@ -1325,14 +1326,14 @@ func detailDeployment(record audit.DeploymentRecord, settings config.ConnectionS
 	summary := summarizeDeployment(record)
 	providers := make([]providerDetail, 0, len(record.Providers))
 	for _, provider := range record.Providers {
-		environmentID, launchURL := deploymentEnvironment(provider, settings)
+		environmentID, environmentDomain, launchURL := deploymentEnvironment(provider, settings)
 		providers = append(providers, providerDetail{
 			Name: provider.Provider, Status: string(provider.StatusAfter),
 			DeployedCount: len(provider.Deployed), PresentCount: len(provider.PresentAfter),
 			RemainingCount:     len(provider.Remaining),
 			ManualItemCount:    len(provider.AdapterPending) + len(provider.Experimental),
 			DeployedComponents: append([]string(nil), provider.Deployed...),
-			EnvironmentID:      environmentID, LaunchURL: launchURL,
+			EnvironmentID:      environmentID, EnvironmentDomain: environmentDomain, LaunchURL: launchURL,
 		})
 	}
 	return deploymentDetail{
@@ -1342,17 +1343,15 @@ func detailDeployment(record audit.DeploymentRecord, settings config.ConnectionS
 	}
 }
 
-func deploymentEnvironment(provider audit.ProviderRecord, settings config.ConnectionSettings) (string, string) {
+func deploymentEnvironment(provider audit.ProviderRecord, settings config.ConnectionSettings) (string, string, string) {
+	environmentID := strings.TrimSpace(provider.EnvironmentID)
+	environmentDomain := strings.ToLower(strings.TrimSpace(provider.EnvironmentDomain))
 	switch strings.ToLower(provider.Provider) {
 	case "box":
-		if strings.TrimSpace(provider.EnvironmentID) != "" {
-			return provider.EnvironmentID, "https://app.box.com/"
-		}
-		if selected, ok := settings.SelectedBoxConnection(); ok {
-			return selected.Enterprise, "https://app.box.com/"
+		if environmentID != "" || environmentDomain != "" {
+			return environmentID, environmentDomain, "https://app.box.com/"
 		}
 	case "salesforce":
-		environmentID := strings.TrimSpace(provider.EnvironmentID)
 		for _, resource := range provider.Resources {
 			if resource.Kind != "organization" || strings.TrimSpace(resource.ID) == "" {
 				continue
@@ -1361,18 +1360,21 @@ func deploymentEnvironment(provider audit.ProviderRecord, settings config.Connec
 				environmentID = resource.ID
 			}
 			launchURL := strings.TrimSpace(resource.URL)
+			if environmentDomain == "" {
+				environmentDomain = safeConnectionHostname(launchURL)
+			}
 			if selected, ok := settings.SelectedSalesforceOrg(); ok && selected.OrgID == environmentID {
 				launchURL = "/api/connections/salesforce/open"
 			}
-			return environmentID, launchURL
+			return environmentID, environmentDomain, launchURL
 		}
 		if environmentID != "" {
 			if selected, ok := settings.SelectedSalesforceOrg(); ok && selected.OrgID == environmentID {
-				return environmentID, "/api/connections/salesforce/open"
+				return environmentID, environmentDomain, "/api/connections/salesforce/open"
 			}
 		}
 	}
-	return "", ""
+	return environmentID, environmentDomain, ""
 }
 
 func connectionSummaries(settings config.ConnectionSettings) []connectionSummary {

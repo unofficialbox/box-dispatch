@@ -37,22 +37,28 @@ type DeploymentRecord struct {
 }
 
 type ProviderRecord struct {
-	Provider       string                           `json:"provider"`
-	EnvironmentID  string                           `json:"environment_id,omitempty"`
-	StatusBefore   lifecycle.Status                 `json:"status_before"`
-	StatusAfter    lifecycle.Status                 `json:"status_after"`
-	Detail         string                           `json:"detail"`
-	Deployed       []string                         `json:"deployed,omitempty"`
-	PresentBefore  []string                         `json:"present_before,omitempty"`
-	PresentAfter   []string                         `json:"present_after,omitempty"`
-	Remaining      []string                         `json:"remaining,omitempty"`
-	AdapterPending []string                         `json:"adapter_pending,omitempty"`
-	Experimental   []string                         `json:"experimental,omitempty"`
-	Resources      []lifecycle.ResourceReference    `json:"resources,omitempty"`
-	Changes        []salesforceapi.MetadataFileDiff `json:"changes,omitempty"`
+	Provider          string                           `json:"provider"`
+	EnvironmentID     string                           `json:"environment_id,omitempty"`
+	EnvironmentDomain string                           `json:"environment_domain,omitempty"`
+	StatusBefore      lifecycle.Status                 `json:"status_before"`
+	StatusAfter       lifecycle.Status                 `json:"status_after"`
+	Detail            string                           `json:"detail"`
+	Deployed          []string                         `json:"deployed,omitempty"`
+	PresentBefore     []string                         `json:"present_before,omitempty"`
+	PresentAfter      []string                         `json:"present_after,omitempty"`
+	Remaining         []string                         `json:"remaining,omitempty"`
+	AdapterPending    []string                         `json:"adapter_pending,omitempty"`
+	Experimental      []string                         `json:"experimental,omitempty"`
+	Resources         []lifecycle.ResourceReference    `json:"resources,omitempty"`
+	Changes           []salesforceapi.MetadataFileDiff `json:"changes,omitempty"`
 }
 
-func ExportDeployment(root, name string, before, after []lifecycle.Item, environmentIDs map[string]string, startedAt, completedAt time.Time) (string, error) {
+type ProviderEnvironment struct {
+	ID     string
+	Domain string
+}
+
+func ExportDeployment(root, name string, before, after []lifecycle.Item, environments map[string]ProviderEnvironment, startedAt, completedAt time.Time) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("package directory is required")
 	}
@@ -91,7 +97,7 @@ func ExportDeployment(root, name string, before, after []lifecycle.Item, environ
 		ComponentStrategies: settings.Box.ComponentStrategies,
 		Artifacts:           map[string]string{},
 		ChangesRecorded:     true,
-		Providers:           providerRecords(before, after, environmentIDs),
+		Providers:           providerRecords(before, after, environments),
 	}
 	for _, relative := range []string{solution.ManifestFile, manifest.DeploymentConfig, ".dispatch/package.json"} {
 		if digest, digestErr := fileDigest(filepath.Join(root, filepath.FromSlash(relative))); digestErr == nil {
@@ -214,24 +220,26 @@ func globalAuditDirectory() (string, error) {
 	return filepath.Join(root, "dispatch", "audit"), nil
 }
 
-func providerRecords(before, after []lifecycle.Item, environmentIDs map[string]string) []ProviderRecord {
+func providerRecords(before, after []lifecycle.Item, environments map[string]ProviderEnvironment) []ProviderRecord {
 	records := make([]ProviderRecord, 0, len(after))
 	for _, current := range after {
 		previous := findProvider(before, current.Provider)
+		environment := environments[current.Provider]
 		records = append(records, ProviderRecord{
-			Provider:       current.Provider,
-			EnvironmentID:  strings.TrimSpace(environmentIDs[current.Provider]),
-			StatusBefore:   previous.Status,
-			StatusAfter:    current.Status,
-			Detail:         current.Detail,
-			Deployed:       difference(current.Present, previous.Present),
-			PresentBefore:  append([]string(nil), previous.Present...),
-			PresentAfter:   append([]string(nil), current.Present...),
-			Remaining:      append([]string(nil), current.Missing...),
-			AdapterPending: append([]string(nil), current.AdapterPending...),
-			Experimental:   append([]string(nil), current.Experimental...),
-			Resources:      append([]lifecycle.ResourceReference(nil), current.Resources...),
-			Changes:        append([]salesforceapi.MetadataFileDiff(nil), previous.Changes...),
+			Provider:          current.Provider,
+			EnvironmentID:     strings.TrimSpace(environment.ID),
+			EnvironmentDomain: strings.ToLower(strings.TrimSpace(environment.Domain)),
+			StatusBefore:      previous.Status,
+			StatusAfter:       current.Status,
+			Detail:            current.Detail,
+			Deployed:          difference(current.Present, previous.Present),
+			PresentBefore:     append([]string(nil), previous.Present...),
+			PresentAfter:      append([]string(nil), current.Present...),
+			Remaining:         append([]string(nil), current.Missing...),
+			AdapterPending:    append([]string(nil), current.AdapterPending...),
+			Experimental:      append([]string(nil), current.Experimental...),
+			Resources:         append([]lifecycle.ResourceReference(nil), current.Resources...),
+			Changes:           append([]salesforceapi.MetadataFileDiff(nil), previous.Changes...),
 		})
 	}
 	return records
