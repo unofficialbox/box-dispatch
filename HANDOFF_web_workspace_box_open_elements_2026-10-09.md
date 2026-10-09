@@ -4,11 +4,11 @@
 
 - **Date:** 2026-10-09
 - **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
-- **Branch:** `main`
-- **Remote main:** `9f546a5c0ddfe4b6f446858f31b4d73613046cd1`
+- **Branch:** `codex/box-open-elements-0.28.6`
+- **Remote main:** `0c2be65c223c9e616565ae78261c87d3def44801`
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.28.4
+  `@unofficialbox/box-open-elements-react` 0.28.6
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -53,6 +53,24 @@ It delivered and verified:
   Editor behavior. No Dispatch component adaptation was required.
 - The package lock and Box Open Elements migration/gap documentation are current.
 
+### PR #37 — exact-cascade CSS consolidation
+
+[PR #37](https://github.com/unofficialbox/box-dispatch/pull/37) was squash-merged to
+`main` as `0c2be65c223c9e616565ae78261c87d3def44801`.
+
+- Removed 390 earlier declarations superseded by the same selector, property,
+  importance, and at-rule context.
+- Preserved all 2,377 final cascade winners and reduced `App.css` by about 10.4 KB.
+- Regenerated the embedded web assets and documented the safe cleanup boundary.
+
+### Current branch — Box Open Elements 0.28.6
+
+- Core and React adapter packages are upgraded together from 0.28.4 to 0.28.6.
+- Releases 0.28.5 and 0.28.6 change Process Modeler, Code Editor, and Form Wizard;
+  Dispatch imports none of those surfaces, so no local component adaptation is needed.
+- Issues #379 and #380 remain open and their requested APIs are absent from the
+  published packages. Keep the existing compatibility boundaries.
+
 ## Box Open Elements boundary
 
 Use [`docs/BOX_OPEN_ELEMENTS_MIGRATION_PLAN.md`](docs/BOX_OPEN_ELEMENTS_MIGRATION_PLAN.md)
@@ -60,7 +78,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.28.4 contracts. Keep the
+All planned migration phases are complete within published 0.28.6 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -92,10 +110,10 @@ issue state, before removing a local compatibility boundary.
 
 ## Verification evidence
 
-The final 0.28.4 baseline passed:
+The 0.28.6 branch baseline passed:
 
-- 21 Vitest files / 62 unit tests;
-- all 4 Playwright mock workflows, including the 390px mobile path;
+- 23 Vitest files / 76 unit tests;
+- all 5 Playwright mock workflows, including the 390px mobile path;
 - frontend lint and production build;
 - `gofmt -l .`, `go build ./...`, `go vet ./...`, and `go test ./...`;
 - live browser smoke on Overview and the Choose-a-solution deployment step; and
@@ -160,14 +178,13 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The Box Open Elements migration, connection refresh behavior,
-  deployment-path adoption, sidebar redesign, Overview status containment, selected
-  template treatment, and 0.28.4 upgrade are merged to `main` and verified.
-- **Recommended Next Step:** Monitor #379 and #380 and adopt their first containing
-  release; otherwise begin the next product feature from a new branch based on `main`.
-- **Why This Next:** No planned Dispatch migration work remains that can be completed
-  locally without those upstream contracts.
-- **Expected Outcome:** Removal of the remaining local JSX/event declarations and coupled
-  Run Trace geometry override when the corresponding public APIs ship.
+- **Current Status:** The 0.28.6 core and React package upgrade is complete and verified
+  on `codex/box-open-elements-0.28.6`; the migration and CSS consolidation are merged.
+- **Recommended Next Step:** Review and merge the 0.28.6 dependency update, then continue
+  monitoring #379 and #380 for their first containing release.
+- **Why This Next:** The packages remain in lockstep and all Dispatch gates pass without
+  local adaptation.
+- **Expected Outcome:** Dispatch runs on the current published Box Open Elements release
+  while retaining only the two still-required compatibility boundaries.
 - **Blockers:** Upstream releases are required for those two cleanup items. There is no
   blocker for unrelated Dispatch product work.

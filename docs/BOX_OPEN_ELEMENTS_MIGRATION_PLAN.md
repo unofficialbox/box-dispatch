@@ -11,13 +11,14 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.28.4`, reviewed on October 9, 2026.
+- the Box Open Elements packages at version `0.28.6`, reviewed on October 9, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
-The 0.28.4 maintenance update keeps both packages aligned; releases 0.28.2 through
-0.28.4 focus on Verdict Banner, Process Modeler, and Code Editor behavior and do
-not change Dispatch's adopted contracts.
+The 0.28.6 maintenance update keeps both packages aligned. Releases 0.28.2 through
+0.28.5 focus on Verdict Banner, Process Modeler, and Code Editor behavior; 0.28.6
+adds a wizard-native path to Form Wizard. Dispatch does not consume those surfaces,
+so the adopted component contracts require no local adaptation.
 
 ## Implementation status
 
@@ -29,6 +30,8 @@ not change Dispatch's adopted contracts.
   landmarks now use the published APIs instead of Dispatch workarounds.
 - **0.28.4 maintenance update complete:** core and React packages remain in lockstep;
   the intervening release contracts require no Dispatch code changes.
+- **0.28.6 maintenance update complete:** the Process Modeler, Code Editor, and Form
+  Wizard changes in 0.28.5–0.28.6 do not affect Dispatch's adopted components.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer

@@ -14,8 +14,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@unofficialbox/box-open-elements": "0.28.4",
-    "@unofficialbox/box-open-elements-react": "0.28.4",
+    "@unofficialbox/box-open-elements": "0.28.6",
+    "@unofficialbox/box-open-elements-react": "0.28.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
