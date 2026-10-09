@@ -14,12 +14,11 @@ import '@unofficialbox/box-open-elements/split-view'
 import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/run-trace'
 import '@unofficialbox/box-open-elements/toast'
-import { applyDesignTokens, registerBoxDefaultDesignSystem } from '@unofficialbox/box-open-elements/foundations/tokens'
 import './index.css'
 import App from './App.tsx'
+import { startDispatchTheme } from './theme.ts'
 
-registerBoxDefaultDesignSystem({ setActive: true })
-applyDesignTokens(document.documentElement, 'box-default')
+startDispatchTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode><App /></StrictMode>,

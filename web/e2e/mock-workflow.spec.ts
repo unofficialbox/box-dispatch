@@ -1,6 +1,43 @@
 import { expect, test } from '@playwright/test'
 
+test('follows the system color preference across primary pages', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.goto('/')
+
+  const root = page.locator('html')
+  await expect(root).toHaveAttribute('data-theme', 'dark')
+  expect(await page.evaluate(() => ({
+    page: getComputedStyle(document.querySelector('.workspace')!).backgroundColor,
+    heading: getComputedStyle(document.querySelector('.overview-heading h1')!).color,
+    token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
+  }))).toEqual({ page: 'rgb(28, 28, 28)', heading: 'rgb(244, 244, 244)', token: '#1c1c1c' })
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  expect(await page.locator('.settings-provider').first().evaluate((panel) => ({
+    border: getComputedStyle(panel).borderTopColor,
+    header: getComputedStyle(panel.querySelector('header')!).backgroundColor,
+  }))).toEqual({ border: 'rgb(58, 58, 58)', header: 'rgb(22, 22, 22)' })
+
+  await page.getByRole('link', { name: 'Deployments', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
+  await expect(root).toHaveAttribute('data-theme', 'dark')
+
+  await page.getByRole('link', { name: 'Deployment history', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Deployment history' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(root).toHaveAttribute('data-theme', 'light')
+  expect(await page.evaluate(() => ({
+    page: getComputedStyle(document.querySelector('.workspace')!).backgroundColor,
+    token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
+  }))).toEqual({ page: 'rgb(255, 255, 255)', token: '#ffffff' })
+})
+
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
   const connectionChecks: string[] = []
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/api\/connections\/(box|salesforce)\/check$/.test(request.url())) connectionChecks.push(request.url())

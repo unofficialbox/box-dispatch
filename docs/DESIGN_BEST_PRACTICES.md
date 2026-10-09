@@ -291,6 +291,20 @@ Use a consistent sequence:
 - Use neutral grays and soft rules for structure.
 - Verify contrast in every interactive and disabled state.
 
+### Theme preferences
+
+- Follow the operating-system color preference by default; add an explicit user
+  choice only when the product needs to override it.
+- Start the theme controller before rendering the application so the shell and
+  design-system components resolve to the same theme.
+- Map application-specific semantic roles such as page surface, muted text, rule,
+  and selected surface to design-system tokens. Do not maintain a second hard-coded
+  light and dark palette.
+- Keep brand navigation visually stable across themes while checking the contrast of
+  active, hover, focus, disabled, success, and error states independently.
+- Exercise the complete workflow in one theme and the primary pages in both themes;
+  a dark landing-page screenshot alone does not prove dark-mode support.
+
 ### Typography and copy
 
 - Use sentence case for headings, buttons, and field labels.
@@ -453,6 +467,8 @@ Do not let one kind of evidence stand in for another.
 ### Responsive and accessible behavior
 
 - [ ] Test desktop and at least one `390px`-class viewport.
+- [ ] Test the primary pages in light and dark system preferences.
+- [ ] Confirm a live system-preference change updates without reloading.
 - [ ] Confirm zero document-level horizontal overflow.
 - [ ] Verify heading order, landmarks, table captions, focus, and keyboard behavior.
 - [ ] Test loading, empty, error, unavailable, and stale states.
