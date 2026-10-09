@@ -329,6 +329,18 @@ progress indicators, steppers, diff viewers, and notifications.
 - Keep product-specific layout in the application and reusable behavior in the design
   system.
 
+### Retire obsolete styles with the component they served
+
+- Remove selectors for the replaced host markup in the same change that adopts a
+  design-system primitive.
+- Style Web Components through documented host properties, attributes, and public
+  parts; do not retain selectors for inaccessible shadow markup.
+- Before deleting a selector, confirm that its exact class is absent from static,
+  conditional, and generated class names.
+- Re-run interaction tests plus desktop and narrow visual checks after cleanup. A
+  successful CSS build alone does not prove that a fallback or responsive state was
+  preserved.
+
 ## 10. Design responsive behavior intentionally
 
 Do not treat mobile as the desktop layout at a smaller width.
