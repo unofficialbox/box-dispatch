@@ -1108,3 +1108,179 @@ box-drawer::part(close) { box-sizing: border-box; }
 @media (max-width: 560px) {
   .connection-mode-picker::part(group) { grid-template-columns: 1fr; }
 }
+
+/* System theme: Box Open Elements owns the source tokens; Dispatch aliases only
+   the semantic roles that belong to the application shell and workflow pages. */
+:root {
+  --dispatch-surface: var(--boe-token-surface-surface, #fff);
+  --dispatch-surface-hover: var(--boe-token-surface-surface-hover, #f4f4f4);
+  --dispatch-surface-secondary: var(--boe-token-surface-surface-secondary, #fbfbfb);
+  --dispatch-surface-tertiary: var(--boe-token-surface-surface-tertiary, #e8e8e8);
+  --dispatch-surface-selected: var(--boe-token-surface-item-surface-selected, #edf4ff);
+  --dispatch-ink: var(--boe-token-text-text, #222);
+  --dispatch-navy: var(--boe-token-text-text, #222);
+  --dispatch-text: var(--boe-token-text-text, #222);
+  --dispatch-muted: var(--boe-token-text-text-secondary, #6f6f6f);
+  --dispatch-blue: var(--boe-token-surface-surface-brand, #0061d5);
+  --dispatch-green: var(--boe-token-text-status-text-success, #187657);
+  --dispatch-red: var(--boe-token-text-status-text-error, #c52a46);
+  --dispatch-border: var(--boe-token-stroke-stroke, #e8e8e8);
+  --dispatch-rule: var(--boe-token-stroke-stroke, #e8e8e8);
+  --dispatch-rule-soft: color-mix(in srgb, var(--boe-token-stroke-stroke, #e8e8e8) 62%, transparent);
+  --dispatch-soft: var(--boe-token-surface-surface-secondary, #fbfbfb);
+  --dispatch-focus: color-mix(in srgb, var(--boe-token-surface-surface-brand, #0061d5) 24%, transparent);
+  color: var(--dispatch-text);
+  background: var(--dispatch-surface-secondary);
+}
+
+body,
+.app-shell,
+.workspace,
+.choose-actions,
+.connect-footnote,
+.configuration-footer,
+.action-row {
+  color: var(--dispatch-text);
+  background: var(--dispatch-surface);
+}
+
+.review-layout-single .review-surface,
+.validation-surface,
+.connection-row,
+.connection-card::part(card),
+.configuration-card::part(card),
+.details-rail box-card::part(card),
+.connection-details box-card::part(card),
+.component-scope,
+.overview-metric::part(card),
+.overview-current::part(card),
+.overview-history::part(card),
+.overview-connection-health::part(card),
+.settings-default-solution-list,
+.summary-targets ul,
+.summary-destinations ul,
+.validation-change-browser,
+.validation-change-preview,
+.history table {
+  background: var(--dispatch-surface);
+}
+
+.history-filters,
+.history-detail-state,
+.settings-provider > header,
+.settings-defaults-editor,
+.validation-change-files,
+.history th {
+  background: var(--dispatch-surface-secondary);
+}
+
+.overview-heading h1,
+.overview-metric::part(value),
+.overview-current h2,
+.overview-history h2,
+.overview-connection-health h2,
+.overview-connection-health li strong,
+.task-heading h2,
+.validation-heading h2,
+.system-selection header h3,
+.system-option,
+.system-option strong,
+.connection-row,
+.connection-row h3,
+.configuration-copy h3,
+.component-scope h3,
+.component-scope-row,
+.history h2,
+.history td,
+.drawer-content,
+.validation-changes-content {
+  color: var(--dispatch-ink);
+}
+
+.history-filters,
+.history-detail-state,
+.settings-provider,
+.settings-defaults-editor,
+.settings-default-solution-list,
+.validation-change-browser,
+.validation-change-files,
+.summary-targets ul,
+.summary-destinations ul,
+.overview-connection-health ul,
+.overview-connection-health li,
+.table-wrap {
+  border-color: var(--dispatch-rule);
+}
+
+html[data-theme='dark'] .sidebar::part(sidebar) {
+  background: linear-gradient(180deg, #0a1830 0%, #071225 100%);
+}
+
+html[data-theme='dark'] .nav-link:hover,
+html[data-theme='dark'] .nav-link:focus-visible {
+  background: color-mix(in srgb, var(--dispatch-blue) 22%, transparent);
+}
+
+html[data-theme='dark'] .nav-link.active,
+html[data-theme='dark'] .nav-button.active {
+  background: color-mix(in srgb, var(--dispatch-blue) 34%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dispatch-blue) 38%, transparent);
+}
+
+html[data-theme='dark'] .scratch-job,
+html[data-theme='dark'] .cli-hint,
+html[data-theme='dark'] .confirmation-wait,
+html[data-theme='dark'] .connection-mode-panel,
+html[data-theme='dark'] .saved-connection-summary,
+html[data-theme='dark'] .deployment-destinations {
+  color: var(--dispatch-text) !important;
+  background: var(--dispatch-surface-secondary);
+  border-color: var(--dispatch-border);
+}
+
+html[data-theme='dark'] .drawer-button,
+html[data-theme='dark'] .connection-control,
+html[data-theme='dark'] .stage-track span {
+  color: var(--dispatch-text);
+  background: var(--dispatch-surface);
+  border-color: var(--dispatch-border);
+}
+
+html[data-theme='dark'] .connection-option-row[selected]::part(row),
+html[data-theme='dark'] .connection-card.selected::part(card),
+html[data-theme='dark'] .configuration-card.selected::part(card) {
+  background: var(--dispatch-surface-selected);
+}
+
+html[data-theme='dark'] .title-row h1,
+html[data-theme='dark'] .choose-stage .task-heading h2,
+html[data-theme='dark'] .connect-stage .task-heading h2,
+html[data-theme='dark'] .configure-stage .task-heading h2,
+html[data-theme='dark'] .validation-heading h2,
+html[data-theme='dark'] .history h2,
+html[data-theme='dark'] .strategy-section h3,
+html[data-theme='dark'] .saved-connection-summary h3,
+html[data-theme='dark'] .connection-add-section h3,
+html[data-theme='dark'] .connection-mode-panel h3,
+html[data-theme='dark'] .connected-environments h4,
+html[data-theme='dark'] .saved-environments-section h3,
+html[data-theme='dark'] .settings-provider-title h3,
+html[data-theme='dark'] .settings-connection-row strong {
+  color: var(--dispatch-ink);
+}
+
+html[data-theme='dark'] .breadcrumbs,
+html[data-theme='dark'] .deployment-meta,
+html[data-theme='dark'] .task-heading p,
+html[data-theme='dark'] .choose-actions .notice,
+html[data-theme='dark'] .connection-row p,
+html[data-theme='dark'] .configuration-copy p,
+html[data-theme='dark'] .configuration-copy small,
+html[data-theme='dark'] .system-option small,
+html[data-theme='dark'] .system-option em,
+html[data-theme='dark'] .settings-provider-title p,
+html[data-theme='dark'] .settings-connection-row small,
+html[data-theme='dark'] .overview-heading > div > p,
+html[data-theme='dark'] .overview-connection-copy {
+  color: var(--dispatch-muted);
+}
