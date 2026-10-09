@@ -11,6 +11,7 @@
 .windlass/
 # Salesforce CLI local auth/export artifacts. These can contain live credentials.
 .sfdx/
+.sf/
 scratch-auth.json
 config/runtime/environment.json
 config/runtime/bootstrap-state.json
@@ -18,3 +19,6 @@ config/runtime/generated/
 *.swp
 *.tmp
 cover.out
+
+# Local editor/agent runtime state
+.cursor/hooks/state/
