@@ -49,6 +49,14 @@ const historyDeploymentIDFromHash = () => {
   }
 }
 
+const workflowResumeNotice = (phase: Phase, run: DispatchRun | null) => {
+  if (phase === 'Summary') return 'Completed deployment restored.'
+  if (phase === 'Deploy' && run?.action === 'validate' && run.status === 'completed') return 'Validation results restored. Review changes or continue to deployment.'
+  if (phase === 'Deploy') return 'Deployment activity restored.'
+  if (phase === 'Review') return 'Authentication is current. Review the plan, then validate.'
+  return 'Saved deployment loaded. Connect the selected systems to continue.'
+}
+
 function App() {
   const [screen, setScreen] = useState<AppView>(viewFromHash)
   const [activePhase, setActivePhase] = useState<Phase>('Review')
@@ -79,7 +87,8 @@ function App() {
   const [checkingConnections, setCheckingConnections] = useState(false)
   const [connectionsRefreshing, setConnectionsRefreshing] = useState(false)
   const [initialDataLoaded, setInitialDataLoaded] = useState(false)
-  const initialConnectionRefreshComplete = useRef(false)
+  const workflowResumeRequested = useRef(viewFromHash() === 'workflow')
+  const workflowNavigationVersion = useRef(0)
   const [deploymentConfirmationOpen, setDeploymentConfirmationOpen] = useState(false)
   const [changeReview, setChangeReview] = useState<{ url: string; stage: 'validation' | 'deployment' } | null>(null)
   const [validationChanges, setValidationChanges] = useState<ValidationFileChange[]>([])
@@ -97,6 +106,10 @@ function App() {
   const packagePreparing = scratchJob?.status === 'preparing' && (scratchJob.packageStatus === 'checking' || scratchJob.packageStatus === 'installing')
 
   const navigateTo = (view: AppView) => {
+    if (view === 'workflow') {
+      workflowResumeRequested.current = false
+      workflowNavigationVersion.current += 1
+    }
     const hash = view === 'overview' ? '' : view === 'workflow' ? '#workspace' : `#${view}`
     const nextURL = `${window.location.pathname}${window.location.search}${hash}`
     window.history.pushState(null, '', nextURL)
@@ -106,7 +119,9 @@ function App() {
 
   useEffect(() => {
     const syncView = () => {
-      setScreen(viewFromHash())
+      const nextScreen = viewFromHash()
+      if (nextScreen === 'workflow') workflowResumeRequested.current = true
+      setScreen(nextScreen)
       setHistoryDeploymentID(historyDeploymentIDFromHash())
     }
     window.addEventListener('hashchange', syncView)
@@ -136,7 +151,7 @@ function App() {
         const resumedPhase = resumeWorkflowPhase(planResult.value, [], latestRun)
         setRun(latestRun)
         setActivePhase(resumedPhase)
-        setNotice(resumedPhase === 'Deploy' ? 'Deployment activity restored.' : resumedPhase === 'Summary' ? 'Completed deployment restored.' : resumedPhase === 'Review' ? 'Saved deployment loaded. Authentication will be checked first.' : 'Saved deployment loaded. Connect the selected systems to continue.')
+        setNotice(workflowResumeNotice(resumedPhase, latestRun))
       } else {
         setActivePhase('Choose')
         setNotice('Choose a supported solution to start a deployment.')
@@ -157,21 +172,23 @@ function App() {
   useEffect(() => {
     if (!initialDataLoaded || !connectionSurface) return
     const controller = new AbortController()
+    const shouldResumeWorkflow = screen === 'workflow' && workflowResumeRequested.current
+    const navigationVersionAtRefreshStart = workflowNavigationVersion.current
+    if (shouldResumeWorkflow) workflowResumeRequested.current = false
     // This effect is the route-entry boundary for a live external-system refresh.
     // oxlint-disable-next-line react/set-state-in-effect
     setConnectionsRefreshing(true)
     setConnections((current) => markConnectionsChecking(current))
     setPlan((current) => markPlanConnectionsChecking(current))
     void revalidateConnections(fetch, controller.signal).then((nextConnections) => {
+      const refreshedPlan = refreshPlanReadiness(plan, nextConnections)
       setConnections(nextConnections)
-      setPlan((current) => {
-        const refreshedPlan = refreshPlanReadiness(current, nextConnections)
-        if (!initialConnectionRefreshComplete.current) {
-          initialConnectionRefreshComplete.current = true
-          if (screen === 'workflow') setActivePhase(resumeWorkflowPhase(refreshedPlan, nextConnections, run))
-        }
-        return refreshedPlan
-      })
+      setPlan((current) => refreshPlanReadiness(current, nextConnections))
+      if (shouldResumeWorkflow && workflowNavigationVersion.current === navigationVersionAtRefreshStart) {
+        const resumedPhase = resumeWorkflowPhase(refreshedPlan, nextConnections, run)
+        setActivePhase(resumedPhase)
+        setNotice(workflowResumeNotice(resumedPhase, run))
+      }
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return
       const message = error instanceof Error ? error.message : 'Connection readiness could not be refreshed.'
@@ -182,7 +199,7 @@ function App() {
     })
     return () => controller.abort()
   // Re-run only when the rendered connection surface changes. `screen` and
-  // `run` are snapshots for the one-time resume decision.
+  // `plan` and `run` are snapshots for a route-entry resume decision.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionSurface, initialDataLoaded])
 
