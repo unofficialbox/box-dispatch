@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 import { ProviderLogo } from '../components/ProviderLogo'
+import { SelectableResourceRow } from '../components/SelectableResourceRow'
 import { StrategyTileGroup } from '../components/StrategyTileGroup'
 import { readinessLabel, type ConnectionSummary, type DeploymentPlan } from '../types'
 
@@ -16,6 +17,7 @@ type Props = {
   connections: ConnectionSummary[]
   notice: string
   checkingConnections: boolean
+  refreshing?: boolean
   componentSelections: Record<string, string[]>
   onToggleProvider: (provider: ProviderID, included: boolean) => void
   onToggleComponent: (provider: ProviderID, component: string, included: boolean) => void
@@ -24,7 +26,7 @@ type Props = {
   onNext: () => void
 }
 
-export function ConfigurePage({ plan, connections, notice, checkingConnections, componentSelections, onToggleProvider, onToggleComponent, onStrategyChange, onBack, onNext }: Props) {
+export function ConfigurePage({ plan, connections, notice, checkingConnections, refreshing = false, componentSelections, onToggleProvider, onToggleComponent, onStrategyChange, onBack, onNext }: Props) {
   const [selectedProviderID, setSelectedProviderID] = useState<ProviderID>('box')
   const salesforceIncluded = plan.components.some((component) => component.id === 'salesforce')
   const selectedConnection = connections.find((connection) => connection.name === (selectedProviderID === 'box' ? 'Box' : 'Salesforce'))
@@ -35,16 +37,16 @@ export function ConfigurePage({ plan, connections, notice, checkingConnections, 
     <box-split-view className="configure-workspace" label="Deployment configuration and selected provider details" ratio={0.66}>
       <div slot="primary">
         <section className="strategy-section"><StrategyTileGroup value={plan.strategy} legend="Deployment strategy" onChange={onStrategyChange}/></section>
-        <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/><ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback={salesforceIncluded ? 'Selected for this deployment' : 'Not included in this deployment'} connection={connections.find((connection) => connection.name === 'Salesforce')} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/></div>
+        <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} refreshing={refreshing} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/><ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback={salesforceIncluded ? 'Selected for this deployment' : 'Not included in this deployment'} connection={connections.find((connection) => connection.name === 'Salesforce')} refreshing={refreshing} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/></div>
         <ComponentScope provider={selectedProviderID} title={selectedTitle} included={selectedProviderID === 'box' || salesforceIncluded} selectedComponents={selectedComponents} onToggle={onToggleComponent}/>
       </div>
-      <DetailsRail title={`${selectedTitle} details`}><ProviderLogo provider={selectedProviderID} size="standard"/><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', readinessLabel(Boolean(selectedConnection?.verified))], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
+      <DetailsRail title={`${selectedTitle} details`}><ProviderLogo provider={selectedProviderID} size="standard"/><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', refreshing ? 'Checking live status' : readinessLabel(Boolean(selectedConnection?.verified))], ['Components selected', `${selectedComponents.length} of ${componentCatalog[selectedProviderID].length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
     </box-split-view>
-    <footer className="configuration-footer"><p className="notice" role="status">{notice}</p><div className="stage-navigation"><box-button label="Back" tone="neutral" onClick={onBack}></box-button><box-button label={checkingConnections ? 'Checking connections…' : 'Review plan'} tone="primary" disabled={checkingConnections} onClick={onNext}></box-button></div></footer>
+    <footer className="configuration-footer"><p className="notice" role="status">{refreshing ? 'Checking the selected provider connections now…' : notice}</p><div className="stage-navigation"><box-button label="Back" tone="neutral" onClick={onBack}></box-button><box-button label={refreshing || checkingConnections ? 'Checking connections…' : 'Review plan'} tone="primary" disabled={refreshing || checkingConnections} onClick={onNext}></box-button></div></footer>
   </section>
 }
 
-function ProviderConfiguration({ id, title, description, fallback, connection, included, required = false, selected, onSelect, onToggle }: { id: ProviderID; title: string; description: string; fallback: string; connection?: ConnectionSummary; included: boolean; required?: boolean; selected: boolean; onSelect: () => void; onToggle: (provider: ProviderID, included: boolean) => void }) {
+function ProviderConfiguration({ id, title, description, fallback, connection, refreshing, included, required = false, selected, onSelect, onToggle }: { id: ProviderID; title: string; description: string; fallback: string; connection?: ConnectionSummary; refreshing: boolean; included: boolean; required?: boolean; selected: boolean; onSelect: () => void; onToggle: (provider: ProviderID, included: boolean) => void }) {
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
     const switchElement = ref.current
@@ -54,7 +56,11 @@ function ProviderConfiguration({ id, title, description, fallback, connection, i
     return () => switchElement.removeEventListener('checked-changed', handleChange)
   }, [id, onToggle, required])
 
-  return <box-card className={`configuration-card ${included ? 'included' : 'excluded'} ${selected ? 'selected' : ''}`}><article className="configuration-provider"><button className="configuration-select" type="button" aria-pressed={selected} onClick={onSelect}><ProviderLogo provider={id} size="standard"/><span className="configuration-copy"><strong>{title}</strong><span>{description}</span><ConnectionDetails connection={connection} fallback={fallback}/></span></button><box-switch ref={ref} checked={included} disabled={required} label={included ? 'Included' : 'Not included'} description={required ? 'Required' : 'Optional'}></box-switch></article></box-card>
+  const ready = Boolean(connection?.verified)
+  const statusLabel = refreshing ? 'Checking' : ready ? 'Ready' : 'Needs attention'
+  const meta = `${description}\n${connectionDetailsText(connection, fallback)}`
+  const toggle = <box-switch ref={ref} checked={included} disabled={required} label={included ? 'Included' : 'Not included'} description={required ? 'Required' : 'Optional'}></box-switch>
+  return <SelectableResourceRow className={`configuration-resource-row ${included ? 'included' : 'excluded'}`} label={title} meta={meta} value={id} selected={selected} icon={<ProviderLogo provider={id} size="standard"/>} status={<box-badge label={statusLabel} tone={refreshing ? 'info' : ready ? 'success' : 'error'}></box-badge>} actions={toggle} onSelect={onSelect}/>
 }
 
 function ComponentScope({ provider, title, included, selectedComponents, onToggle }: { provider: ProviderID; title: string; included: boolean; selectedComponents: string[]; onToggle: (provider: ProviderID, component: string, included: boolean) => void }) {
@@ -73,9 +79,9 @@ function ComponentToggle({ provider, component, checked, disabled, onToggle }: {
   return <div className="component-scope-row"><span>{component}</span><box-switch ref={ref} checked={checked} disabled={disabled} label={checked ? 'Included' : 'Not included'}></box-switch></div>
 }
 
-function ConnectionDetails({ connection, fallback }: { connection?: ConnectionSummary; fallback: string }) {
-  if (!connection) return <small>{fallback}</small>
-  if (!connection.configured) return <small><b>Connection</b> · Not configured</small>
+function connectionDetailsText(connection: ConnectionSummary | undefined, fallback: string) {
+  if (!connection) return fallback
+  if (!connection.configured) return 'Connection · Not configured'
   const parts = [connection.selection, connection.authType, readinessLabel(connection.verified), connection.expiresAt ? `Expires ${connection.expiresAt}` : ''].filter(Boolean)
-  return <small><b>Connection</b> · {parts.join(' · ')}</small>
+  return `Connection · ${parts.join(' · ')}`
 }

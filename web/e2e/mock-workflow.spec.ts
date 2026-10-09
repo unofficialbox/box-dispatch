@@ -1,32 +1,57 @@
 import { expect, test } from '@playwright/test'
 
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
+  const connectionChecks: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/api\/connections\/(box|salesforce)\/check$/.test(request.url())) connectionChecks.push(request.url())
+  })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('box-metric-card[heading="Connections"]')).not.toHaveAttribute('value', 'Checking')
+  await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
   await expect(page.getByRole('navigation')).toHaveCount(1)
   const sidebar = page.locator('box-nav-sidebar')
-  await expect(sidebar).toHaveAttribute('collapsed', '')
-  const collapsedWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
-  await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Expand navigation' }).click()
   await expect(sidebar).not.toHaveAttribute('collapsed', '')
-  await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(collapsedWidth)
+  const expandedWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
+  const expandedNavigationRows = await sidebar.locator('.nav-route').evaluateAll((rows) => rows.map((row) => {
+    const icon = row.querySelector<HTMLElement>('[data-nav-icon]')!.getBoundingClientRect()
+    const label = row.querySelector<HTMLElement>('[data-nav-label]')!.getBoundingClientRect()
+    return {
+      iconBeforeLabel: icon.right < label.left,
+      centerDelta: Math.abs((icon.top + icon.height / 2) - (label.top + label.height / 2)),
+      rowTextAlign: getComputedStyle(row).textAlign,
+      labelTextAlign: getComputedStyle(row.querySelector<HTMLElement>('[data-nav-label]')!).textAlign,
+    }
+  }))
+  expect(expandedNavigationRows.every(({ iconBeforeLabel, centerDelta, rowTextAlign, labelTextAlign }) => iconBeforeLabel && centerDelta < 0.5 && rowTextAlign === 'left' && labelTextAlign === 'left')).toBe(true)
+  const activeNavigationStyle = await sidebar.locator('.nav-route.active').evaluate((row) => ({
+    beforeContent: getComputedStyle(row, '::before').content,
+    boxShadow: getComputedStyle(row).boxShadow,
+  }))
+  expect(activeNavigationStyle.beforeContent).toBe('none')
+  expect(activeNavigationStyle.boxShadow).not.toContain('3px 0px')
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' }).click()
   await expect(sidebar).toHaveAttribute('collapsed', '')
+  await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(expandedWidth)
+  await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Expand navigation' }).click()
+  await expect(sidebar).not.toHaveAttribute('collapsed', '')
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('button', { name: 'Overview', exact: true })).not.toHaveAttribute('aria-current')
+  await expect(page.getByText(/\d+ saved/).first()).toBeVisible()
+  await expect.poll(() => connectionChecks.filter((url) => url.endsWith('/box/check')).length).toBeGreaterThanOrEqual(2)
+  await expect.poll(() => connectionChecks.filter((url) => url.endsWith('/salesforce/check')).length).toBeGreaterThanOrEqual(2)
+  await expect(page.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('link', { name: 'Overview', exact: true })).not.toHaveAttribute('aria-current')
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await page.goForward()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-  await page.getByRole('button', { name: 'Overview', exact: true }).click()
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 
   const overviewGutter = await page.evaluate(() => {
@@ -43,10 +68,30 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await page.getByRole('button', { name: 'New deployment' }).click()
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
-  const workflow = page.locator('box-progress-steps')
-  await expect(workflow).toHaveAttribute('value', 'Choose')
-  await expect(workflow.locator('[part="step"][data-value="Deploy"]')).toBeDisabled()
-  await expect(workflow.locator('[part="step"][data-value="Summary"]')).toBeDisabled()
+  const workflow = page.locator('box-path')
+  await expect(workflow).toHaveAttribute('current', 'Choose')
+  await expect(workflow.locator('[part="stage"][data-stage-id="Deploy"]')).toHaveAttribute('data-state', 'upcoming')
+  await expect(workflow.locator('[part="stage"][data-stage-id="Summary"]')).toHaveAttribute('data-state', 'upcoming')
+  const solutionGroup = page.locator('box-tile-group.solution-list')
+  const selectedSolutionBorder = await solutionGroup.evaluate((group) => {
+    const selected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')!
+    const unselected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="false"]')!
+    const selectedStyle = getComputedStyle(selected)
+    const unselectedStyle = getComputedStyle(unselected)
+    return {
+      selectedID: selected.dataset.optionId,
+      selectedColors: [selectedStyle.borderTopColor, selectedStyle.borderRightColor, selectedStyle.borderBottomColor, selectedStyle.borderLeftColor],
+      selectedWidths: [selectedStyle.borderTopWidth, selectedStyle.borderRightWidth, selectedStyle.borderBottomWidth, selectedStyle.borderLeftWidth],
+      unselectedColor: unselectedStyle.borderTopColor,
+    }
+  })
+  expect(selectedSolutionBorder.selectedWidths).toEqual(['1px', '1px', '1px', '1px'])
+  expect(new Set(selectedSolutionBorder.selectedColors).size).toBe(1)
+  expect(selectedSolutionBorder.selectedColors[0]).not.toBe(selectedSolutionBorder.unselectedColor)
+  await solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLInputElement>('[part="tile"][data-selected="false"] [part="control"]')!.click())
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).not.toBe(selectedSolutionBorder.selectedID)
+  await solutionGroup.evaluate((group, selectedID) => group.shadowRoot!.querySelector<HTMLInputElement>(`[part="tile"][data-option-id="${selectedID}"] [part="control"]`)!.click(), selectedSolutionBorder.selectedID)
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).toBe(selectedSolutionBorder.selectedID)
   const nameFieldLayout = await page.evaluate(() => {
     const section = document.querySelector('.deployment-name-field')!.getBoundingClientRect()
     const field = document.querySelector('.deployment-name-field box-text-field')!.getBoundingClientRect()
@@ -78,22 +123,20 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Prepare package' }).click()
 
   await expect(page.getByRole('heading', { name: 'Confirm connections' })).toBeVisible()
-  await expect(workflow).toHaveAttribute('value', 'Connect')
-  await expect(workflow.locator('[part="step"][data-value="Choose"]')).toHaveAttribute('data-state', 'complete')
-  await workflow.locator('[part="step"][data-value="Choose"]').focus()
-  await page.keyboard.press('ArrowRight')
-  await expect(page.getByRole('heading', { name: 'Confirm connections' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Box Verified and ready/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Salesforce Verified and ready/ })).toBeVisible()
+  await expect(workflow).toHaveAttribute('current', 'Connect')
+  await expect(workflow.locator('[part="stage"][data-stage-id="Choose"]')).toHaveAttribute('data-state', 'complete')
+  await expect(page.locator('box-resource-row.connection-resource-row[label="Box"]')).toHaveAttribute('selected', '')
+  await expect(page.locator('box-resource-row.connection-resource-row[label="Box"] box-badge')).toHaveAttribute('label', 'Ready')
+  await expect(page.locator('box-resource-row.connection-resource-row[label="Salesforce"] box-badge')).toHaveAttribute('label', 'Ready')
   await expect(page.locator('.connection-buttons box-button[label="Open"][aria-label="Open Box"]')).toBeVisible()
   await expect(page.locator('.connection-buttons box-button[label="Open"][aria-label="Open Salesforce"]')).toBeVisible()
-  await expect(page.locator('.connection-summary img[data-provider-logo]')).toHaveCount(2)
+  await expect(page.locator('.connection-resource-row img[data-provider-logo]')).toHaveCount(2)
   expect(await page.locator('.connection-buttons box-button[aria-label^="Open "]').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('label')))).toEqual(['Open', 'Open'])
   expect(await page.locator('button button, button box-button, button box-switch').count()).toBe(0)
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
-  const providerControls = await page.locator('.configuration-provider box-switch').evaluateAll((switches) => switches.map((control) => {
+  const providerControls = await page.locator('.configuration-resource-row box-switch').evaluateAll((switches) => switches.map((control) => {
     const bounds = control.getBoundingClientRect()
     return {
       label: control.getAttribute('label'),
@@ -189,7 +232,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   const confirmation = page.getByRole('dialog', { name: 'Start deployment?' })
   await expect(confirmation).toBeVisible()
   expect(await confirmation.evaluate((dialog) => dialog.matches(':modal'))).toBe(true)
-  await page.getByRole('button', { name: 'Overview', exact: true, includeHidden: true }).evaluate((button) => button.focus())
+  await page.getByRole('link', { name: 'Overview', exact: true, includeHidden: true }).evaluate((link) => link.focus())
   expect(await confirmationHost.evaluate((host) => document.activeElement === host && host.shadowRoot?.activeElement?.getAttribute('part') === 'dialog')).toBe(true)
   for (let index = 0; index < 4; index++) {
     await page.keyboard.press('Tab')
@@ -216,7 +259,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({ before: viewer.getAttribute('before-label'), after: viewer.getAttribute('after-label') }))).toEqual({ before: 'Before deployment', after: 'After deployment' })
   await page.getByRole('button', { name: 'Close drawer' }).click()
 
-  await page.getByRole('button', { name: 'Overview', exact: true }).click()
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
   await expect(page.getByText('Northstar CLM rollout').first()).toBeVisible()
   const recentDeployments = page.getByRole('table', { name: 'Recent deployments' })
   await recentDeployments.getByRole('link', { name: 'Northstar CLM rollout' }).click()
@@ -344,7 +387,7 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
   await expect(defaults.getByText('Source', { exact: true })).toBeVisible()
   await defaults.locator('box-button[label="Cancel"]').click()
 
-  await page.getByRole('button', { name: 'Deployments' }).click()
+  await page.getByRole('link', { name: 'Deployments' }).click()
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
   await expect(page.locator('box-tile-group.solution-list').locator('[part="tile"][data-selected="true"]')).toContainText('Contract Lifecycle Management')
   await expect(page.locator('box-switch[label="Salesforce"]')).not.toHaveAttribute('checked')
@@ -353,18 +396,34 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
 })
 
 test('returns an authentication failure to a resumable connection step and recovers', async ({ page }) => {
-  await page.request.post('/api/packages', { data: { name: 'Recovery CLM rollout', templateId: 'clm', components: ['box', 'salesforce'], strategy: 'reuse' } })
   await page.route('**/api/connections/salesforce/check', async (route) => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Salesforce session expired. Reconnect the selected Salesforce org.' }) })
   })
+  await page.request.post('/api/packages', { data: { name: 'Recovery CLM rollout', templateId: 'clm', components: ['box', 'salesforce'], strategy: 'reuse' } })
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  const salesforcePanel = page.locator('.provider-connection-panel--compact[aria-label="Salesforce"]')
+  const notReadyBadge = salesforcePanel.locator('box-badge[label="Not ready"]')
+  await expect(notReadyBadge).toBeVisible()
+  const statusBounds = await salesforcePanel.evaluate((panel) => {
+    const badge = panel.querySelector('box-badge[label="Not ready"]')!.getBoundingClientRect()
+    const row = panel.querySelector('.settings-connection-row')!.getBoundingClientRect()
+    return {
+      insetRight: row.right - badge.right,
+      insideLeftEdge: badge.left >= row.left,
+    }
+  })
+  expect(statusBounds.insetRight).toBeGreaterThanOrEqual(12)
+  expect(statusBounds.insideLeftEdge).toBe(true)
+
   await page.goto('/#workspace')
-  await expect(page.getByRole('heading', { name: 'Review and validate' })).toBeVisible()
-  await page.getByRole('button', { name: 'Validate deployment' }).click()
   await expect(page.getByRole('heading', { name: 'Confirm connections' })).toBeVisible()
-  await expect(page.getByText('Salesforce session expired. Reconnect the selected Salesforce org.').first()).toBeVisible()
+  await expect(page.locator('box-resource-row.connection-resource-row[label="Salesforce"] box-badge')).toHaveAttribute('label', 'Needs attention')
 
   await page.unroute('**/api/connections/salesforce/check')
   await page.getByRole('button', { name: 'Continue to configure' }).click()
+  await expect(page.getByRole('button', { name: 'Review plan' })).toBeEnabled()
   await page.getByRole('button', { name: 'Review plan' }).click()
   await expect(page.getByRole('heading', { name: 'Review and validate' })).toBeVisible()
   await page.getByRole('button', { name: 'Validate deployment' }).click()

@@ -4,7 +4,7 @@ import { ProviderLogo } from './ProviderLogo'
 
 export function ConnectionDetailsPanel({ component, connection, onEdit }: { component: PlanComponent; connection?: ConnectionSummary; onEdit: () => void }) {
   const rows: Array<[string, string]> = [
-    ['Status', readinessLabel(component.ready)],
+    ['Status', connection?.status === 'Checking' ? 'Checking live status' : readinessLabel(component.ready)],
     ['Connection', connection?.authType || 'Not configured'],
     ['Selected', connection?.selection || '—'],
   ]

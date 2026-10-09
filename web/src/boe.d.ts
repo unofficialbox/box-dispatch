@@ -24,10 +24,21 @@ declare module 'react' {
         label?: string
         maxItems?: number
       }
-      'box-progress-steps': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-        items?: import('@unofficialbox/box-open-elements/progress-steps').ProgressStepItem[]
+      'box-path': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        stages?: import('@unofficialbox/box-open-elements/path').PathStage[]
         label?: string
+        current?: string
+        variant?: import('@unofficialbox/box-open-elements/path').PathVariant
+        hasError?: boolean
+      }
+      'box-resource-row': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        label?: string
+        meta?: string
+        status?: string
         value?: string
+        selected?: boolean
+        active?: boolean
+        disabled?: boolean
       }
       'box-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
         label?: string
