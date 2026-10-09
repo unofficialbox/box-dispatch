@@ -1,3 +1,4 @@
+import '@unofficialbox/box-open-elements/status-icon'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 import type { DeploymentPlan } from '../types'
 
@@ -11,5 +12,5 @@ export function ReviewPage({ plan, notice, checkingConnections, onDeploy, onEdit
 }
 
 function PlanGroup({ title, rows }: { title: string; rows: [string, string][] }) {
-  return <section className="plan-group"><h3>{title}</h3>{rows.map(([label, value]) => <div className="plan-row" key={label}><span>{label}</span><strong className={value === 'Ready' ? 'plan-value-ready' : undefined}>{value}</strong></div>)}</section>
+  return <section className="plan-group"><h3>{title}</h3>{rows.map(([label, value]) => <div className="plan-row" key={label}><span>{label}</span><strong className={value === 'Ready' ? 'plan-value-ready' : undefined}>{value === 'Ready' ? <box-status-icon kind="done" label="Ready" aria-hidden="true"></box-status-icon> : null}{value}</strong></div>)}</section>
 }

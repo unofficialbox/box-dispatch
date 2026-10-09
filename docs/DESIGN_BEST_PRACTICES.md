@@ -192,6 +192,10 @@ These concepts answer different questions:
 Do not use color alone to communicate state. Pair color with a label and, when useful,
 an icon or supporting sentence.
 
+Use the design system's status glyph family for execution and outcome states. Do not
+draw checkmarks, warnings, or failures with text characters or CSS-generated content.
+Keep the specific outcome words visible beside or immediately after the glyph.
+
 ### Keep badges scarce
 
 Badges are strongest when they answer a single status question. Avoid turning metadata

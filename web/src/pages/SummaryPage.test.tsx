@@ -14,6 +14,8 @@ describe('SummaryPage', () => {
     const { container } = render(<SummaryPage plan={plan} connections={[{ name: 'Box', configured: true, verified: true, launchUrl: 'https://app.box.com/', connections: [{ id: 'box-1', alias: 'Production Box', status: 'Ready', selected: true, domain: 'acme.app.box.com', enterpriseId: '5105484' }] }, { name: 'Salesforce', configured: true, verified: true, launchUrl: '/api/connections/salesforce/open', orgs: [{ id: 'sf-1', alias: 'CLM Scratch', kind: 'Scratch org', status: 'Ready', selected: true, domain: 'example.my.salesforce.com', orgId: '00D123' }] }]} run={run} onOpenProvider={onOpenProvider} onViewChanges={onViewChanges} onOverview={onOverview} />)
 
     expect(screen.getByText('Northstar CLM is ready')).toBeTruthy()
+    expect(container.querySelector('box-status-icon.summary-status-icon[kind="done"][label="Complete"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('✓')
     expect(screen.getByText('acme.app.box.com')).toBeTruthy()
     expect(screen.getByText('Enterprise ID 5105484')).toBeTruthy()
     expect(screen.getByText('example.my.salesforce.com')).toBeTruthy()
@@ -51,6 +53,7 @@ describe('SummaryPage', () => {
     expect(screen.getByText('Deployment needs attention')).toBeTruthy()
     expect(screen.getByText(/Some components remain or require manual work/)).toBeTruthy()
     expect(container.querySelector('.summary-surface-attention')).toBeTruthy()
+    expect(container.querySelector('box-status-icon.summary-status-icon[kind="warning"][label="Needs attention"]')).toBeTruthy()
     const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Status', value: 'Needs attention' })
     expect(screen.queryByText('Every selected system finished successfully.')).toBeNull()
@@ -63,6 +66,7 @@ describe('SummaryPage', () => {
 
     expect(screen.getByText('Northstar CLM was recorded')).toBeTruthy()
     expect(screen.getByText('Deployment recorded')).toBeTruthy()
+    expect(container.querySelector('box-status-icon.summary-status-icon[kind="pending"][label="Recorded"]')).toBeTruthy()
     const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Status', value: 'Recorded' })
   })

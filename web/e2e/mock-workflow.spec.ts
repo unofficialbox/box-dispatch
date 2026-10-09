@@ -295,6 +295,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Start deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout is ready' })).toBeVisible()
+  await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('kind', 'done')
+  await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('label', 'Complete')
   await expect(page.getByText('Every selected system finished successfully. Open a destination to review the deployed experience.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Deployment targets' })).toBeVisible()
   await expect(page.getByText('acme.app.box.com')).toBeVisible()

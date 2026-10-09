@@ -1,6 +1,7 @@
 import '@unofficialbox/box-open-elements/card'
 import '@unofficialbox/box-open-elements/link-button'
 import '@unofficialbox/box-open-elements/section'
+import '@unofficialbox/box-open-elements/status-icon'
 import type { ConnectionSummary, DeploymentPlan, DispatchRun } from '../types'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 import { deploymentOutcome } from '../deploymentPresentation'
@@ -12,6 +13,7 @@ export function SummaryPage({ plan, connections, run, onOpenProvider, onViewChan
   const outcome = deploymentOutcome(run)
   const complete = outcome.label === 'Complete'
   const needsAttention = outcome.label === 'Needs attention'
+  const outcomeKind = complete ? 'done' : needsAttention ? 'warning' : 'pending'
   const summaryEyebrow = complete ? 'Deployment complete' : needsAttention ? 'Deployment needs attention' : 'Deployment recorded'
   const summaryTitle = complete ? `${plan.name} is ready` : needsAttention ? `${plan.name} needs attention` : `${plan.name} was recorded`
   const summaryCopy = complete ? 'Every selected system finished successfully. Open a destination to review the deployed experience.' : needsAttention ? 'Some components remain or require manual work. Review the recorded changes and provider results before treating this deployment as complete.' : 'Provider results were not recorded, so this deployment cannot be confirmed complete. Review its audit details before continuing.'
@@ -37,7 +39,7 @@ export function SummaryPage({ plan, connections, run, onOpenProvider, onViewChan
   ]
   return <section className="summary-workspace" aria-labelledby="deployment-summary-title">
     <box-card className={`summary-surface${needsAttention ? ' summary-surface-attention' : complete ? '' : ' summary-surface-recorded'}`}><section>
-      <div className="summary-success-mark" aria-hidden="true">{complete ? '✓' : needsAttention ? '!' : 'i'}</div>
+      <box-status-icon className="summary-status-icon" kind={outcomeKind} label={outcome.label} aria-hidden="true"></box-status-icon>
       <p className="summary-eyebrow">{summaryEyebrow}</p>
       <h2 id="deployment-summary-title">{summaryTitle}</h2>
       <p className="summary-lede">{summaryCopy}</p>
