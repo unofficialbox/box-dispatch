@@ -127,6 +127,31 @@ func TestMockHandlerCanSimulateStaleConnectionBeforeValidation(t *testing.T) {
 	}
 }
 
+func TestMockHandlerInvalidatesStaleBoxConnectionCheck(t *testing.T) {
+	server := httptest.NewServer(NewMockHandlerWithOptions(MockOptions{ConnectionFailureProvider: "box"}))
+	defer server.Close()
+
+	response, err := http.Post(server.URL+"/api/connections/box/check", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "reconnect the selected Box account") {
+		t.Fatalf("check = %d: %s", response.StatusCode, body)
+	}
+
+	connections, err := http.Get(server.URL + "/api/connections")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionBody, _ := io.ReadAll(connections.Body)
+	_ = connections.Body.Close()
+	if connections.StatusCode != http.StatusOK || strings.Count(string(connectionBody), `"verified":true`) != 1 || !strings.Contains(string(connectionBody), `"name":"Box","configured":true,"verified":false`) {
+		t.Fatalf("connections = %d: %s", connections.StatusCode, connectionBody)
+	}
+}
+
 func startMockRun(t *testing.T, url string) runResponse {
 	t.Helper()
 	response, err := http.Post(url, "application/json", nil)

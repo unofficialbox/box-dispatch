@@ -24,6 +24,10 @@ React packages in lockstep and adopts the component contracts released in 0.28.0
 - **0.28.1 follow-up complete:** confirmation dialogs, rich solution/default tiles,
   drawer close-affordance control, the collapsed sidebar toggle, and shell navigation
   landmarks now use the published APIs instead of Dispatch workarounds.
+- **October 9 audit complete:** the deployment header uses `box-path`; Connect,
+  Configure, and saved-connection selectors use `box-resource-row`; connection-mode
+  choices use `box-tile-group`; and the sidebar uses the published header/body/footer
+  composition with expanded route identity by default.
 - **Phase 1 complete within the published component contracts:** fact lists,
   strategy tiles, history filters, React field adapters, alerts, spinners, status
   badges, and toast integration are migrated and verified.
@@ -33,8 +37,8 @@ React packages in lockstep and adopts the component contracts released in 0.28.0
 - **Phases 3 and 4 complete:** deployment data, validation-file selection, live
   activity, metrics, provider summaries, and completed-run composition now use
   the published table, timeline, metric, card, section, and fact-list contracts.
-- The connection summary rows remain Dispatch composition. The published Resource
-  Row is selectable; these summaries are intentionally read-only.
+- The read-only connection summary rows remain Dispatch composition. Selectable
+  provider and saved-connection rows now use Resource Row.
 
 ## Decision rules
 
@@ -58,10 +62,10 @@ React packages in lockstep and adopts the component contracts released in 0.28.0
 
 | Current Dispatch surface | Box Open Elements target | Decision |
 | --- | --- | --- |
-| `Sidebar` and the outer `.app-shell` layout | `box-app-shell`, `box-nav-sidebar`, and `box-sidebar-toggle-button` | Replace. Keep hash routing and active-route state in Dispatch; render route buttons or links in the sidebar slots. |
+| `Sidebar` and the outer `.app-shell` layout | `box-app-shell`, `box-nav-sidebar`, and `box-sidebar-toggle-button` | Replaced. Keep hash routing and active-route state in Dispatch; render route links in the sidebar slots. |
 | `RailIcon` | Nav-sidebar icon slots plus Box Open Elements iconography | Reduce, then retain only the small icon lookup if the sidebar still needs it. Do not duplicate icon SVGs. |
 | `DeploymentHeader` breadcrumbs | `box-breadcrumb` | Replace the custom separator and link styling. Dispatch continues to provide the route targets. |
-| `WorkflowIndicator` | `box-progress-steps` | Replace after a focused prototype. Version 0.27 supports interactive steps, current position, complete/blocked/failed/disabled states, keyboard navigation, and a change event. Dispatch continues to calculate eligibility. |
+| Deployment lifecycle indicator | `box-path` | Replaced. The header is a read-only record lifecycle; Back/Continue buttons own task navigation and eligibility. |
 | History back control | `box-link-button` or the page breadcrumb | Replace the custom text-button styling while preserving navigation semantics. |
 
 ### Forms and selection
@@ -118,8 +122,9 @@ trailing status/action region. Placing **Open**, **Remove**, or **Configure** in
 the option activation target would create ambiguous nested interaction.
 
 Issue [box-open-elements #354](https://github.com/unofficialbox/box-open-elements/issues/354)
-delivered Resource Row. Its selectable resource model fits future master-detail
-connection lists, but not the current non-selectable summary rows.
+delivered Resource Row. Its selectable resource model now owns the Connect,
+Configure, and saved-connection lists, while the current non-selectable summary
+rows remain application composition.
 
 For the current summary rows:
 
@@ -197,9 +202,9 @@ Status: **Complete within the current component contracts**
    **Complete.** In 0.28.1 the toggle uses the header slot and stays reachable when
    collapsed; App Shell yields the navigation landmark to the slotted sidebar.
 4. Replace breadcrumbs with `box-breadcrumb`. **Complete.**
-5. Prototype and then replace `WorkflowIndicator` with `box-progress-steps`.
-   **Complete.** The public state/event contract fits; Dispatch uses published
-   parts for the horizontal composition.
+5. Replace the workflow header indicator with `box-path`.
+   **Complete.** The header reports read-only lifecycle state; explicit page actions
+   retain task navigation.
 
 Exit gate: mouse, keyboard, browser Back/Forward, reload-on-deep-link, and narrow
 viewport navigation all preserve current behavior.
@@ -221,8 +226,8 @@ Status: **Complete**
    replacement file sets, and empty/error copy are covered by tests.
 4. Prototype `box-timeline` for the compact live activity feed. **Complete.** The
    host remains keyboard focusable because it owns the bounded scroll region.
-5. Keep the connection-row composition behind one local component pending issue
-   #354. **Retained as the documented exception.**
+5. Adopt Resource Row for selectable provider and saved-connection rows while
+   retaining one read-only summary-row composition. **Complete.**
 
 Exit gate: sorting/filtering, row links, result badges, empty states, and selected
 file behavior pass unit and end-to-end tests.

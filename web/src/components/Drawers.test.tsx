@@ -58,7 +58,7 @@ describe('connection drawers', () => {
     expect(container.querySelector('box-select[label="Salesforce environment"]')).toBeNull()
     expect(container.querySelector('box-text-field[label="Scratch org alias"]')).toBeNull()
 
-    fireEvent.click(container.querySelector('button.connection-mode-card:nth-child(2)')!)
+    fireEvent(container.querySelector('box-tile-group[name="salesforce-connection-type"]')!, new CustomEvent('tile-change', { detail: { selected: ['scratch'] } }))
 
     expect(container.querySelector('box-text-field[label="Scratch org alias"]')).toBeTruthy()
     expect(container.querySelector('box-switch[label="Install Box for Salesforce automatically"][checked]')).toBeTruthy()
@@ -83,10 +83,9 @@ describe('connection drawers', () => {
     const summary = container.querySelector('.saved-connection-summary')!
     const list = container.querySelector('.saved-environments-section')!
     expect(summary.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(list.textContent).toContain('Current')
-    expect(list.textContent).toContain('Production')
-    const production = Array.from(container.querySelectorAll<HTMLButtonElement>('.connection-option-main')).find((button) => button.textContent?.includes('Production'))
-    fireEvent.click(production!)
+    expect(Array.from(list.querySelectorAll('box-resource-row')).map((row) => row.getAttribute('label'))).toEqual(['Current', 'Production'])
+    const production = Array.from(container.querySelectorAll<HTMLElement>('box-resource-row.connection-option-row')).find((row) => row.getAttribute('label') === 'Production')
+    fireEvent(production!, new CustomEvent('select', { detail: { value: 'org-2' } }))
     expect(onSelect).toHaveBeenCalledWith('org-2')
   })
 
@@ -129,10 +128,9 @@ describe('connection drawers', () => {
     expect(container.querySelector('box-button[label="Check availability"]')).toBeNull()
     expect(container.querySelector('.selected-environment-details')?.textContent).toContain('Box OAuth')
     expect(container.querySelector('.selected-environment-details')?.textContent).toContain('acme.app.box.com')
-    expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Production')
-    expect(container.querySelector('.saved-environments-section')?.textContent).toContain('Sandbox')
-    const sandbox = Array.from(container.querySelectorAll<HTMLButtonElement>('.connection-option-main')).find((button) => button.textContent?.includes('Sandbox'))
-    fireEvent.click(sandbox!)
+    expect(Array.from(container.querySelectorAll('.saved-environments-section box-resource-row')).map((row) => row.getAttribute('label'))).toEqual(['Production', 'Sandbox'])
+    const sandbox = Array.from(container.querySelectorAll<HTMLElement>('box-resource-row.connection-option-row')).find((row) => row.getAttribute('label') === 'Sandbox')
+    fireEvent(sandbox!, new CustomEvent('select', { detail: { value: 'box-2' } }))
     expect(onSelect).toHaveBeenCalledWith('box-2')
   })
 })

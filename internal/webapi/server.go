@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -149,6 +150,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 
 	mux := http.NewServeMux()
+	var connectionCheckMu sync.Mutex
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{Profile: profile, ServerTime: options.Now().UTC()})
 	})
@@ -252,6 +254,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
 	})
 	mux.HandleFunc("POST /api/connections/salesforce/check", func(w http.ResponseWriter, r *http.Request) {
+		connectionCheckMu.Lock()
+		defer connectionCheckMu.Unlock()
 		settings, err := options.ConnectionStore()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
@@ -608,6 +612,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
 	})
 	mux.HandleFunc("POST /api/connections/box/check", func(w http.ResponseWriter, r *http.Request) {
+		connectionCheckMu.Lock()
+		defer connectionCheckMu.Unlock()
 		settings, err := options.ConnectionStore()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
@@ -622,6 +628,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		defer cancel()
 		verification, err := options.BoxCheck(ctx, settings)
 		if err != nil {
+			settings = settings.MarkSelectedBoxUnverified()
+			_ = options.ConnectionSaver(settings)
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}

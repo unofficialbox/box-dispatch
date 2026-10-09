@@ -5,6 +5,17 @@ import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
 import '@unofficialbox/box-open-elements/accordion'
 import type { ConnectionSummary, RunDiagnostic, SalesforceOAuthJob, ScratchOrgJob, BoxOAuthJob } from '../types'
 import { ProviderLogo } from './ProviderLogo'
+import { SelectableResourceRow } from './SelectableResourceRow'
+import { SolutionTileGroup } from './SolutionTileGroup'
+
+const salesforceConnectionModes = [
+  { id: 'existing', label: 'Existing org', description: 'Connect production or sandbox.', meta: 'Browser login' },
+  { id: 'scratch', label: 'Scratch org', description: 'Create from your Dev Hub.', meta: '30-day environment' },
+]
+
+const boxConnectionModes = [
+  { id: 'box-user', label: 'Box user', description: 'Connect with Box OAuth.', meta: 'Browser login' },
+]
 
 function useDrawerClose(onClose: () => void) {
   const ref = useRef<HTMLElement>(null)
@@ -108,21 +119,13 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
         <div><h3>Saved environments</h3><p>Select the org Dispatch should use or remove one you no longer need.</p></div>
         <ul className="connection-option-list">
           {orgs.map((org) => <li key={org.id || `${org.alias}-${org.username}`} className={org.selected ? 'selected' : ''}>
-            <button type="button" className="connection-option-main" aria-pressed={org.selected} disabled={loading || org.selected || org.devHub || !org.id} onClick={() => { if (org.id) void onSelect(org.id) }}>
-              <span className={`connection-state-dot ${org.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
-              <span className="connection-option-copy"><strong>{org.alias || org.username || 'Salesforce org'}</strong><small>{[org.domain, org.kind, org.username, org.orgId].filter(Boolean).join(' · ')}</small></span>
-              <span className="connection-option-badge">{org.selected ? 'Selected' : org.devHub ? 'Dev Hub' : 'Use org'}</span>
-            </button>
-            <RemoveConnectionButton label={`Remove ${org.alias || org.username || 'Salesforce org'}`} disabled={loading || !org.id} onPress={() => { if (org.id) void onRemove(org.id) }}/>
+            <SelectableResourceRow className="connection-option-row" label={org.alias || org.username || 'Salesforce org'} meta={[org.domain, org.kind, org.username, org.orgId].filter(Boolean).join(' · ')} value={org.id || org.alias} selected={org.selected} disabled={loading || org.selected || org.devHub || !org.id} icon={<span className={`connection-state-dot ${org.selected && org.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>} status={<box-badge label={org.selected ? org.status : org.devHub ? 'Dev Hub' : 'Saved'} tone={org.selected && org.status === 'Ready' ? 'success' : 'neutral'}></box-badge>} actions={<RemoveConnectionButton label={`Remove ${org.alias || org.username || 'Salesforce org'}`} disabled={loading || !org.id} onPress={() => { if (org.id) void onRemove(org.id) }}/>} onSelect={(id) => { if (org.id && id === org.id) void onSelect(org.id) }}/>
           </li>)}
         </ul>
       </section>}
       <section className="drawer-section connection-add-section">
         <div><h3>Add a Salesforce environment</h3><p>Use an existing org or create a temporary org for this deployment.</p></div>
-        <div className="connection-mode-picker" role="group" aria-label="Salesforce connection type">
-          <button type="button" className={`connection-mode-card ${addMode === 'existing' ? 'selected' : ''}`} aria-pressed={addMode === 'existing'} disabled={loading} onClick={() => setAddMode(addMode === 'existing' ? null : 'existing')}><span className="connection-mode-icon">↗</span><span><strong>Existing org</strong><small>Connect production or sandbox.</small></span></button>
-          <button type="button" className={`connection-mode-card ${addMode === 'scratch' ? 'selected' : ''}`} aria-pressed={addMode === 'scratch'} disabled={loading} onClick={() => setAddMode(addMode === 'scratch' ? null : 'scratch')}><span className="connection-mode-icon">＋</span><span><strong>Scratch org</strong><small>Create from your Dev Hub.</small></span></button>
-        </div>
+        <SolutionTileGroup className="connection-mode-picker" legend="Salesforce connection type" name="salesforce-connection-type" options={salesforceConnectionModes} value={addMode ?? ''} disabled={loading} onChange={(mode) => setAddMode(mode === 'scratch' ? 'scratch' : 'existing')}/>
       </section>
       {addMode === 'existing' && <section className="drawer-section connection-mode-panel">
         <div><h3>Connect an existing org</h3><p>Choose where Salesforce should authenticate, then connect either a working org or a Dev Hub.</p></div>
@@ -175,20 +178,13 @@ export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLo
         <div><h3>Saved connections</h3><p>Select the Box account Dispatch should use or remove one you no longer need.</p></div>
         <ul className="connection-option-list">
           {apps.map((app) => <li key={app.id || `${app.alias}-${app.identity}`} className={app.selected ? 'selected' : ''}>
-            <button type="button" className="connection-option-main" aria-pressed={app.selected} disabled={loading || app.selected || !app.id} onClick={() => { if (app.id) void onSelect(app.id) }}>
-              <span className={`connection-state-dot ${app.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>
-              <span className="connection-option-copy"><strong>{app.alias || app.identity || 'Box account'}</strong><small>{[app.domain, app.identity, app.subjectType, app.clientIdHint].filter(Boolean).join(' · ')}</small></span>
-              <span className="connection-option-badge">{app.selected ? 'Selected' : 'Use account'}</span>
-            </button>
-            <RemoveConnectionButton label={`Remove ${app.alias || app.identity || 'Box connection'}`} disabled={loading || !app.id} onPress={() => { if (app.id) void onRemove(app.id) }}/>
+            <SelectableResourceRow className="connection-option-row" label={app.alias || app.identity || 'Box account'} meta={[app.domain, app.identity, app.subjectType, app.clientIdHint].filter(Boolean).join(' · ')} value={app.id || app.alias} selected={app.selected} disabled={loading || app.selected || !app.id} icon={<span className={`connection-state-dot ${app.selected && app.status === 'Ready' ? 'ready' : ''}`} aria-hidden="true"></span>} status={<box-badge label={app.selected ? app.status : 'Saved'} tone={app.selected && app.status === 'Ready' ? 'success' : 'neutral'}></box-badge>} actions={<RemoveConnectionButton label={`Remove ${app.alias || app.identity || 'Box connection'}`} disabled={loading || !app.id} onPress={() => { if (app.id) void onRemove(app.id) }}/>} onSelect={(id) => { if (app.id && id === app.id) void onSelect(app.id) }}/>
           </li>)}
         </ul>
       </section>}
       <section className="drawer-section connection-add-section">
         <div><h3>Add a Box environment</h3><p>Connect another Box user and choose which account Dispatch should use.</p></div>
-        <div className="connection-mode-picker connection-mode-picker--single" role="group" aria-label="Box connection type">
-          <button type="button" className={`connection-mode-card ${addingConnection ? 'selected' : ''}`} aria-pressed={addingConnection} disabled={loading} onClick={() => setAddingConnection(!addingConnection)}><span className="connection-mode-icon">＋</span><span><strong>Box user</strong><small>Connect with Box OAuth.</small></span></button>
-        </div>
+        <SolutionTileGroup className="connection-mode-picker connection-mode-picker--single" legend="Box connection type" name="box-connection-type" options={boxConnectionModes} value={addingConnection ? 'box-user' : ''} disabled={loading} onChange={() => setAddingConnection(true)}/>
       </section>
       {addingConnection && <section className="drawer-section connection-mode-panel">
         <div><h3>Connect a Box user</h3><p>Sign in to Box, then select the account Dispatch should use from the saved connections below.</p></div>

@@ -38,8 +38,10 @@ function RemoveConnectionButton({ label, disabled, onRemove }: { label: string; 
   return <box-icon-button ref={ref} className="settings-connection-remove" icon="cart-1" label={label} disabled={disabled}></box-icon-button>
 }
 
-export function ProviderConnectionRow({ primary, details, selected = false, ready = false, removeLabel, removeDisabled = false, onRemove }: { primary: string; details: string[]; selected?: boolean; ready?: boolean; removeLabel?: string; removeDisabled?: boolean; onRemove?: () => void }) {
-  return <article className="settings-connection-row"><div className="settings-connection-copy"><strong>{primary}</strong>{details.filter(Boolean).map((detail, index) => <small key={`${detail}-${index}`}>{detail}</small>)}</div><div className="settings-connection-actions"><div className="settings-connection-status">{selected ? <box-badge label="Selected" tone="info"></box-badge> : null}<box-badge label={ready ? 'Ready' : 'Not ready'} tone={ready ? 'success' : 'error'}></box-badge></div>{onRemove && removeLabel ? <RemoveConnectionButton label={removeLabel} disabled={removeDisabled} onRemove={onRemove}/> : null}</div></article>
+export function ProviderConnectionRow({ primary, details, selected = false, ready = false, status, removeLabel, removeDisabled = false, onRemove }: { primary: string; details: string[]; selected?: boolean; ready?: boolean; status?: string; removeLabel?: string; removeDisabled?: boolean; onRemove?: () => void }) {
+  const statusLabel = status || (ready ? 'Ready' : 'Not ready')
+  const statusTone = statusLabel === 'Checking' ? 'info' : statusLabel === 'Saved' ? 'neutral' : ready ? 'success' : 'error'
+  return <article className="settings-connection-row"><div className="settings-connection-copy"><strong>{primary}</strong>{details.filter(Boolean).map((detail, index) => <small key={`${detail}-${index}`}>{detail}</small>)}</div><div className="settings-connection-actions"><div className="settings-connection-status">{selected ? <box-badge label="Selected" tone="info"></box-badge> : null}<box-badge label={statusLabel} tone={statusTone}></box-badge></div>{onRemove && removeLabel ? <RemoveConnectionButton label={removeLabel} disabled={removeDisabled} onRemove={onRemove}/> : null}</div></article>
 }
 
 export function EmptyProviderConnection({ provider, compact = false }: { provider: string; compact?: boolean }) {
