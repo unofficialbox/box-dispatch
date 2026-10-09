@@ -357,8 +357,8 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .details-rail { min-width: 0; align-self: start; }
 .details-rail box-card { display: block; }
 .details-rail box-card::part(card) { padding: 26px; border-color: #d6e1ef; border-radius: 10px; background: linear-gradient(160deg, #fff, #f7faff); box-shadow: 0 8px 24px rgba(20, 52, 91, .05); }
-.details-rail h2 { margin: 0; color: #102956; font-size: 19px; letter-spacing: -.35px; }
-.details-rail > box-card > section > p { margin: 7px 0 0; color: #60759a; font-size: 13px; line-height: 1.5; }
+.details-rail h2 { margin: 0; color: var(--dispatch-ink); font-size: 19px; letter-spacing: -.35px; }
+.details-rail > box-card > section > p { margin: 7px 0 0; color: var(--dispatch-muted); font-size: 13px; line-height: 1.5; }
 .details-rail-content { margin-top: 20px; }
 .details-rail-content > box-button { margin-top: 20px; }
 .detail-list { display: block; }
@@ -566,12 +566,12 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .dispatch-run-trace::part(step) { grid-template-columns: var(--dispatch-trace-marker-column) minmax(0, 1fr); column-gap: 10px; padding-inline-start: 0; }
 .dispatch-run-trace::part(marker) { box-sizing: border-box; inline-size: var(--dispatch-trace-marker-size); block-size: var(--dispatch-trace-marker-size); margin-block-start: var(--dispatch-trace-marker-offset); justify-self: center; }
 .dispatch-run-trace::part(step)::after { left: calc((var(--dispatch-trace-marker-column) / 2) - 1px); top: calc(.55rem + var(--dispatch-trace-marker-offset) + var(--dispatch-trace-marker-size)); bottom: calc((.55rem + var(--dispatch-trace-marker-offset)) * -1); }
-.dispatch-run-trace::part(step-title) { color: #10264e; font-size: 14px; }
+.dispatch-run-trace::part(step-title) { color: var(--dispatch-ink); font-size: 14px; }
 .dispatch-run-trace::part(description) { margin: 3px 0 0; line-height: 1.45; }
 .live-activity-feed { margin-top: 14px; overflow: hidden; border: 1px solid #d9e4f1; border-radius: 10px; background: #fbfdff; }
 .live-activity-log { display: block; max-block-size: min(48vh, 420px); overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; }
 .live-activity-log::part(panel) { border: 0; border-radius: 0; box-shadow: none; }
-.live-activity-log::part(title) { color: #10264e; font-size: 14px; }
+.live-activity-log::part(title) { color: var(--dispatch-ink); font-size: 14px; }
 .live-activity-log::part(event) { padding-inline: 2px; }
 @media (max-width: 640px) { .live-activity-log { max-block-size: 52vh; } }
 

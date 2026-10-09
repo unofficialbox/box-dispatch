@@ -193,10 +193,12 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await expect(page.getByRole('heading', { name: 'Review and validate' })).toBeVisible()
   await page.getByRole('button', { name: 'Validate deployment' }).click()
-  await expect.poll(() => page.locator('box-run-trace').evaluate((trace) => {
-    const runningMarker = trace.shadowRoot?.querySelector<HTMLElement>('[part="step"][data-step-id="salesforce"][data-status="running"] [part="marker"]')
-    return runningMarker ? getComputedStyle(runningMarker).animationName : ''
-  })).toContain('dispatch-provider-pulse')
+  await expect(page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"]')).toHaveAttribute('data-status', 'running')
+  await expect(page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="status"]')).toHaveText('Running')
+  expect(await page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="marker"]').evaluate((marker) => ({
+    background: getComputedStyle(marker).backgroundColor,
+    injectedStyle: Boolean((marker.getRootNode() as ShadowRoot).querySelector('[data-dispatch-running-pulse]')),
+  }))).toEqual({ background: 'rgb(69, 150, 255)', injectedStyle: false })
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Validation', exact: true })).toBeVisible()
   await expect(page.getByText('All selected systems finished successfully.')).toBeVisible()

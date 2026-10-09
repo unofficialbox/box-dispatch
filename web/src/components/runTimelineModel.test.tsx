@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import '@unofficialbox/box-open-elements/run-trace'
 import { RunTimeline } from './RunTimeline'
 import { presentProviderProgress } from './runTimelineModel'
 import { latestActivityEvents } from './liveActivityModel'
@@ -48,6 +49,17 @@ describe('presentProviderProgress', () => {
       expect.objectContaining({ action: 'Box', summary: 'Inspecting the Box workspace', badge: 'Update', tone: 'neutral' }),
       expect.objectContaining({ action: 'Metadata Template:Contract', summary: 'Checking metadata templates', badge: 'Working', tone: 'brand' }),
     ])
+  })
+
+  it('passes the running state through the public run trace contract', () => {
+    const { container } = render(<RunTimeline providers={[{
+      id: 'salesforce', name: 'Salesforce', state: 'active', components: [], updates: [
+        { sequence: 1, at: '2026-08-24T00:00:00Z', type: 'activity', provider: 'salesforce', message: 'Applying Salesforce configuration', status: 'running', progressState: 'running' },
+      ],
+    }]} />)
+
+    const trace = container.querySelector('box-run-trace') as HTMLElement & { steps: Array<{ id: string; status: string }> }
+    expect(trace.steps).toEqual([expect.objectContaining({ id: 'salesforce', status: 'running' })])
   })
 
   it('tails the newest live activity update', () => {

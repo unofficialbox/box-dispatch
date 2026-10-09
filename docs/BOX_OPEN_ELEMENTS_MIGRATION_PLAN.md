@@ -108,7 +108,7 @@ not change Dispatch's adopted contracts.
 | Deployment component details table | `box-table` | Replace directly with System, Component, and Result columns and an explicit empty state. |
 | File selector in `ValidationChangesDrawer` | Selectable `box-table` | Replaced. The table's controlled single-selection contract preserves current-row state and keyboard selection; the current `box-document-list` does not expose controlled selected/current state. |
 | `LiveActivityFeed` | `box-timeline` | Replaced. Dispatch retains the 12-event live-tail policy and a keyboard-focusable bounded scroll host; use `box-audit-log` only for a full searchable/exportable audit view, not this compact feed. |
-| `RunTimeline` | Existing `box-run-trace` | Retain. The mapping in `runTimelineModel` is application logic and should remain. Recheck whether the local running-indicator patch is still necessary in 0.27. |
+| `RunTimeline` | Existing `box-run-trace` | Retain. The mapping in `runTimelineModel` is application logic and remains. The 0.28.4 built-in running marker, visible status label, and summary are sufficient; the former shadow-root animation injection was removed. |
 | Summary/provider result compositions | `box-card`, `box-fact-list`, `box-result-blocks`, and existing buttons/badges | Compose from primitives. Do not force `box-run-summary` unless its run/todo/step model matches the Dispatch record. |
 | External destination links in Summary | `box-link-button` | Replace the locally styled anchor when it is a navigation action. Keep provider launch URL validation in Dispatch. |
 
