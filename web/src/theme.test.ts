@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { startDispatchTheme } from './theme'
+import { DISPATCH_DARK_THEME, DISPATCH_LIGHT_THEME, startDispatchTheme } from './theme'
 
 const mediaPreference = (dark: boolean) => {
   const listeners = new Set<(event: MediaQueryListEvent) => void>()
@@ -36,15 +36,44 @@ describe('Dispatch theme', () => {
     expect(controller.getResolvedTheme()).toBe('dark')
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     expect(document.documentElement.style.colorScheme).toBe('dark')
-    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-surface')).toBe('#1c1c1c')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-surface')).toBe('#121513')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-surface-brand')).toBe('#00e581')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-illustration-surface-box-neutral')).toBe('#00e581')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-status-surface-inprogress')).toBe('#ffa300')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-status-surface-accent')).toBe('#8b49cf')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-badge-foldershared-surface')).toBe('#0098ff')
 
     preference.setDark(false)
     expect(controller.getResolvedTheme()).toBe('light')
     expect(document.documentElement.getAttribute('data-theme')).toBe('light')
     expect(document.documentElement.style.colorScheme).toBe('light')
     expect(document.documentElement.style.getPropertyValue('--boe-token-surface-surface')).toBe('#ffffff')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-surface-brand')).toBe('#007a4c')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-illustration-surface-box-neutral')).toBe('#007a4c')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-status-surface-inprogress')).toBe('#ffa300')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-status-surface-accent')).toBe('#8b49cf')
+    expect(document.documentElement.style.getPropertyValue('--boe-token-surface-badge-foldershared-surface')).toBe('#0098ff')
 
     controller.stop()
+    vi.unstubAllGlobals()
+  })
+
+  it('uses named Dispatch design systems when the preference changes', () => {
+    const preference = mediaPreference(false)
+    vi.stubGlobal('matchMedia', () => preference.media)
+    window.localStorage.clear()
+    const events: string[] = []
+    const listener = (event: Event) => events.push((event as CustomEvent<{ designSystemName: string }>).detail.designSystemName)
+    document.documentElement.addEventListener('boe:theme-change', listener)
+
+    const controller = startDispatchTheme()
+    expect(events.at(-1)).toBe(DISPATCH_LIGHT_THEME)
+
+    preference.setDark(true)
+    expect(events.at(-1)).toBe(DISPATCH_DARK_THEME)
+
+    controller.stop()
+    document.documentElement.removeEventListener('boe:theme-change', listener)
     vi.unstubAllGlobals()
   })
 })

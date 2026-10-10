@@ -10,14 +10,14 @@ test('follows the system color preference across primary pages', async ({ page }
     page: getComputedStyle(document.querySelector('.workspace')!).backgroundColor,
     heading: getComputedStyle(document.querySelector('.overview-heading h1')!).color,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
-  }))).toEqual({ page: 'rgb(28, 28, 28)', heading: 'rgb(244, 244, 244)', token: '#1c1c1c' })
+  }))).toEqual({ page: 'rgb(18, 21, 19)', heading: 'rgb(244, 244, 244)', token: '#121513' })
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   expect(await page.locator('.settings-provider').first().evaluate((panel) => ({
     border: getComputedStyle(panel).borderTopColor,
     header: getComputedStyle(panel.querySelector('header')!).backgroundColor,
-  }))).toEqual({ border: 'rgb(58, 58, 58)', header: 'rgb(22, 22, 22)' })
+  }))).toEqual({ border: 'rgb(52, 58, 55)', header: 'rgb(12, 15, 13)' })
 
   await page.getByRole('link', { name: 'Deployments', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
@@ -63,9 +63,11 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   }))
   expect(expandedNavigationRows.every(({ iconBeforeLabel, centerDelta, rowTextAlign, labelTextAlign }) => iconBeforeLabel && centerDelta < 0.5 && rowTextAlign === 'left' && labelTextAlign === 'left')).toBe(true)
   const activeNavigationStyle = await sidebar.locator('.nav-route.active').evaluate((row) => ({
+    backgroundColor: getComputedStyle(row).backgroundColor,
     beforeContent: getComputedStyle(row, '::before').content,
     boxShadow: getComputedStyle(row).boxShadow,
   }))
+  expect(activeNavigationStyle.backgroundColor).toBe('rgb(48, 51, 48)')
   expect(activeNavigationStyle.beforeContent).toBe('none')
   expect(activeNavigationStyle.boxShadow).not.toContain('3px 0px')
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' }).click()
@@ -198,7 +200,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(await page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="marker"]').evaluate((marker) => ({
     background: getComputedStyle(marker).backgroundColor,
     injectedStyle: Boolean((marker.getRootNode() as ShadowRoot).querySelector('[data-dispatch-running-pulse]')),
-  }))).toEqual({ background: 'rgb(69, 150, 255)', injectedStyle: false })
+  }))).toEqual({ background: 'rgb(0, 229, 129)', injectedStyle: false })
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Validation', exact: true })).toBeVisible()
   await expect(page.getByText('All selected systems finished successfully.')).toBeVisible()

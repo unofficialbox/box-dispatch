@@ -287,13 +287,31 @@ Use a consistent sequence:
 
 ### Color
 
-- Use the brand color for navigation, links, and primary actions.
+- Define color by semantic role, then register those values with the component
+  library's theme system so product CSS and shared components stay aligned.
+- Use the brand color for navigation, links, primary actions, focus, and selection.
 - Show active navigation with a restrained background plus text and icon contrast.
   Avoid decorative left-edge accent bars that compete with the item content.
-- Use green only for positive state, not as a decorative card background.
+- When the brand color is also green, pair positive states with explicit labels and
+  keep their treatment distinct from primary actions.
+- Reserve a secondary accent for small contextual signals such as eyebrows,
+  informational badges, and recorded-state labels; do not let it compete with the
+  primary action.
 - Use red for errors and destructive actions.
 - Use neutral grays and soft rules for structure.
 - Verify contrast in every interactive and disabled state.
+
+Dispatch uses near-black neutral surfaces with a four-color semantic palette:
+
+- mint `#00e581` for primary actions and selection;
+- orange `#ffa300` for pending and contextual states;
+- purple `#8b49cf` for recorded and audit states; and
+- blue `#0098ff` for informational states.
+
+The supplied colors are registered directly as design-system tokens. Light surfaces
+use contrast-safe companions such as mint `#007a4c`, orange `#7a4a00`, and blue
+`#0068ad` when the same hue renders small text or a control boundary. This preserves
+the intended palette without sacrificing readability on white.
 
 ### Theme preferences
 
