@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import type {} from '@unofficialbox/box-open-elements/react-jsx'
 import '@unofficialbox/box-open-elements/button'
 import '@unofficialbox/box-open-elements/icon-button'
 import '@unofficialbox/box-open-elements/card'

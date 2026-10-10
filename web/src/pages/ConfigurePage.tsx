@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import { DetailList, DetailsRail } from '../components/DetailsRail'
 import { ProviderLogo } from '../components/ProviderLogo'
 import { SelectableResourceRow } from '../components/SelectableResourceRow'
@@ -47,11 +48,11 @@ export function ConfigurePage({ plan, connections, notice, checkingConnections, 
 }
 
 function ProviderConfiguration({ id, title, description, fallback, connection, refreshing, included, required = false, selected, onSelect, onToggle }: { id: ProviderID; title: string; description: string; fallback: string; connection?: ConnectionSummary; refreshing: boolean; included: boolean; required?: boolean; selected: boolean; onSelect: () => void; onToggle: (provider: ProviderID, included: boolean) => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const switchElement = ref.current
     if (!switchElement || required) return
-    const handleChange = (event: Event) => onToggle(id, (event as CustomEvent<{ checked: boolean }>).detail.checked)
+    const handleChange = (event: BoxElementEventMap['box-switch']['checked-changed']) => onToggle(id, event.detail.checked)
     switchElement.addEventListener('checked-changed', handleChange)
     return () => switchElement.removeEventListener('checked-changed', handleChange)
   }, [id, onToggle, required])
@@ -68,11 +69,11 @@ function ComponentScope({ provider, title, included, selectedComponents, onToggl
 }
 
 function ComponentToggle({ provider, component, checked, disabled, onToggle }: { provider: ProviderID; component: string; checked: boolean; disabled: boolean; onToggle: (provider: ProviderID, component: string, included: boolean) => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const switchElement = ref.current
     if (!switchElement) return
-    const handleChange = (event: Event) => onToggle(provider, component, (event as CustomEvent<{ checked: boolean }>).detail.checked)
+    const handleChange = (event: BoxElementEventMap['box-switch']['checked-changed']) => onToggle(provider, component, event.detail.checked)
     switchElement.addEventListener('checked-changed', handleChange)
     return () => switchElement.removeEventListener('checked-changed', handleChange)
   }, [component, onToggle, provider])

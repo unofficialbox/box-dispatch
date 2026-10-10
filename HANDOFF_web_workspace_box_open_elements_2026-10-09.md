@@ -2,13 +2,13 @@
 
 ## Current state
 
-- **Date:** 2026-10-09
+- **Date:** 2026-10-10
 - **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
-- **Branch:** `codex/box-open-elements-0.28.6`
-- **Remote main:** `0c2be65c223c9e616565ae78261c87d3def44801`
+- **Branch:** `codex/box-open-elements-0.33.0`
+- **Remote main:** `604878e77a1e9f39880c9d9918eabb0f29269fea`
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.28.6
+  `@unofficialbox/box-open-elements-react` 0.33.0
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -63,13 +63,21 @@ It delivered and verified:
 - Preserved all 2,377 final cascade winners and reduced `App.css` by about 10.4 KB.
 - Regenerated the embedded web assets and documented the safe cleanup boundary.
 
-### Current branch — Box Open Elements 0.28.6
+### PR #38 — Box Open Elements 0.28.6
 
-- Core and React adapter packages are upgraded together from 0.28.4 to 0.28.6.
+- Core and React adapter packages were upgraded together from 0.28.4 to 0.28.6.
 - Releases 0.28.5 and 0.28.6 change Process Modeler, Code Editor, and Form Wizard;
   Dispatch imports none of those surfaces, so no local component adaptation is needed.
-- Issues #379 and #380 remain open and their requested APIs are absent from the
-  published packages. Keep the existing compatibility boundaries.
+- The change was squash-merged to `main` as `604878e77a1e9f39880c9d9918eabb0f29269fea`.
+
+### Current branch — Box Open Elements 0.33.0
+
+- Core and React adapter packages are upgraded together from 0.28.6 to 0.33.0.
+- Version 0.29.0 ships the declarations from issue #379 and Run Trace geometry tokens
+  from issue #380. Dispatch adopts both published contracts and removes the matching
+  local compatibility code.
+- Releases 0.30.0 through 0.33.0 add Process Modeler capabilities that Dispatch does
+  not consume, so they require no additional application adaptation.
 
 ## Box Open Elements boundary
 
@@ -78,7 +86,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.28.6 contracts. Keep the
+All planned migration phases are complete within published 0.33.0 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -92,33 +100,35 @@ Do not replace semantic page structure merely to increase the component count. A
 library component only when its interaction and accessibility contract matches the
 Dispatch surface.
 
-## Remaining upstream dependencies
+## Resolved upstream dependencies
 
-Two Box Open Elements enhancements remain open. They are not Dispatch release blockers:
+Two former Box Open Elements dependencies shipped in 0.29.0 and are adopted here:
 
 1. [box-open-elements #379](https://github.com/unofficialbox/box-open-elements/issues/379)
-   — generated JSX intrinsic-element declarations and typed custom-event maps. Until a
-   containing release ships, retain the narrow local `web/src/boe.d.ts` boundary and
-   native event listener casts.
+   — generated JSX intrinsic-element declarations and typed custom-event maps. Dispatch
+   imports the official declarations and removes `web/src/boe.d.ts` and custom-event
+   casts.
 2. [box-open-elements #380](https://github.com/unofficialbox/box-open-elements/issues/380)
-   — density-safe Run Trace marker and connector geometry tokens. Until released, keep
-   the coordinated `step`, `marker`, and connector CSS overrides plus the existing E2E
-   geometry assertion.
+   — density-safe Run Trace marker and connector geometry tokens. Dispatch now uses the
+   public tokens and retains its E2E geometry assertion.
 
-Do not file duplicate issues for these needs. Recheck the published package, not only the
-issue state, before removing a local compatibility boundary.
+Do not restore either compatibility boundary. Recheck the published package, not only
+issue state, before changing a future integration contract.
 
 ## Verification evidence
 
-The 0.28.6 branch baseline passed:
+The 0.33.0 branch passed:
 
 - 23 Vitest files / 76 unit tests;
 - all 5 Playwright mock workflows, including the 390px mobile path;
 - frontend lint and production build;
 - `gofmt -l .`, `go build ./...`, `go vet ./...`, and `go test ./...`;
-- live browser smoke on Overview and the Choose-a-solution deployment step; and
-- desktop and narrow visual checks for the status-badge containment and selected-template
-  border changes.
+- live Chrome verification through Overview, Choose, Connect, Configure, Review, and
+  completed Validation;
+- desktop and 390px visual checks with no page overflow or browser console warnings;
+  and
+- Run Trace public-token values plus marker/connector geometry through the mock
+  end-to-end assertion.
 
 The production build still reports the pre-existing JavaScript chunk-size warning. Treat
 that as a separate performance task unless a future change measurably increases it.
@@ -178,13 +188,12 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The 0.28.6 core and React package upgrade is complete and verified
-  on `codex/box-open-elements-0.28.6`; the migration and CSS consolidation are merged.
-- **Recommended Next Step:** Review and merge the 0.28.6 dependency update, then continue
-  monitoring #379 and #380 for their first containing release.
-- **Why This Next:** The packages remain in lockstep and all Dispatch gates pass without
-  local adaptation.
-- **Expected Outcome:** Dispatch runs on the current published Box Open Elements release
-  while retaining only the two still-required compatibility boundaries.
-- **Blockers:** Upstream releases are required for those two cleanup items. There is no
-  blocker for unrelated Dispatch product work.
+- **Current Status:** The 0.33.0 core and React upgrade is implemented and verified on
+  `codex/box-open-elements-0.33.0`; official native types and Run Trace tokens replace
+  the final two local compatibility boundaries.
+- **Recommended Next Step:** Review and merge the 0.33.0 pull request.
+- **Why This Next:** The code now consumes the upstream contracts directly and all
+  frontend, browser, and repository gates pass.
+- **Expected Outcome:** Dispatch runs on Box Open Elements 0.33.0 with both packages in
+  lockstep and no local JSX or Run Trace geometry workaround.
+- **Blockers:** None known.

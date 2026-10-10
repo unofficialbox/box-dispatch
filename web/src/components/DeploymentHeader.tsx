@@ -32,7 +32,7 @@ const stages: PathStage[] = [
 ]
 
 function WorkflowPath({ activePhase, run }: { activePhase: Phase; run: DispatchRun | null }) {
-  const pathRef = useRef<(HTMLElement & { stages: PathStage[] }) | null>(null)
+  const pathRef = useRef<HTMLElementTagNameMap['box-path'] | null>(null)
   const currentPhase = activePhase === 'Deploy' && run?.action !== 'deploy' ? 'Review' : activePhase
   const hasIncompleteDeployment = activePhase === 'Summary' && run?.action === 'deploy' && run.status === 'completed' && deploymentOutcome(run).label !== 'Complete'
   const hasError = run?.status === 'failed' && (activePhase === 'Review' || activePhase === 'Deploy') || hasIncompleteDeployment

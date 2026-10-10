@@ -1,12 +1,9 @@
 import { useEffect, useRef } from 'react'
 import '@unofficialbox/box-open-elements/tile-group'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import type { TileOption } from '@unofficialbox/box-open-elements/tile-group'
 
 type Strategy = 'reuse' | 'create_new'
-type TileGroupElement = HTMLElement & {
-  options: TileOption[]
-  value: string
-}
 
 const strategyOptions: TileOption[] = [
   { id: 'reuse', label: 'Reuse existing', description: 'Keep matching configuration and apply only what is missing.' },
@@ -14,14 +11,14 @@ const strategyOptions: TileOption[] = [
 ]
 
 export function StrategyTileGroup({ value, disabled = false, legend = 'Deployment strategy', onChange }: { value: Strategy; disabled?: boolean; legend?: string; onChange: (strategy: Strategy) => void }) {
-  const ref = useRef<TileGroupElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-tile-group']>(null)
   const options = strategyOptions.map((option) => ({ ...option, disabled }))
 
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    const handleChange = (event: Event) => {
-      const selected = (event as CustomEvent<{ selected: string[] }>).detail.selected[0]
+    const handleChange = (event: BoxElementEventMap['box-tile-group']['tile-change']) => {
+      const selected = event.detail.selected[0]
       if (selected === 'reuse' || selected === 'create_new') onChange(selected)
     }
     element.addEventListener('tile-change', handleChange)

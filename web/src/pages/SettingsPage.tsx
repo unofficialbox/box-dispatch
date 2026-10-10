@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert } from '@unofficialbox/box-open-elements-react/alert'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import { EmptyProviderConnection, ProviderConnectionPanel, ProviderConnectionRow } from '../components/ProviderConnectionPanel'
 import { SolutionTileGroup } from '../components/SolutionTileGroup'
 import { StrategyTileGroup } from '../components/StrategyTileGroup'
@@ -38,11 +39,11 @@ function DefaultSolutionList({ selectedID, disabled = false, readOnly = false, o
 }
 
 function DefaultSystemSwitch({ checked, disabled, label, description, onChange }: { checked: boolean; disabled?: boolean; label: string; description: string; onChange?: (checked: boolean) => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const element = ref.current
     if (!element || !onChange) return
-    const handleChange = (event: Event) => onChange((event as CustomEvent<{ checked: boolean }>).detail.checked)
+    const handleChange = (event: BoxElementEventMap['box-switch']['checked-changed']) => onChange(event.detail.checked)
     element.addEventListener('checked-changed', handleChange)
     return () => element.removeEventListener('checked-changed', handleChange)
   }, [onChange])

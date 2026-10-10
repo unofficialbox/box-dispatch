@@ -4,10 +4,8 @@ import { ProviderLogo } from '../components/ProviderLogo'
 import { SolutionTileGroup } from '../components/SolutionTileGroup'
 import type { SolutionTemplate } from '../types'
 
-type SwitchElement = HTMLElement & { checked: boolean }
-
 function ProviderSwitch({ checked, disabled = false, label, description, onToggle }: { checked: boolean; disabled?: boolean; label?: string; description?: string; onToggle?: () => void }) {
-  const switchRef = useRef<SwitchElement>(null)
+  const switchRef = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const element = switchRef.current
     if (!element || !onToggle) return

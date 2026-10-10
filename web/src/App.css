@@ -421,12 +421,20 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
   .settings-defaults-editor > footer { align-items: stretch; flex-direction: column-reverse; }
 }
 
-.dispatch-run-trace { display: block; }
+.dispatch-run-trace {
+  display: block;
+  --boe-run-trace-marker-column-width: 22px;
+  --boe-run-trace-marker-size: 18px;
+  --boe-run-trace-marker-inline-inset: 0px;
+  --boe-run-trace-marker-block-offset: 3px;
+  --boe-run-trace-step-padding-block: .55rem;
+  --boe-run-trace-step-row-gap: 0px;
+  --boe-run-trace-step-column-gap: 12px;
+  --boe-run-trace-connector-start-gap: 2px;
+  --boe-run-trace-connector-end-overhang: calc(.55rem + 3px);
+}
 .dispatch-run-trace::part(panel) { box-shadow: none; }
 .dispatch-run-trace::part(header) { margin-bottom: 8px; }
-.dispatch-run-trace::part(step) { padding-inline-start: 0; }
-.dispatch-run-trace::part(marker) { box-sizing: border-box; inline-size: var(--dispatch-trace-marker-size); block-size: var(--dispatch-trace-marker-size); margin-block-start: var(--dispatch-trace-marker-offset); }
-.dispatch-run-trace::part(step)::after { top: calc(.55rem + var(--dispatch-trace-marker-offset) + var(--dispatch-trace-marker-size)); bottom: calc((.55rem + var(--dispatch-trace-marker-offset)) * -1); }
 .dispatch-run-trace::part(step-title) { color: var(--dispatch-ink); font-size: 14px; }
 .dispatch-run-trace::part(description) { margin: 3px 0 0; line-height: 1.45; }
 .live-activity-feed { overflow: hidden; border: 1px solid #d9e4f1; }
@@ -596,12 +604,6 @@ h1 { color: #0a214a; font-size: clamp(31px, 3vw, 43px); letter-spacing: -1.65px;
 .drawer-button-row box-button, .saved-connection-actions box-button, .drawer-actions box-button { flex: 0 0 auto; }
 .scratch-org-section > box-button { justify-self: start; width: max-content; }
 box-drawer::part(close) { box-sizing: border-box; }
-
-/* 6. Provider progress markers and connectors share one mathematical center line. */
-.dispatch-run-trace { --dispatch-trace-marker-column: 22px; --dispatch-trace-marker-size: 18px; --dispatch-trace-marker-offset: 3px; }
-.dispatch-run-trace::part(step) { grid-template-columns: var(--dispatch-trace-marker-column) minmax(0, 1fr); column-gap: 12px; }
-.dispatch-run-trace::part(marker) { justify-self: center; }
-.dispatch-run-trace::part(step)::after { left: calc((var(--dispatch-trace-marker-column) / 2) - 1px); }
 
 /* 7. Long labels remain readable instead of clipping at responsive breakpoints. */
 .details-rail { min-width: 0; }

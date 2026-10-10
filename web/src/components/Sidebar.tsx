@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import '@unofficialbox/box-open-elements/nav-sidebar'
 import '@unofficialbox/box-open-elements/sidebar-toggle-button'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import { RailIcon } from './RailIcon'
 
 export type AppView = 'overview' | 'workflow' | 'history' | 'settings'
 
 export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, onSettings }: { activeView: AppView; onOverview: () => void; onNewDeployment: () => void; onHistory: () => void; onSettings: () => void }) {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('dispatch-sidebar-collapsed') === 'true')
-  const toggleRef = useRef<HTMLElement | null>(null)
+  const toggleRef = useRef<HTMLElementTagNameMap['box-sidebar-toggle-button'] | null>(null)
 
   useEffect(() => {
     const toggle = toggleRef.current
     if (!toggle) return
-    const handleToggle = (event: Event) => {
-      const nextCollapsed = !(event as CustomEvent<{ expanded: boolean }>).detail.expanded
+    const handleToggle = (event: BoxElementEventMap['box-sidebar-toggle-button']['toggle']) => {
+      const nextCollapsed = !event.detail.expanded
       setCollapsed(nextCollapsed)
       window.localStorage.setItem('dispatch-sidebar-collapsed', String(nextCollapsed))
     }

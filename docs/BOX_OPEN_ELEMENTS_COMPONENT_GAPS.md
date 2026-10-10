@@ -29,7 +29,7 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.28.6.
+The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.33.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -41,13 +41,16 @@ and removed the matching local substitutes. The October 9 follow-up also adopted
 Resource Row for selectable provider and saved-connection rows, Path for the
 read-only deployment lifecycle, and Tile Group for connection-mode choices. The
 read-only connection summaries remain application composition because they do not
-offer a selection target.
+offer a selection target. Version 0.29.0 resolves the native TypeScript/React JSX and
+Run Trace geometry gaps; Dispatch adopted both contracts in the 0.33.0 update.
 
 ## Adopted in Dispatch
 
 | Category | Box Open Elements capability | Dispatch use |
 | --- | --- | --- |
 | Foundations | Design tokens and `boxIconography` | Color, typography, spacing, focus treatment, and navigation icons. |
+| Foundations | Generated `native-types` and `react-jsx` declarations | Typed native custom-element properties, refs, JSX attributes, and custom events without a Dispatch-owned declaration bridge. |
+| Foundations | Run Trace geometry tokens | Density-safe marker, column, inset, spacing, and connector alignment without styling an internal pseudo-element. |
 | Components | `box-button` | Primary, secondary, and destructive workflow actions. |
 | Components | `box-card` | Summary and detail surfaces. |
 | Components | `box-switch` | Provider and component enablement. |
@@ -72,11 +75,11 @@ offer a selection target.
 | Patterns | `box-timeline` | The compact 12-event validation/deployment activity tail. |
 | Patterns | `box-run-trace` | Live provider and component validation/deployment activity. Its public running state supplies the marker, status text, summary, token colors, and reduced-motion behavior; Dispatch does not patch the component shadow root. |
 
-The published React adapter now provides wrappers for buttons, dialogs, selects,
+The published React adapter provides wrappers for buttons, dialogs, selects,
 comboboxes, text and number fields, checkboxes, tabs, cards, alerts, toasts, drawers,
 and code blocks, where typed property and event bridging is useful. Components
 without an adapter wrapper remain supported native custom elements in React 19;
-Dispatch keeps a narrow JSX declaration boundary for those elements.
+Dispatch imports the package's generated `react-jsx` and `native-types` declarations.
 
 ## Available components that are not gaps
 
@@ -103,20 +106,33 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.28.6 review
+## Remaining enhancements after the 0.33.0 review
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
-| P1 | Foundations | TypeScript custom-element declarations | JSX tag maps and typed event maps for React and TypeScript consumers. Tracked in [box-open-elements #379](https://github.com/unofficialbox/box-open-elements/issues/379). | Maintain the narrow local `boe.d.ts` boundary and native event listeners. Remove redundant declarations after adoption. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
-| P2 | Foundations | `box-run-trace` marker geometry tokens | The pattern's connector position is coupled to its internal step padding. Public marker/connector inset tokens, or an invariant that part-level step padding preserves alignment, would let consuming products tune density without breaking the trace geometry. Tracked in [box-open-elements #380](https://github.com/unofficialbox/box-open-elements/issues/380). | Dispatch currently overrides the published `step` and `marker` parts together with the step connector pseudo-element in `App.css`. The mock end-to-end suite checks marker centres and connector edge alignment. Recheck these coupled overrides on every package upgrade until geometry tokens are published. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
 Accessibility corrections for `box-dropdown`, `box-selectable-card`, and
 `box-action-bar` are reported complete by the maintainer. Dispatch should consume
 them through the next containing package release rather than applying local forks.
 
-## Resolved component gap
+## Resolved component gaps
+
+### Native TypeScript and React JSX declarations
+
+[Box Open Elements #379](https://github.com/unofficialbox/box-open-elements/issues/379)
+shipped in 0.29.0. Dispatch imports `react-jsx` once at the application entry point
+and uses the generated element and event maps for native custom-element refs and
+listeners. The former `web/src/boe.d.ts` bridge and event casts are removed.
+
+### Run Trace geometry tokens
+
+[Box Open Elements #380](https://github.com/unofficialbox/box-open-elements/issues/380)
+shipped in 0.29.0. Dispatch uses the public marker, column, inset, padding, gap, and
+connector tokens for its compact trace. It no longer coordinates internal `step`,
+`marker`, and connector pseudo-element overrides. The mock end-to-end suite continues
+to verify marker centres and connector edge alignment.
 
 ### Live run trace
 
@@ -153,7 +169,8 @@ those remaining components, including `box-spinner`, `box-badge`,
 
 1. Use the published drawer, field, select, split-view, metric-card, table, timeline, run-trace, section, card, fact-list, and progress APIs where their verified contracts fit.
 2. Use `box-path` for deployment lifecycle state; keep workflow navigation in explicit Back/Continue actions.
-3. Replace local JSX declarations with official React JSX tag maps if they are published.
+3. Use the published React JSX tag maps and native event declarations; do not restore
+   a local declaration bridge.
 4. Use the published sidebar header-toggle and single-navigation-landmark composition; do not restore the former body-slot or nested-landmark workarounds.
 5. Re-run this source-level intake on each Box Open Elements upgrade and update this document with published-version evidence.
 

@@ -37,7 +37,7 @@ const completedDeploymentForPlan = (plan: DeploymentPlan, deployments: Deploymen
 }
 
 function OverviewActionButton({ icon, label, disabled = false, onPress }: { icon: 'arrow-right' | 'gear'; label: string; disabled?: boolean; onPress: () => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-icon-button']>(null)
   const onPressRef = useRef(onPress)
   useEffect(() => { onPressRef.current = onPress }, [onPress])
   useEffect(() => {
