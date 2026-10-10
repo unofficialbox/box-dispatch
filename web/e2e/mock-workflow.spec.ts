@@ -253,6 +253,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(childAlignment.rightEdgeDelta).toBeLessThan(0.01)
 
   const traceAlignment = await page.locator('box-run-trace').evaluate((trace) => {
+    const hostStyle = getComputedStyle(trace)
     const steps = [...trace.shadowRoot!.querySelectorAll<HTMLElement>('[part="step"]')]
     const markers = steps.map((step) => step.querySelector<HTMLElement>('[part="marker"]')!.getBoundingClientRect())
     const connector = getComputedStyle(steps[0], '::after')
@@ -261,12 +262,20 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     const lineTop = step.top + Number.parseFloat(connector.top)
     const lineBottom = step.bottom - Number.parseFloat(connector.bottom)
     return {
+      geometryTokens: {
+        column: hostStyle.getPropertyValue('--boe-run-trace-marker-column-width').trim(),
+        marker: hostStyle.getPropertyValue('--boe-run-trace-marker-size').trim(),
+        inset: hostStyle.getPropertyValue('--boe-run-trace-marker-inline-inset').trim(),
+        offset: hostStyle.getPropertyValue('--boe-run-trace-marker-block-offset').trim(),
+        gap: hostStyle.getPropertyValue('--boe-run-trace-step-column-gap').trim(),
+      },
       markerCenterDelta: Math.abs((markers[0].left + markers[0].width / 2) - (markers[1].left + markers[1].width / 2)),
       connectorCenterDelta: Math.abs(lineCenter - (markers[0].left + markers[0].width / 2)),
       firstEdgeGap: Math.abs(lineTop - markers[0].bottom),
       secondEdgeGap: Math.abs(markers[1].top - lineBottom),
     }
   })
+  expect(traceAlignment.geometryTokens).toEqual({ column: '22px', marker: '18px', inset: '0px', offset: '3px', gap: '12px' })
   expect(traceAlignment.markerCenterDelta).toBeLessThan(0.01)
   expect(traceAlignment.connectorCenterDelta).toBeLessThan(0.01)
   expect(traceAlignment.firstEdgeGap).toBeLessThan(0.01)

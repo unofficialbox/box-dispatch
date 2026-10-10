@@ -11,14 +11,14 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.28.6`, reviewed on October 9, 2026.
+- the Box Open Elements packages at version `0.33.0`, reviewed on October 10, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
-The 0.28.6 maintenance update keeps both packages aligned. Releases 0.28.2 through
-0.28.5 focus on Verdict Banner, Process Modeler, and Code Editor behavior; 0.28.6
-adds a wizard-native path to Form Wizard. Dispatch does not consume those surfaces,
-so the adopted component contracts require no local adaptation.
+The 0.33.0 update keeps both packages aligned. Version 0.29.0 publishes generated
+native-element and React JSX declarations plus Run Trace geometry tokens, resolving
+the two remaining Dispatch compatibility boundaries. Releases 0.30.0 through 0.33.0
+add Process Modeler capabilities that Dispatch does not consume.
 
 ## Implementation status
 
@@ -32,6 +32,9 @@ so the adopted component contracts require no local adaptation.
   the intervening release contracts require no Dispatch code changes.
 - **0.28.6 maintenance update complete:** the Process Modeler, Code Editor, and Form
   Wizard changes in 0.28.5–0.28.6 do not affect Dispatch's adopted components.
+- **0.33.0 update complete:** Dispatch imports the official React JSX and typed native
+  event maps, removes its local `boe.d.ts` bridge, and configures Run Trace density
+  through the published geometry tokens instead of coupled part/pseudo-element CSS.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
@@ -57,9 +60,9 @@ so the adopted component contracts require no local adaptation.
    custom component that needs replacing.
 3. Keep Dispatch responsible for routing, API calls, provider URLs, workflow state,
    and domain-specific copy.
-4. Use the React adapter when it provides typed property and event bridging. Use a
-   native custom element for the remaining published components instead of creating
-   another local wrapper layer.
+4. Use the React adapter when it provides typed property and event bridging. For native
+   custom elements, import the official React JSX declarations and use the generated
+   element and event maps instead of creating a local declaration or wrapper layer.
 5. Do not combine nested interactive controls inside a button or listbox option.
 6. Remove local CSS only after the replacement passes interaction, responsive, and
    accessibility checks.
@@ -111,7 +114,7 @@ so the adopted component contracts require no local adaptation.
 | Deployment component details table | `box-table` | Replace directly with System, Component, and Result columns and an explicit empty state. |
 | File selector in `ValidationChangesDrawer` | Selectable `box-table` | Replaced. The table's controlled single-selection contract preserves current-row state and keyboard selection; the current `box-document-list` does not expose controlled selected/current state. |
 | `LiveActivityFeed` | `box-timeline` | Replaced. Dispatch retains the 12-event live-tail policy and a keyboard-focusable bounded scroll host; use `box-audit-log` only for a full searchable/exportable audit view, not this compact feed. |
-| `RunTimeline` | Existing `box-run-trace` | Retain. The mapping in `runTimelineModel` is application logic and remains. The 0.28.4 built-in running marker, visible status label, and summary are sufficient; the former shadow-root animation injection was removed. |
+| `RunTimeline` | Existing `box-run-trace` | Retain. The mapping in `runTimelineModel` is application logic and remains. The built-in running marker, visible status label, and summary are sufficient; Dispatch now tunes density with the public 0.29.0 geometry tokens. |
 | Summary/provider result compositions | `box-card`, `box-fact-list`, `box-result-blocks`, and existing buttons/badges | Compose from primitives. Do not force `box-run-summary` unless its run/todo/step model matches the Dispatch record. |
 | External destination links in Summary | `box-link-button` | Replace the locally styled anchor when it is a navigation action. Keep provider launch URL validation in Dispatch. |
 
@@ -143,7 +146,8 @@ For the current summary rows:
 - do not force selection semantics into a read-only status summary.
 
 Issues #355, #357, #358, #359, and #360 are resolved and adopted in the 0.28.1
-upgrade. No local CSS or behavior workaround remains for those contracts.
+upgrade. Issues #379 and #380 are resolved and adopted in the 0.33.0 upgrade. No
+local CSS or behavior workaround remains for those contracts.
 
 ## Components that should remain Dispatch-owned
 
@@ -169,8 +173,8 @@ Status: **Complete**
 3. Review 0.27 migration notes and source contracts for every currently used
    element, especially custom event names, boolean properties, drawer top-layer
    behavior, and token changes.
-4. Replace local JSX declarations with package types where available. Keep
-   `boe.d.ts` only for uncovered native elements.
+4. Replace local JSX declarations with the package's generated `react-jsx` and
+   `native-types` entries. **Complete in 0.33.0; `boe.d.ts` is removed.**
 5. Run the complete existing test suite and a browser smoke pass before changing
    markup. This isolates upgrade regressions from migration regressions.
 6. Reconcile `BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md` against the new installed
@@ -254,6 +258,8 @@ Status: **Complete within the current component contracts**
    migrated surfaces.** The former drawer-close bridge was removed in 0.28.1. A
    follow-up exact-class audit also removed the remaining pre-migration breadcrumb,
    path, resource-row, provider-card, drawer-button, table, and activity selectors.
+   The remaining coupled Run Trace geometry overrides were replaced by public tokens
+   in 0.33.0.
 4. Consolidate the remaining CSS into page layout and Dispatch-specific composition
    rules; use only published parts for component-level treatment. **Complete.** An
    exact-cascade cleanup also removed earlier declarations superseded under the same

@@ -22,7 +22,7 @@ export function ProviderConnectionPanel({ provider, title, count, onManage, acti
 }
 
 function RemoveConnectionButton({ label, disabled, onRemove }: { label: string; disabled: boolean; onRemove: () => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-icon-button']>(null)
   const onRemoveRef = useRef(onRemove)
   useEffect(() => { onRemoveRef.current = onRemove }, [onRemove])
   useEffect(() => {

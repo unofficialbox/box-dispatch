@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@unofficialbox/box-open-elements-react/alert'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import type { ValidationFileChange } from '../types'
 import { BoeTable } from './BoeTable'
@@ -36,7 +37,7 @@ const changeColumns: TableColumn[] = [
 const fileID = (file: ValidationFileChange) => `${file.component}:${file.path}`
 
 export function ValidationChangesDrawer({ files, loading, error, stage = 'validation', onClose }: { files: ValidationFileChange[]; loading: boolean; error: string; stage?: ChangeReviewStage; onClose: () => void }) {
-  const drawerRef = useRef<HTMLElement>(null)
+  const drawerRef = useRef<HTMLElementTagNameMap['box-drawer']>(null)
   const [selectedFileID, setSelectedFileID] = useState('')
   const selected = useMemo(() => files.find((file) => fileID(file) === selectedFileID) ?? files[0], [files, selectedFileID])
   const rows = useMemo<TableRow[]>(() => files.map((file) => ({
@@ -57,8 +58,8 @@ export function ValidationChangesDrawer({ files, loading, error, stage = 'valida
   useEffect(() => {
     const drawer = drawerRef.current
     if (!drawer) return
-    const handleOpenChanged = (event: Event) => {
-      if (!(event as CustomEvent<{ open: boolean }>).detail.open) onClose()
+    const handleOpenChanged = (event: BoxElementEventMap['box-drawer']['open-changed']) => {
+      if (!event.detail.open) onClose()
     }
     drawer.addEventListener('open-changed', handleOpenChanged)
     return () => drawer.removeEventListener('open-changed', handleOpenChanged)

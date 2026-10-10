@@ -1,19 +1,15 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import '@unofficialbox/box-open-elements/resource-row'
-
-type ResourceRowElement = HTMLElement & {
-  selected: boolean
-  disabled: boolean
-}
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 
 export function SelectableResourceRow({ className, label, meta, value, status, selected = false, disabled = false, icon, actions, onSelect }: { className?: string; label: string; meta?: string; value: string; status?: ReactNode; selected?: boolean; disabled?: boolean; icon?: ReactNode; actions?: ReactNode; onSelect: (value: string) => void }) {
-  const ref = useRef<ResourceRowElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-resource-row']>(null)
   const onSelectRef = useRef(onSelect)
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
   useEffect(() => {
     const row = ref.current
     if (!row) return
-    const handleSelect = (event: Event) => onSelectRef.current((event as CustomEvent<{ value: string }>).detail.value)
+    const handleSelect = (event: BoxElementEventMap['box-resource-row']['select']) => onSelectRef.current(event.detail.value)
     row.addEventListener('select', handleSelect)
     return () => row.removeEventListener('select', handleSelect)
   }, [])

@@ -1,13 +1,7 @@
 import { useEffect, useRef } from 'react'
 import '@unofficialbox/box-open-elements/table'
-import type { TableColumn, TableRow, TableSelectionChangedDetail, TableSelectionMode, TableSortDetail } from '@unofficialbox/box-open-elements/table'
-
-type TableElement = HTMLElement & {
-  columns: TableColumn[]
-  rows: TableRow[]
-  selectedIds: string[]
-  selectionMode: TableSelectionMode
-}
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
+import type { TableColumn, TableRow, TableSelectionMode, TableSortDetail } from '@unofficialbox/box-open-elements/table'
 
 type BoeTableProps = {
   className?: string
@@ -28,7 +22,7 @@ type BoeTableProps = {
 const EMPTY_SELECTED_IDS: string[] = []
 
 export function BoeTable({ className, columns, emptyText = 'No rows', errorText = '', label, loading = false, onSelectionChange, onSort, rows, selectedIds = EMPTY_SELECTED_IDS, selectionMode = 'none', sortDirection, sortKey }: BoeTableProps) {
-  const tableRef = useRef<TableElement | null>(null)
+  const tableRef = useRef<HTMLElementTagNameMap['box-table'] | null>(null)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onSortRef = useRef(onSort)
 
@@ -59,8 +53,8 @@ export function BoeTable({ className, columns, emptyText = 'No rows', errorText 
   useEffect(() => {
     const table = tableRef.current
     if (!table) return
-    const handleSort = (event: Event) => onSortRef.current?.((event as CustomEvent<TableSortDetail>).detail)
-    const handleSelection = (event: Event) => onSelectionChangeRef.current?.((event as CustomEvent<TableSelectionChangedDetail>).detail.selectedIds)
+    const handleSort = (event: BoxElementEventMap['box-table']['sort']) => onSortRef.current?.(event.detail)
+    const handleSelection = (event: BoxElementEventMap['box-table']['selection-changed']) => onSelectionChangeRef.current?.(event.detail.selectedIds)
     table.addEventListener('sort', handleSort)
     table.addEventListener('selection-changed', handleSelection)
     return () => {

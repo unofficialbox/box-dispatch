@@ -5,8 +5,6 @@ import type { RunEvent } from '../types'
 import type { ProviderProgress } from './runTimelineModel'
 import { latestActivityEvents, type FeedItem } from './liveActivityModel'
 
-type TimelineElement = HTMLElement & { events: TimelineEvent[] }
-
 export function LiveActivityFeed({ providers }: { providers: ProviderProgress[] }) {
   const events: FeedItem[] = useMemo(() => providers.flatMap((provider) => provider.updates.map((event) => ({ ...event, providerName: provider.name }))).sort((left, right) => left.sequence - right.sequence), [providers])
   const visibleEvents = useMemo(() => latestActivityEvents(events).slice(-12), [events])
@@ -20,7 +18,7 @@ export function LiveActivityFeed({ providers }: { providers: ProviderProgress[] 
     badge: eventLabel(event),
   })), [visibleEvents])
   const lastEventSequence = visibleEvents.at(-1)?.sequence
-  const logRef = useRef<TimelineElement>(null)
+  const logRef = useRef<HTMLElementTagNameMap['box-timeline']>(null)
   useLayoutEffect(() => {
     const log = logRef.current
     if (log) {

@@ -3,6 +3,7 @@ import { Alert } from '@unofficialbox/box-open-elements-react/alert'
 import { Select } from '@unofficialbox/box-open-elements-react/select'
 import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
 import '@unofficialbox/box-open-elements/accordion'
+import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import type { ConnectionSummary, RunDiagnostic, SalesforceOAuthJob, ScratchOrgJob, BoxOAuthJob } from '../types'
 import { ProviderLogo } from './ProviderLogo'
 import { SelectableResourceRow } from './SelectableResourceRow'
@@ -18,12 +19,12 @@ const boxConnectionModes = [
 ]
 
 function useDrawerClose(onClose: () => void) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-drawer']>(null)
   useEffect(() => {
     const drawer = ref.current
     if (!drawer) return
-    const handleOpenChanged = (event: Event) => {
-      if (!(event as CustomEvent<{ open: boolean }>).detail.open) onClose()
+    const handleOpenChanged = (event: BoxElementEventMap['box-drawer']['open-changed']) => {
+      if (!event.detail.open) onClose()
     }
     drawer.addEventListener('open-changed', handleOpenChanged)
     return () => drawer.removeEventListener('open-changed', handleOpenChanged)
@@ -32,7 +33,7 @@ function useDrawerClose(onClose: () => void) {
 }
 
 function RemoveConnectionButton({ label, disabled = false, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-icon-button']>(null)
   const handlerRef = useRef(onPress)
   useEffect(() => { handlerRef.current = onPress }, [onPress])
   useEffect(() => {
@@ -56,18 +57,17 @@ function DrawerButton({ label, tone = 'neutral', disabled = false, onPress }: { 
 }
 
 function DrawerSwitch({ checked, label, description, disabled = false, onChange }: { checked: boolean; label: string; description: string; disabled?: boolean; onChange: (checked: boolean) => void }) {
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    const handleChange = (event: Event) => onChange((event as CustomEvent<{ checked: boolean }>).detail.checked)
+    const handleChange = (event: BoxElementEventMap['box-switch']['checked-changed']) => onChange(event.detail.checked)
     element.addEventListener('checked-changed', handleChange)
     return () => element.removeEventListener('checked-changed', handleChange)
   }, [onChange])
   return <box-switch ref={ref} checked={checked} disabled={disabled} label={label} description={description}></box-switch>
 }
 
-type DrawerElement = HTMLElement & { close: () => void }
 const diagnosticDetailItems = [{ label: 'Technical details', value: 'technical' }]
 
 export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiagnostic | null; onClose: () => void }) {
@@ -91,7 +91,7 @@ export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiag
 
 export function SalesforceConnectionDrawer({ connection, loading, error, oauthJob, scratchJob, onLogin, onSelect, onRemove, onOpen, onCreateScratch, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: SalesforceOAuthJob | null; scratchJob: ScratchOrgJob | null; onLogin: (loginHost: 'production' | 'sandbox', role: 'org' | 'devhub') => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onOpen: () => void; onCreateScratch: (alias: string, installManagedPackage: boolean) => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
-  const closeDrawer = () => (drawerRef.current as DrawerElement | null)?.close()
+  const closeDrawer = () => drawerRef.current?.close()
   const [loginHost, setLoginHost] = useState<'production' | 'sandbox'>('production')
   const [alias, setAlias] = useState('')
   const [installManagedPackage, setInstallManagedPackage] = useState(true)
@@ -155,7 +155,7 @@ export function SalesforceConnectionDrawer({ connection, loading, error, oauthJo
 
 export function BoxConnectionDrawer({ connection, loading, error, oauthJob, onLogin, onSelect, onRemove, onOpen, onClose }: { connection?: ConnectionSummary; loading: boolean; error: string; oauthJob: BoxOAuthJob | null; onLogin: () => Promise<boolean>; onSelect: (id: string) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onOpen: () => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
-  const closeDrawer = () => (drawerRef.current as DrawerElement | null)?.close()
+  const closeDrawer = () => drawerRef.current?.close()
   const apps = connection?.connections ?? []
   const selected = apps.find((app) => app.selected) ?? apps[0]
   const [addingConnection, setAddingConnection] = useState(apps.length === 0)
