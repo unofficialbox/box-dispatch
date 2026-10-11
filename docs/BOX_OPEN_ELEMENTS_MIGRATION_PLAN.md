@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.38.0`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.39.0`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -65,6 +65,12 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   mobile tables and repeated keyboard sorting. Qualified Drawer/overlap findings
   and pre-existing Switch invalid-error stress contrast remain baseline evidence;
   this does not claim global conformance.
+- **0.39.0 maintenance update:** core and React artifacts are verified and
+  upgraded together. Runtime changes are Box Plot and Trace Waterfall enhancements,
+  neither consumed by Dispatch. Metric cards remain value/message compositions;
+  no application compatibility change is needed. Rebuilt embedded assets are
+  byte-identical. Existing Chromium light/dark desktop/mobile, sorting, gutter
+  contrast and Switch description regressions remain the acceptance boundary.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
