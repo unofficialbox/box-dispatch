@@ -4,7 +4,7 @@ import '@unofficialbox/box-open-elements/sidebar-toggle-button'
 import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import { RailIcon } from './RailIcon'
 
-export type AppView = 'overview' | 'workflow' | 'history' | 'settings'
+export type AppView = 'overview' | 'workflow' | 'history' | 'settings' | 'help'
 
 export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, onSettings }: { activeView: AppView; onOverview: () => void; onNewDeployment: () => void; onHistory: () => void; onSettings: () => void }) {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('dispatch-sidebar-collapsed') === 'true')
@@ -31,7 +31,7 @@ export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, on
     <a className={`nav-link nav-route ${activeView === 'history' ? 'active' : ''}`} href="#history" onClick={route(onHistory)} aria-current={activeView === 'history' ? 'page' : undefined} aria-label="Deployment history"><span data-nav-icon><RailIcon name="clock2" /></span><span data-nav-label>History</span></a>
     <a className={`nav-link nav-route ${activeView === 'settings' ? 'active' : ''}`} href="#settings" onClick={route(onSettings)} aria-current={activeView === 'settings' ? 'page' : undefined} aria-label="Settings"><span data-nav-icon><RailIcon name="settings" /></span><span data-nav-label>Settings</span></a>
     <box-sidebar-toggle-button ref={toggleRef} className="sidebar-toggle" slot="header" label={collapsed ? 'Expand navigation' : 'Collapse navigation'} expanded={!collapsed}></box-sidebar-toggle-button>
-    <a className="nav-link nav-help" href="#help" aria-label="Help" title="Help"><span data-nav-icon><RailIcon name="help" /></span><span data-nav-label>Help</span></a>
+    <a className={`nav-link nav-help ${activeView === 'help' ? 'active' : ''}`} aria-current={activeView === 'help' ? 'page' : undefined} href="#help" aria-label="Help" title="Help"><span data-nav-icon><RailIcon name="help" /></span><span data-nav-label>Help</span></a>
     <div className="sidebar-context" slot="footer"><strong>Local workspace</strong><span>Box + Salesforce</span></div>
   </box-nav-sidebar>
 }

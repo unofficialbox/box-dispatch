@@ -70,10 +70,11 @@ function DrawerSwitch({ checked, label, description, disabled = false, onChange 
 
 const diagnosticDetailItems = [{ label: 'Technical details', value: 'technical' }]
 
-export function DiagnosticsDrawer({ diagnostic, onClose }: { diagnostic: RunDiagnostic | null; onClose: () => void }) {
+export function DiagnosticsDrawer({ diagnostic, loading = !diagnostic, error = '', onRetry, onClose }: { diagnostic: RunDiagnostic | null; loading?: boolean; error?: string; onRetry?: () => void; onClose: () => void }) {
   const drawerRef = useDrawerClose(onClose)
-  return <box-drawer ref={drawerRef} className="diagnostic-drawer" open heading={diagnostic?.title ?? 'Loading diagnostic guidance'} description={diagnostic?.summary ?? 'Dispatch is preparing safe next steps for this failed run.'} position="right" size="medium" busy={!diagnostic}>
+  return <box-drawer ref={drawerRef} className="diagnostic-drawer" open heading={diagnostic?.title ?? (error ? 'Diagnostic guidance unavailable' : 'Loading diagnostic guidance')} description={diagnostic?.summary ?? (error ? 'Retry to load next steps for this failed run.' : 'Dispatch is preparing safe next steps for this failed run.')} position="right" size="medium" busy={loading}>
     <section className="drawer-content">
+      {error && <><Alert heading="Guidance could not be loaded" message={error} tone="error" open/>{onRetry && <DrawerButton label="Retry diagnostics" onPress={onRetry} disabled={loading}/>}</>}
       {diagnostic && <>
         {(diagnostic.provider || diagnostic.code) && <dl className="diagnostic-summary">
           {diagnostic.provider && <div><dt>Provider</dt><dd>{diagnostic.provider}</dd></div>}

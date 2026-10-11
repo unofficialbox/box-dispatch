@@ -360,8 +360,8 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .settings-provider-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .settings-provider-title h3 { color: var(--dispatch-navy); font-size: 15px; }
 .settings-provider-title p { margin: 3px 0 0; color: var(--dispatch-muted); font-size: 12px; }
-.settings-connection-list { display: grid; }
-.settings-connection-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 13px 16px; border-bottom: 1px solid var(--dispatch-rule-soft); }
+.settings-connection-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.settings-connection-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 13px 16px; border-bottom: 1px solid var(--dispatch-rule-soft); }
 .settings-connection-row:last-child { border-bottom: 0; }
 .settings-connection-copy { flex: 1 1 0; min-width: 0; }
 .settings-connection-row strong, .settings-connection-row small { display: block; }
