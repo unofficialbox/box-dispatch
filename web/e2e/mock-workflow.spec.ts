@@ -1,4 +1,83 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import axe from 'axe-core'
+
+// Scoped audits retain all violations and incompletes, plus color-contrast passes.
+// Full-page review evidence covers residuals outside these contexts.
+async function expectAccessible(page: Page, selectors: (string | string[])[], rules: string[]) {
+  await page.addScriptTag({ content: axe.source })
+  const audit = await page.evaluate(async ({ selectors, rules }) => {
+    const result = await (window as Window & { axe: typeof axe }).axe.run(
+      { include: selectors },
+      { runOnly: { type: 'rule', values: rules } },
+    )
+    const summarize = (results: typeof result.violations) => results.map(({ id, nodes }) => ({
+      id,
+      nodes: nodes.map(({ target, failureSummary, any, all, none }) => ({
+        target,
+        failureSummary,
+        checks: [...any, ...all, ...none].map(({ id, data, message }) => ({ id, data, message })),
+      })),
+    }))
+    return {
+      violations: summarize(result.violations),
+      incomplete: summarize(result.incomplete),
+      contrastPasses: summarize(result.passes.filter(({ id }) => id === 'color-contrast')),
+    }
+  }, { selectors, rules })
+  await test.info().attach('owned-accessibility-audit', {
+    body: JSON.stringify({ selectors, rules, ...audit }, null, 2),
+    contentType: 'application/json',
+  })
+  expect(audit.violations).toEqual([])
+  if (rules.includes('color-contrast')) {
+    // These contexts contain visible owned copy with known theme backgrounds.
+    // An indeterminate contrast result must be assessed rather than passing.
+    expect(audit.incomplete.filter(({ id }) => id === 'color-contrast')).toEqual([])
+    expect(audit.contrastPasses.flatMap(({ nodes }) => nodes).length).toBeGreaterThan(0)
+  }
+}
+
+// Settle native theme transitions before assessing the rendered label colors.
+async function expectSharedAccessibilityInBothThemes(page: Page, selectors: (string | string[])[], rules = ['color-contrast', 'label-content-name-mismatch']) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme)
+    const upcomingStage = page.locator('box-path').locator('[part="stage"][data-state="upcoming"]').first()
+    if (await upcomingStage.count()) {
+      await expect(upcomingStage).toHaveCSS('background-color', colorScheme === 'light' ? 'rgb(244, 244, 244)' : 'rgb(29, 33, 31)')
+    }
+    await expectAccessible(page, selectors, rules)
+  }
+}
+
+async function expectDiffGutterContrast(page: Page) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme)
+    const measurements = await page.locator('box-diff-viewer').evaluate((viewer) => {
+      const rgb = (color: string) => {
+        const match = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/)
+        if (!match) throw new Error(`Expected opaque RGB gutter color: ${color}`)
+        return match.slice(1).map(Number)
+      }
+      const luminance = (color: number[]) => color.map((value) => {
+        const channel = value / 255
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0)
+      const background = getComputedStyle(viewer.shadowRoot!.querySelector('[part="panel"]')!).backgroundColor
+      return [...viewer.shadowRoot!.querySelectorAll<HTMLElement>('[part="line-number"]')].filter((cell) => cell.textContent?.trim()).map((cell) => {
+        const style = getComputedStyle(cell)
+        // Numeric-only content can be inapplicable to axe's text heuristic.
+        // Measure the visible native text instead of accepting an empty audit.
+        const values = [luminance(rgb(style.color)), luminance(rgb(background))].sort((a, b) => a - b)
+        return { text: cell.textContent, color: style.color, background, opacity: style.opacity, visible: cell.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }), ratio: (values[1] + 0.05) / (values[0] + 0.05) }
+      })
+    })
+    await test.info().attach(`diff-gutter-${colorScheme}`, { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' })
+    expect(measurements.length).toBeGreaterThan(0)
+    expect(measurements.every(({ visible, opacity, ratio }) => visible && opacity === '1' && ratio >= 4.5)).toBe(true)
+  }
+}
 
 test('follows the system color preference across primary pages', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -11,6 +90,8 @@ test('follows the system color preference across primary pages', async ({ page }
     heading: getComputedStyle(document.querySelector('.overview-heading h1')!).color,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
   }))).toEqual({ page: 'rgb(18, 21, 19)', heading: 'rgb(244, 244, 244)', token: '#121513' })
+  await expect(page.locator('.overview-summary')).toHaveCSS('color', 'rgb(188, 188, 188)')
+  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
@@ -34,6 +115,9 @@ test('follows the system color preference across primary pages', async ({ page }
     page: getComputedStyle(document.querySelector('.workspace')!).backgroundColor,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
   }))).toEqual({ page: 'rgb(255, 255, 255)', token: '#ffffff' })
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
 })
 
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
@@ -46,6 +130,9 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.locator('box-metric-card[heading="Connections"]')).not.toHaveAttribute('value', 'Checking')
   await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('link', { name: 'B/ Dispatch Solution delivery overview', exact: true })).toBeVisible()
+  await expect(page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' })).not.toHaveAttribute('aria-controls')
+  await expectAccessible(page, ['.brand', 'box-sidebar-toggle-button'], ['label-content-name-mismatch', 'aria-valid-attr-value'])
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
   await expect(page.getByRole('navigation')).toHaveCount(1)
   const sidebar = page.locator('box-nav-sidebar')
@@ -172,9 +259,21 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('.connection-resource-row img[data-provider-logo]')).toHaveCount(2)
   expect(await page.locator('.connection-buttons box-button[aria-label^="Open "]').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('label')))).toEqual(['Open', 'Open'])
   expect(await page.locator('button button, button box-button, button box-switch').count()).toBe(0)
+  await expectSharedAccessibilityInBothThemes(page, ['box-resource-row', 'box-badge', ['box-path', '[part="stage-label"]']])
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
+  const requiredSwitch = page.locator('box-switch[description="Required"]').getByRole('switch')
+  const optionalSwitch = page.locator('box-switch[description="Optional"]').getByRole('switch')
+  await expect(requiredSwitch).toHaveAccessibleName('Included')
+  await expect(requiredSwitch).toHaveAccessibleDescription('Required')
+  await expect(requiredSwitch).toBeDisabled()
+  await expect(requiredSwitch).toHaveAttribute('aria-checked', 'true')
+  await expect(optionalSwitch).toHaveAccessibleName('Included')
+  await expect(optionalSwitch).toHaveAccessibleDescription('Optional')
+  await expect(optionalSwitch).toBeEnabled()
+  await expect(page.locator('.component-scope p').first()).toHaveCSS('color', 'rgb(188, 188, 188)')
+  await expectAccessible(page, ['.component-scope p'], ['color-contrast'])
   const providerControls = await page.locator('.configuration-resource-row box-switch').evaluateAll((switches) => switches.map((control) => {
     const bounds = control.getBoundingClientRect()
     return {
@@ -217,16 +316,21 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByText('Validation results restored. Review changes or continue to deployment.')).toBeVisible()
   const liveActivity = page.locator('box-timeline[aria-label="Live validation log"]')
   await expect(liveActivity).toBeVisible()
+  await expect(page.locator('.live-activity-feed')).toHaveCSS('background-color', 'rgb(18, 21, 19)')
   await liveActivity.focus()
   await page.keyboard.press('PageDown')
   const liveActivityState = await liveActivity.evaluate((element) => ({ focused: document.activeElement === element, tabIndex: (element as HTMLElement).tabIndex, events: (element as HTMLElement & { events: unknown[] }).events.length }))
   expect(liveActivityState).toMatchObject({ focused: true, tabIndex: 0 })
   expect(liveActivityState.events).toBeGreaterThan(0)
+  await expectSharedAccessibilityInBothThemes(page, ['box-badge', ['box-path', '[part="stage-label"]'], ['box-run-trace', '[part="summary"]'], 'box-timeline'])
 
   await page.getByRole('button', { name: 'Review changes' }).click()
   await expect(page.getByRole('heading', { name: 'Review validation changes' })).toBeVisible()
   await expect(page.getByText('2 files')).toBeVisible()
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
+  await expectSharedAccessibilityInBothThemes(page, ['box-table.validation-change-table'])
+  await expectSharedAccessibilityInBothThemes(page, ['box-diff-viewer'], ['label-content-name-mismatch'])
+  await expectDiffGutterContrast(page)
   expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({
     before: viewer.getAttribute('before-label'),
     after: viewer.getAttribute('after-label'),
@@ -235,6 +339,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     hasPackaged: viewer.getAttribute('after-text')?.includes('true'),
   }))).toEqual({ before: 'Current org', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="1"]').click()
+  await expect(page.locator('box-table.validation-change-table').getByRole('grid')).toBeVisible()
+  await expect(page.locator('box-table.validation-change-table').getByRole('row', { selected: true })).toHaveCount(1)
   await expect(page.locator('box-diff-viewer[heading="objects/Contract__c/fields/Amount__c.field-meta.xml"]')).toBeVisible()
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="0"]').click()
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
@@ -354,9 +460,38 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByLabel('System', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Result', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Strategy', { exact: true })).toBeVisible()
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      const table = page.getByRole('table', { name: 'All deployments' })
+      await expect(table.getByRole('link', { name: 'Northstar CLM rollout' })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+      const header = table.getByRole('columnheader', { name: /Deployment/ }).first()
+      const sortButton = header.getByRole('button')
+      await sortButton.focus()
+      // Controlled React row/sort updates must preserve keyboard focus. Focus
+      // once only: subsequent activations use the surviving native button.
+      for (let activation = 0; activation < 4; activation++) {
+        const next = await header.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending'
+        await page.keyboard.press(activation % 2 === 0 ? 'Enter' : 'Space')
+        await expect(header).toHaveAttribute('aria-sort', next)
+        await expect(sortButton).toBeFocused()
+      }
+      await expect(table.locator('[aria-selected]')).toHaveCount(0)
+      await expectAccessible(page, ['box-table.deployment-history-table'], ['aria-allowed-attr', 'aria-required-children', 'aria-required-parent', 'aria-valid-attr-value'])
+      await test.info().attach(`history-sort-${colorScheme}-${width}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+      await table.getByRole('link', { name: 'Northstar CLM rollout' }).click()
+      await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
+      await expect(page.getByRole('table', { name: 'Components deployed by this deployment' })).toBeVisible()
+      await page.getByRole('link', { name: 'Back to deployment history' }).click()
+    }
+  }
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('link', { name: 'Northstar CLM rollout' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Deployment actions' })).toBeVisible()
+  await expectAccessible(page, ['.history-environment-actions'], ['aria-prohibited-attr'])
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })
 
@@ -372,6 +507,17 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   await page.getByRole('button', { name: 'New deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
+  const lifecycleScroll = page.getByRole('region', { name: 'Deployment lifecycle stages' })
+  await lifecycleScroll.focus()
+  await expect(lifecycleScroll).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => lifecycleScroll.evaluate((region) => region.scrollLeft)).toBeGreaterThan(0)
+  expect(await lifecycleScroll.evaluate((region) => ({
+    outlineStyle: getComputedStyle(region).outlineStyle,
+    outlineWidth: getComputedStyle(region).outlineWidth,
+  }))).toEqual({ outlineStyle: 'solid', outlineWidth: '2px' })
+  await lifecycleScroll.evaluate((region) => { region.scrollLeft = 0 })
+  await expectAccessible(page, ['.workflow-path-scroll'], ['scrollable-region-focusable'])
   const mobileProviderAlignment = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('[data-system-provider]')].map((provider) => {
     const logo = provider.querySelector<HTMLElement>('.provider-logo')!.getBoundingClientRect()
     const copy = provider.querySelector<HTMLElement>('.system-provider-copy')!.getBoundingClientRect()

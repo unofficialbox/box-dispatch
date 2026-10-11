@@ -29,7 +29,8 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.37.0.
+The current Dispatch web package uses verified published core and React adapter
+versions 0.38.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -112,17 +113,40 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.37.0 review
+## Remaining enhancements after the 0.38.0 adoption
+
+The `box-table` keyboard sort-focus gap is resolved in verified published 0.37.1.
+Real Dispatch tests retain focus through four consecutive Enter/Space sorts without
+refocusing in each light/dark and desktop/mobile context, then open historical
+details. Static-table and selectable-grid semantics are also verified. Published
+0.37.2 repairs the original Badge/status foregrounds and Resource Row/Diff Viewer
+native names; scoped real Dispatch light/dark checks cover those contracts.
+All Path stage labels pass after theme transitions settle; transient fills are
+not treated as a component gap. Version 0.38.0 additionally resolves numeric
+gutter text contrast and Switch description association. Real Dispatch tests cover
+light/dark gutter cells, native Required/Optional descriptions, checked/disabled
+state, compact mobile tables and repeated sorts without refocus. Native Drawer
+scrim qualifications and pre-existing Switch invalid-error stress contrast remain
+explicit baseline evidence; no global conformance claim is made.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
-| P2 | Components | `box-table` keyboard sort focus | Controlled sort updates rebuild the header and lose focus on its sort button in both 0.33.0 and 0.37.0. | Seek upstream focus preservation; do not patch the component shadow DOM. Repeated keyboard audit activations refocus the header. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
 Accessibility corrections for `box-dropdown`, `box-selectable-card`, and
 `box-action-bar` are reported complete by the maintainer. Dispatch should consume
 them through the next containing package release rather than applying local forks.
+
+## Dispatch-owned accessibility composition
+
+The October 11 cleanup names all visible brand text, omits the optional cross-shadow
+sidebar control reference, makes lifecycle overflow a named focusable region, gives
+history actions a group role, and uses current muted/surface tokens for affected
+application copy and the live feed. It leaves the settled-clean Fact List styles and
+all BOE status/naming internals unchanged. Scoped axe regressions cover the owned
+surfaces and the adopted shared status/name contracts; residuals above remain
+explicit in full-page audits.
 
 ## Resolved component gaps
 

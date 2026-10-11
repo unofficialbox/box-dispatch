@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render } from '@testing-library/react'
+import { render, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { DeploymentHeader } from './DeploymentHeader'
 import type { DeploymentPlan, DispatchRun } from '../types'
@@ -25,6 +25,13 @@ const failedValidation: DispatchRun = {
 }
 
 describe('DeploymentHeader', () => {
+  it('keeps read-only stages inside a named keyboard scroll region', () => {
+    const { container } = render(<DeploymentHeader plan={plan} activePhase="Choose" run={null} />)
+    const region = within(container).getByRole('region', { name: 'Deployment lifecycle stages' })
+    expect(region.tabIndex).toBe(0)
+    expect(region.querySelector('box-path')?.getAttribute('current')).toBe('Choose')
+    expect(region.querySelector('box-path')?.getAttribute('label')).toBe('Deployment lifecycle')
+  })
   it('uses the BOE select for the environment control', () => {
     const { container } = render(<DeploymentHeader plan={plan} activePhase="Choose" run={null} />)
 

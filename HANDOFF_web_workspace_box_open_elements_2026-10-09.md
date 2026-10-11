@@ -4,11 +4,11 @@
 
 - **Date:** 2026-10-11
 - **Repo:** `unofficialbox/box-dispatch`; cloud checkout `/workspace/box-dispatch-cloud-verified`
-- **Branch:** `codex/box-open-elements-0.37.0`
-- **Base main:** `c1663ac0b992749245b5b6472a6736d9c581a772` (PR #40)
+- **Branch:** `codex/dispatch-accessibility-cleanup`
+- **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.37.0
+  `@unofficialbox/box-open-elements-react` 0.38.0
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -84,13 +84,90 @@ It delivered and verified:
 Main includes the charcoal/dark-mint and white/light-green themes. The 0.37 update
 preserves `web/src/theme.ts`, all application CSS, and existing theme assertions.
 
-### Current branch — Box Open Elements 0.37.0
+### PR #41 — Box Open Elements 0.37.0 (merged)
 
 Both packages upgrade from 0.33.0 to 0.37.0 with no other lockfile resolution
 changes. Published APIs and generated declarations remain compatible. The optional
 new component features do not require Dispatch application changes. Embedded assets
-and the adoption notes are refreshed. This branch is prepared for review; merge and
-deployment require separate approval.
+and the adoption notes are refreshed. PR #41 was squash-merged as
+`27936b11a21b34685e1c49f097b75dbd551d140e` with specific user approval.
+
+### Current branch — independent Dispatch accessibility cleanup
+
+The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
+The branch adopts verified published core/React 0.38.0 from upstream commit
+`4e7da132911563e1cb3f80720134cb16b8aa1755`; both downloaded tarballs match
+the registry SHA-512 integrity and the React core peer range is compatible.
+It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
+
+- the brand name includes its visible B/ glyph, Dispatch and Solution delivery copy,
+  with explicit text-node separators; the optional sidebar toggle control IDREF is
+  omitted because its shadow button cannot resolve the light-DOM target;
+- lifecycle overflow belongs to a named keyboard-focusable region with visible focus,
+  preserving the read-only Path component and existing stages;
+- historical deployment actions have a named group role;
+- affected muted text and the live activity feed use existing theme tokens instead
+  of hardcoded light colors; charcoal/mint fills and registered themes are unchanged;
+- focused unit tests and scoped axe/keyboard checks are added to the existing E2E
+  workflows. `axe-core` 4.14.0 is a test-only dependency. Scoped audits attach
+  violations, incomplete checks and contrast passes; the visible owned text contexts
+  require at least one resolved contrast pass and no incomplete contrast result.
+  Other incomplete categories remain evidence for assessment, not blanket failures.
+
+Fact-list styles remain unchanged: their earlier contrast findings disappeared once
+entrance animations settled. No BOE source, native control names or status color-mix
+internals are patched. Published 0.37.2 repairs the original bright Badge/status
+foregrounds and Resource Row/Diff Viewer native names. Scoped real-app checks cover
+those contracts in both themes, retaining evaluated contrast passes and incompletes.
+Path checks cover all stage labels after theme fills settle; Run Trace checks its
+status summary.
+Full-page evidence retains other content and all stages rather than treating these
+scoped checks as global conformance.
+
+An early light Path scan sampled the theme-transition fill #e9e9e9 at 4.13:1.
+Settled screenshot pixels verify #6f6f6f on #f4f4f4 at 4.57:1; the regression
+waits for the native fill before auditing all stage labels. This is not an open gap.
+Published 0.38.0 resolves the confirmed numeric-gutter contrast failure with
+opaque secondary text. The real diff drawer now checks its native line-number cells
+in both themes, independently of the pre-existing changed-code overlap incompletes.
+It also resolves Switch public-description association: native AX descriptions are
+Required/Optional, while Included/Not included names, checked state, required disabled
+state and optional focusability are preserved before/after toggling. The earlier
+2.92:1 gutter measurement and absent Switch descriptions remain historical evidence,
+not current open gaps. No local override or rule suppression is introduced.
+Non-text hidden
+Path markers and Run Trace overlap incompletes are also retained by full-page scans;
+they are not waived through the strict owned-text helper.
+
+The final cleanup/adoption passes 79 unit tests, all five updated mock E2E
+workflows, frontend lint/build, frozen installation, and the full Go gate. Final
+attachments retain 18 scoped audits with zero violations/incompletes and nine
+resolved contrast contexts, plus explicit numeric-gutter measurements. Gutter
+computed colors and screenshot pixels measure 5.02:1 light and 9.68:1 dark.
+Two focused read-only probes retain native Switch AX before/after toggling and
+rendered gutter screenshots. The isolated six-check full-page replay retains 41
+matched states with no page overflow. It reports six qualified native-Drawer scrim
+contrast nodes, zero name-mismatch violations, 453 contrast and four name-rule
+incomplete node occurrences (repeated states included). The four name incompletes
+are Switch valueText heuristics; native AX now independently confirms the correct
+primary names, Required/Optional descriptions and checked/disabled states.
+
+The original sidebar IDREF, brand name, history ARIA, mobile scroll focus and owned
+body-copy findings are cleared on audited normal surfaces. The Drawer scan derives
+scrim gray for headings/copy and a tile legend despite the painted white inner
+panel. Outer dialog is rgba(0,0,0,.75); panel and screenshot background are white.
+Actual #222 headings and #6f6f6f copy measure 15.91:1 and 5.02:1. That specific
+background-resolution qualification does not waive unrelated findings or claim
+formal conformance. Other gradient/image, hidden-glyph and overlap incompletes
+retain the bounded computed/pixel classifications from the earlier assessment.
+
+The published 0.37.1 table fix is adopted in lockstep. The real Dispatch workflow
+checks four successive Enter/Space sorts with focus set only once, in light/dark
+at 1440px/390px, then opens historical details and returns to History. Static
+tables omit selection ARIA; the controlled file selector has grid semantics and
+one selected row. Embedded assets are regenerated. The 0.37.2 status/name adoption
+is verified separately from the remaining contrast findings. This cleanup requires
+its own review; PR #41 approval does not authorize another merge or deployment.
 
 ## Box Open Elements boundary
 
@@ -99,7 +176,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.37.0 contracts. Keep the
+All planned migration phases are complete within published 0.38.0 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -222,10 +299,15 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The 0.37.0 core/React upgrade is implemented and verified on
-  `codex/box-open-elements-0.37.0`, based on merged PR #40. Official native types and
-  Run Trace tokens remain adopted; application source and themes are unchanged.
-- **Recommended Next Step:** Review the upgrade diff and its draft pull request.
-- **Expected Outcome:** Dispatch consumes both 0.37.0 packages in lockstep.
-- **Blockers:** No upgrade blocker found. Existing automated accessibility findings
-  and bundle-size warning remain follow-up work. Merge/deploy await approval.
+- **Current Status:** Independent Dispatch accessibility repairs are implemented on
+  `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
+  are aligned on verified published 0.38.0; gutter contrast and Switch
+  description association are verified resolved.
+- **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
+  confirm exact-head merge approval; deployment remains separately gated.
+- **Remaining qualifications:** Native Drawer scrim reports retain the verified
+  white-panel interpretation. Sidebar/select/visible-overlap samples pass; hidden
+  Path glyphs and modal-covered content are separately classified. Pre-existing
+  Switch invalid-error stress contrast remains upstream baseline evidence, outside
+  this normal-workflow adoption; it is not a new regression or a global-clean claim.
+  Bundle warning remains. Merge/deploy require approval.
