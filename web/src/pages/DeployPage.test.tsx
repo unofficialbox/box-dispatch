@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DeployPage } from './DeployPage'
 import type { DeploymentPlan, DispatchRun, RunEvent } from '../types'
 
@@ -30,6 +30,7 @@ const events: RunEvent[] = [
 ]
 
 describe('DeployPage', () => {
+  afterEach(cleanup)
   it('makes authentication failure and recovery guidance visually explicit', () => {
     const { container } = render(<DeployPage plan={plan} run={failedRun} events={events} notice="" onApply={vi.fn()} onDiagnostics={vi.fn()} onViewChanges={vi.fn()} />)
 
@@ -37,6 +38,13 @@ describe('DeployPage', () => {
     expect(screen.getByText('Salesforce authentication failed. Reconnect it before retrying.')).toBeTruthy()
     expect(container.querySelector('box-badge[label="Needs attention"][tone="error"]')).toBeTruthy()
     expect(container.querySelector('box-button[label="View diagnostic guidance"][tone="primary"]')).toBeTruthy()
+  })
+
+  it('disables continuation while the deployment request is pending', () => {
+    const validation: DispatchRun = { ...failedRun, action: 'validate', status: 'completed' }
+    const { container } = render(<DeployPage plan={plan} run={validation} events={[]} notice="" starting onApply={vi.fn()} onDiagnostics={vi.fn()} onViewChanges={vi.fn()} />)
+    expect(container.querySelector('box-button[label="Starting deployment…"]')?.hasAttribute('disabled')).toBe(true)
+    expect(container.querySelector('box-button[label="Continue to deployment"]')).toBeNull()
   })
 
   it('keeps completion actions out of the live run surface', () => {

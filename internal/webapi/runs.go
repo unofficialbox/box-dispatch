@@ -68,17 +68,18 @@ type runDiagnostic struct {
 }
 
 type persistedRun struct {
-	ID          string              `json:"id"`
-	Action      runAction           `json:"action"`
-	Status      runStatus           `json:"status"`
-	CreatedAt   time.Time           `json:"createdAt"`
-	StartedAt   *time.Time          `json:"startedAt,omitempty"`
-	CompletedAt *time.Time          `json:"completedAt,omitempty"`
-	Providers   []providerSummary   `json:"providers,omitempty"`
-	Plan        config.SolutionPlan `json:"plan,omitempty"`
-	Items       []lifecycle.Item    `json:"items,omitempty"`
-	Events      []runEvent          `json:"events,omitempty"`
-	Diagnostic  *runDiagnostic      `json:"diagnostic,omitempty"`
+	ID              string              `json:"id"`
+	DeploymentRunID string              `json:"deploymentRunId,omitempty"`
+	Action          runAction           `json:"action"`
+	Status          runStatus           `json:"status"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	StartedAt       *time.Time          `json:"startedAt,omitempty"`
+	CompletedAt     *time.Time          `json:"completedAt,omitempty"`
+	Providers       []providerSummary   `json:"providers,omitempty"`
+	Plan            config.SolutionPlan `json:"plan,omitempty"`
+	Items           []lifecycle.Item    `json:"items,omitempty"`
+	Events          []runEvent          `json:"events,omitempty"`
+	Diagnostic      *runDiagnostic      `json:"diagnostic,omitempty"`
 }
 
 type runChangesResponse struct {
@@ -98,17 +99,18 @@ type runManager struct {
 }
 
 type deploymentRun struct {
-	id          string
-	action      runAction
-	status      runStatus
-	plan        config.SolutionPlan
-	items       []lifecycle.Item
-	createdAt   time.Time
-	startedAt   *time.Time
-	completedAt *time.Time
-	events      []runEvent
-	listeners   map[chan runEvent]struct{}
-	diagnostic  *runDiagnostic
+	id              string
+	deploymentRunID string
+	action          runAction
+	status          runStatus
+	plan            config.SolutionPlan
+	items           []lifecycle.Item
+	createdAt       time.Time
+	startedAt       *time.Time
+	completedAt     *time.Time
+	events          []runEvent
+	listeners       map[chan runEvent]struct{}
+	diagnostic      *runDiagnostic
 }
 
 func newRunManager() *runManager {
@@ -132,34 +134,55 @@ func (m *runManager) startValidation(plan config.SolutionPlan) (runResponse, err
 	return m.start(runActionValidate, plan, nil, m.validate), nil
 }
 
+// A validation claims one deployment, including after a failed/lost response.
+// An intentional retry must validate again; replaying an old request never applies twice.
 func (m *runManager) startDeployment(validationID string) (runResponse, error) {
-	m.mu.RLock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	validation := m.runs[validationID]
 	if validation == nil {
-		m.mu.RUnlock()
 		return runResponse{}, fmt.Errorf("validation run was not found")
 	}
+	if validation.deploymentRunID != "" {
+		if deployment := m.runs[validation.deploymentRunID]; deployment != nil {
+			return summarizeRun(deployment), nil
+		}
+		return runResponse{}, fmt.Errorf("the recorded deployment is unavailable; run validation again before applying changes")
+	}
 	if validation.action != runActionValidate || validation.status != runCompleted {
-		m.mu.RUnlock()
 		return runResponse{}, fmt.Errorf("complete a successful validation before applying changes")
 	}
 	if validation.plan.PackagePath == "" {
-		m.mu.RUnlock()
 		return runResponse{}, fmt.Errorf("rerun validation after restarting the local API before applying changes")
 	}
-	plan := validation.plan
-	items := append([]lifecycle.Item(nil), validation.items...)
-	m.mu.RUnlock()
-	for _, item := range items {
+	for _, item := range validation.items {
 		if item.Status == lifecycle.StatusFailed {
 			return runResponse{}, fmt.Errorf("resolve validation failures before applying changes")
 		}
 	}
-	return m.start(runActionDeploy, plan, items, m.deploy), nil
+	response := m.startLocked(runActionDeploy, validation.plan, append([]lifecycle.Item(nil), validation.items...))
+	validation.deploymentRunID = response.ID
+	// Persist the claim and queued run together before any provider work starts.
+	if err := m.saveLocked(); err != nil {
+		validation.deploymentRunID = ""
+		delete(m.runs, response.ID)
+		m.next--
+		return runResponse{}, fmt.Errorf("deployment could not be recorded; check local storage and try again")
+	}
+	go m.execute(response.ID, m.deploy)
+	return response, nil
 }
 
 func (m *runManager) start(action runAction, plan config.SolutionPlan, items []lifecycle.Item, executor runExecutor) runResponse {
 	m.mu.Lock()
+	response := m.startLocked(action, plan, items)
+	m.saveLocked()
+	m.mu.Unlock()
+	go m.execute(response.ID, executor)
+	return response
+}
+
+func (m *runManager) startLocked(action runAction, plan config.SolutionPlan, items []lifecycle.Item) runResponse {
 	m.next++
 	now := m.now().UTC()
 	run := &deploymentRun{
@@ -168,11 +191,7 @@ func (m *runManager) start(action runAction, plan config.SolutionPlan, items []l
 	}
 	m.runs[run.id] = run
 	m.appendEventLocked(run, "status", "", "Run queued", runQueued)
-	response := summarizeRun(run)
-	m.saveLocked()
-	m.mu.Unlock()
-	go m.execute(run.id, executor)
-	return response
+	return summarizeRun(run)
 }
 
 func (m *runManager) execute(id string, executor runExecutor) {
@@ -399,7 +418,7 @@ func (m *runManager) restoreHistory() {
 			continue
 		}
 		run := &deploymentRun{
-			id: saved.ID, action: saved.Action, status: saved.Status, plan: saved.Plan, createdAt: saved.CreatedAt,
+			id: saved.ID, deploymentRunID: saved.DeploymentRunID, action: saved.Action, status: saved.Status, plan: saved.Plan, createdAt: saved.CreatedAt,
 			startedAt: saved.StartedAt, completedAt: saved.CompletedAt,
 			items: append([]lifecycle.Item(nil), saved.Items...), events: append([]runEvent(nil), saved.Events...),
 			diagnostic: saved.Diagnostic, listeners: map[chan runEvent]struct{}{},
@@ -425,20 +444,20 @@ func (m *runManager) restoreHistory() {
 	m.saveLocked()
 }
 
-func (m *runManager) saveLocked() {
+func (m *runManager) saveLocked() error {
 	if m.store == nil {
-		return
+		return nil
 	}
 	persisted := make([]persistedRun, 0, len(m.runs))
 	for _, run := range m.runs {
 		persisted = append(persisted, persistedRun{
-			ID: run.id, Action: run.action, Status: run.status, CreatedAt: run.createdAt,
+			ID: run.id, DeploymentRunID: run.deploymentRunID, Action: run.action, Status: run.status, CreatedAt: run.createdAt,
 			StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: summarizeRun(run).Providers,
 			Plan: run.plan, Items: append([]lifecycle.Item(nil), run.items...),
 			Events: append([]runEvent(nil), run.events...), Diagnostic: run.diagnostic,
 		})
 	}
-	_ = m.store.Save(persisted)
+	return m.store.Save(persisted)
 }
 
 func summariesToItems(summaries []providerSummary) []lifecycle.Item {

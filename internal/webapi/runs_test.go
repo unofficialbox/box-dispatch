@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -490,4 +492,122 @@ func waitForRun(t *testing.T, runs *runManager, id string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("run %s did not finish", id)
+}
+
+func TestDeploymentClaimDeduplicatesConcurrentRequestsAndSurvivesRestart(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	validate := func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		return []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusMissing, Deployable: true}}, nil
+	}
+	deploy := func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		calls.Add(1)
+		<-release
+		return nil, errors.New("simulated provider failure")
+	}
+	plan := config.SolutionPlan{TemplateID: "clm", PackagePath: "/mock-package", Components: []string{"box"}}
+	store := &testRunStore{runs: []persistedRun{{ID: "validation", Action: runActionValidate, Status: runCompleted, CreatedAt: time.Now(), Plan: plan}}}
+	manager := newRunManagerWithStore(validate, deploy, time.Now, store)
+	handler := NewHandlerWithOptions(ServerOptions{Runs: manager})
+	ids := make(chan string, 32)
+	var group sync.WaitGroup
+	for range 32 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/runs/validation/deploy", nil))
+			if response.Code != http.StatusAccepted {
+				t.Errorf("start = %d: %s", response.Code, response.Body.String())
+				return
+			}
+			var run runResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &run); err != nil {
+				t.Error(err)
+				return
+			}
+			ids <- run.ID
+		}()
+	}
+	group.Wait()
+	close(ids)
+	id := ""
+	for next := range ids {
+		if id != "" && next != id {
+			t.Errorf("duplicate deployment IDs: %s and %s", id, next)
+		}
+		id = next
+	}
+	if id == "" {
+		close(release)
+		t.Fatal("no deployment accepted")
+	}
+	close(release)
+	waitForRun(t, manager, id)
+	if calls.Load() != 1 {
+		t.Fatalf("executor calls = %d", calls.Load())
+	}
+	// A lost response, completed/failed run, or another tab reuses the same claim.
+	replay, err := manager.startDeployment("validation")
+	if err != nil || replay.ID != id {
+		t.Fatalf("replay = %#v, %v", replay, err)
+	}
+	restored := newRunManagerWithStore(validate, deploy, time.Now, store)
+	replay, err = restored.startDeployment("validation")
+	if err != nil || replay.ID != id || calls.Load() != 1 {
+		t.Fatalf("restored replay = %#v, %v; calls=%d", replay, err, calls.Load())
+	}
+	// Retrying provider work is explicit: a fresh validation claims a fresh run.
+	fresh, err := restored.startValidation(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, restored, fresh.ID)
+	retry, err := restored.startDeployment(fresh.ID)
+	if err != nil || retry.ID == id {
+		t.Fatalf("fresh deployment = %#v, %v", retry, err)
+	}
+	waitForRun(t, restored, retry.ID)
+	if calls.Load() != 2 {
+		t.Fatalf("legitimate retry calls = %d", calls.Load())
+	}
+}
+
+type failingClaimStore struct {
+	testRunStore
+	fail bool
+}
+
+func (s *failingClaimStore) Save(runs []persistedRun) error {
+	if s.fail {
+		return errors.New("simulated disk full")
+	}
+	return s.testRunStore.Save(runs)
+}
+
+func TestDeploymentDoesNotExecuteWithoutPersistedClaimAndCanRetryStorageFailure(t *testing.T) {
+	var calls atomic.Int32
+	store := &failingClaimStore{testRunStore: testRunStore{runs: []persistedRun{{ID: "validation", Action: runActionValidate, Status: runCompleted, Plan: config.SolutionPlan{TemplateID: "clm", PackagePath: "/mock-package"}}}}, fail: true}
+	deploy := func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		calls.Add(1)
+		return nil, nil
+	}
+	manager := newRunManagerWithStore(nil, deploy, time.Now, store)
+	if _, err := manager.startDeployment("validation"); err == nil || !strings.Contains(err.Error(), "local storage") {
+		t.Fatalf("start error = %v", err)
+	}
+	if calls.Load() != 0 || len(manager.history()) != 1 {
+		t.Fatal("unrecorded deployment must not execute or remain queued")
+	}
+	manager.mu.Lock()
+	store.fail = false
+	manager.mu.Unlock()
+	accepted, err := manager.startDeployment("validation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, manager, accepted.ID)
+	if calls.Load() != 1 {
+		t.Fatalf("retry executor calls = %d", calls.Load())
+	}
 }

@@ -66,7 +66,6 @@ function App() {
   const [templates, setTemplates] = useState<SolutionTemplate[]>(fallbackTemplates)
   const [selectedTemplateID, setSelectedTemplateID] = useState('clm')
   const [selectedComponents, setSelectedComponents] = useState<string[]>(['box', 'salesforce'])
-  const [componentSelections, setComponentSelections] = useState<Record<string, string[]>>({ box: ['Workspace structure', 'Metadata templates', 'Doc Gen templates', 'Sample content'], salesforce: ['CLM Contract', 'CLM Clause', 'Layouts', 'Permission sets'] })
   const [assembling, setAssembling] = useState(false)
   const [run, setRun] = useState<DispatchRun | null>(null)
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
@@ -90,6 +89,8 @@ function App() {
   const workflowResumeRequested = useRef(viewFromHash() === 'workflow')
   const workflowNavigationVersion = useRef(0)
   const [deploymentConfirmationOpen, setDeploymentConfirmationOpen] = useState(false)
+  const [deploymentStarting, setDeploymentStarting] = useState(false)
+  const deploymentStartPending = useRef(false)
   const [changeReview, setChangeReview] = useState<{ url: string; stage: 'validation' | 'deployment' } | null>(null)
   const [validationChanges, setValidationChanges] = useState<ValidationFileChange[]>([])
   const [validationChangesLoading, setValidationChangesLoading] = useState(false)
@@ -255,13 +256,24 @@ function App() {
       setCheckingConnections(false)
     }
   }
-  const applyDeployment = () => {
-    if (!run || packagePreparing) return
+  const applyDeployment = async () => {
+    if (!run || packagePreparing || deploymentStartPending.current) return
+    deploymentStartPending.current = true
+    setDeploymentStarting(true)
     setDeploymentConfirmationOpen(false)
-    void fetch(`/api/runs/${run.id}/deploy`, { method: 'POST' }).then(async (response) => {
-      if (!response.ok) throw new Error('Deployment could not start.')
-      return (await response.json()) as DispatchRun
-    }).then((nextRun) => { setRun(nextRun); setRunEvents([]); setNotice('') }).catch(() => setNotice('Deployment could not start. Complete a successful validation first.'))
+    try {
+      const response = await fetch(`/api/runs/${run.id}/deploy`, { method: 'POST' })
+      if (!response.ok) throw new Error(await responseError(response, 'Deployment could not start. Try again.'))
+      const nextRun = await response.json() as DispatchRun
+      setRun(nextRun)
+      setRunEvents([])
+      setNotice('')
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Deployment could not start. Try again.')
+    } finally {
+      deploymentStartPending.current = false
+      setDeploymentStarting(false)
+    }
   }
   const openDiagnostics = (runID: string) => {
     setDiagnosticRunID(runID); setDiagnostic(null)
@@ -654,7 +666,6 @@ function App() {
     })
   }
   const setStrategy = (strategy: DeploymentPlan['strategy']) => setPlan((current) => ({ ...current, strategy }))
-  const toggleDeploymentComponent = (provider: 'box' | 'salesforce', component: string, included: boolean) => setComponentSelections((current) => ({ ...current, [provider]: included ? [...new Set([...(current[provider] ?? []), component])] : (current[provider] ?? []).filter((item) => item !== component) }))
   const continueToReview = async () => {
     if (checkingConnections) return
     setCheckingConnections(true)
@@ -696,7 +707,7 @@ function App() {
   }
   const continueSavedDeployment = () => setWorkflowPhase(resumeWorkflowPhase(plan, connections, run))
 
-  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} refreshing={connectionsRefreshing} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} refreshing={connectionsRefreshing} checkingConnections={checkingConnections} componentSelections={componentSelections} onToggleProvider={toggleProvider} onToggleComponent={toggleDeploymentComponent} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage plan={plan} run={run} events={runEvents} notice={notice} onApply={() => setDeploymentConfirmationOpen(true)} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onViewChanges={openCompletedRunChanges} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
+  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} refreshing={connectionsRefreshing} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} refreshing={connectionsRefreshing} checkingConnections={checkingConnections} onToggleProvider={toggleProvider} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage starting={deploymentStarting} plan={plan} run={run} events={runEvents} notice={notice} onApply={() => { if (!deploymentStartPending.current) setDeploymentConfirmationOpen(true) }} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onViewChanges={openCompletedRunChanges} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
   const content = screen === 'overview'
     ? <OverviewPage plan={plan} connections={connections} connectionsRefreshing={connectionsRefreshing} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
     : screen === 'history'
