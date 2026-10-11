@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 import axe from 'axe-core'
 
-// Audit the application-owned surfaces here. Shared component findings remain
-// in the full-page review evidence until the upstream fixes are published.
-async function expectAccessible(page: Page, selectors: string[], rules: string[]) {
+// Scoped owned and shared regressions retain complete axe results. Full-page
+// review evidence covers the documented residuals outside these contexts.
+async function expectAccessible(page: Page, selectors: (string | string[])[], rules: string[]) {
   await page.addScriptTag({ content: axe.source })
   const audit = await page.evaluate(async ({ selectors, rules }) => {
     const result = await (window as Window & { axe: typeof axe }).axe.run(
@@ -34,6 +34,19 @@ async function expectAccessible(page: Page, selectors: string[], rules: string[]
     // An indeterminate contrast result must be assessed rather than passing.
     expect(audit.incomplete.filter(({ id }) => id === 'color-contrast')).toEqual([])
     expect(audit.contrastPasses.flatMap(({ nodes }) => nodes).length).toBeGreaterThan(0)
+  }
+}
+
+// Settle native theme transitions before assessing the rendered label colors.
+async function expectSharedAccessibilityInBothThemes(page: Page, selectors: (string | string[])[], rules = ['color-contrast', 'label-content-name-mismatch']) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme)
+    const upcomingStage = page.locator('box-path').locator('[part="stage"][data-state="upcoming"]').first()
+    if (await upcomingStage.count()) {
+      await expect(upcomingStage).toHaveCSS('background-color', colorScheme === 'light' ? 'rgb(244, 244, 244)' : 'rgb(29, 33, 31)')
+    }
+    await expectAccessible(page, selectors, rules)
   }
 }
 
@@ -217,6 +230,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('.connection-resource-row img[data-provider-logo]')).toHaveCount(2)
   expect(await page.locator('.connection-buttons box-button[aria-label^="Open "]').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('label')))).toEqual(['Open', 'Open'])
   expect(await page.locator('button button, button box-button, button box-switch').count()).toBe(0)
+  await expectSharedAccessibilityInBothThemes(page, ['box-resource-row', 'box-badge', ['box-path', '[part="stage-label"]']])
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
@@ -270,11 +284,14 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   const liveActivityState = await liveActivity.evaluate((element) => ({ focused: document.activeElement === element, tabIndex: (element as HTMLElement).tabIndex, events: (element as HTMLElement & { events: unknown[] }).events.length }))
   expect(liveActivityState).toMatchObject({ focused: true, tabIndex: 0 })
   expect(liveActivityState.events).toBeGreaterThan(0)
+  await expectSharedAccessibilityInBothThemes(page, ['box-badge', ['box-path', '[part="stage-label"]'], ['box-run-trace', '[part="summary"]'], 'box-timeline'])
 
   await page.getByRole('button', { name: 'Review changes' }).click()
   await expect(page.getByRole('heading', { name: 'Review validation changes' })).toBeVisible()
   await expect(page.getByText('2 files')).toBeVisible()
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
+  await expectSharedAccessibilityInBothThemes(page, ['box-table.validation-change-table'])
+  await expectSharedAccessibilityInBothThemes(page, ['box-diff-viewer'], ['label-content-name-mismatch'])
   expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({
     before: viewer.getAttribute('before-label'),
     after: viewer.getAttribute('after-label'),

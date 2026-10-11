@@ -8,7 +8,7 @@
 - **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.37.1
+  `@unofficialbox/box-open-elements-react` 0.37.2
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -95,8 +95,8 @@ and the adoption notes are refreshed. PR #41 was squash-merged as
 ### Current branch — independent Dispatch accessibility cleanup
 
 The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
-The branch adopts verified published core/React 0.37.1 from upstream commit
-`4ff52871a002bc30f5a4b2e9e7d511c43859cb5e`; both downloaded tarballs match
+The branch adopts verified published core/React 0.37.2 from upstream commit
+`cfa40dc70cc5829677c09d8cfb2b85cede2941ee`; both downloaded tarballs match
 the registry SHA-512 integrity and the React core peer range is compatible.
 It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
 
@@ -116,30 +116,48 @@ It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
 
 Fact-list styles remain unchanged: their earlier contrast findings disappeared once
 entrance animations settled. No BOE source, native control names or status color-mix
-internals are patched. Full-page automated accessibility remains affected by shared
-Badge/Path/Run Trace/Table/Timeline contrast and Resource Row/Diff Viewer names.
-Those reproductions have been handed to the separate upstream owner. Scoped passing
-checks do not imply the full app conforms to WCAG.
+internals are patched. Published 0.37.2 repairs the original bright Badge/status
+foregrounds and Resource Row/Diff Viewer native names. Scoped real-app checks cover
+those contracts in both themes, retaining evaluated contrast passes and incompletes.
+Path checks cover all stage labels after theme fills settle; Run Trace checks its
+status summary.
+Full-page evidence retains other content and all stages rather than treating these
+scoped checks as global conformance.
+
+An early light Path scan sampled the theme-transition fill #e9e9e9 at 4.13:1.
+Settled screenshot pixels verify #6f6f6f on #f4f4f4 at 4.57:1; the regression
+waits for the native fill before auditing all stage labels. This is not an open gap.
+Diff Viewer numeric gutters additionally produce contrast incompletes with
+shortTextContent, #979797 on white at 2.92:1, retained for assessment. Non-text hidden
+Path markers and Run Trace overlap incompletes are also retained by full-page scans;
+they are not waived through the strict owned-text helper.
 
 The independent cleanup passes 79 unit tests, all five updated mock E2E workflows,
-frontend lint/build, frozen installation, and the full Go gate. A further six-test
+frontend lint/build, frozen installation, and the full Go gate. A further seven-check
 instrumented run retains 41 full-page axe/screenshot states across desktop/mobile
-and both themes, with no page overflow. The original sidebar IDREF, brand name,
+and both themes, with no page overflow. Eight additional real-workflow light/dark
+checkpoints retain full-page results and screenshots. In the 41 matched states,
+original contrast-node reports drop from 151 to six native-Drawer scrim reports,
+and name-mismatch violations drop from 16 to zero. Contrast and name incompletes
+remain assessment evidence (453 and four node occurrences respectively; duplicated
+states included). The original sidebar IDREF, brand name,
 history ARIA, mobile scroll-focus and affected body-copy findings are cleared on
-the audited normal surfaces. The full-page audit still reports shared contrast/name
-failures. A light
+the audited normal surfaces. Full-page results retain the specific residuals above;
+original status/name findings are reassessed against the installed release. A light
 native Drawer scan additionally computes scrim gray behind transparent slotted
-headers/copy even though the screenshot renders them on the white inner panel;
-that evidence is retained for review, without recoloring the visible surface or
-claiming formal conformance.
+headers/copy and a tile legend even though screenshots render them on the white
+inner panel;
+the outer dialog is rgba(0,0,0,.75), while the inner panel and screenshot
+background are white. Actual #222 headings and #6f6f6f copy measure 15.91:1 and
+5.02:1 on that panel. This specific scrim-resolution limitation does not waive
+other findings or claim formal conformance.
 
 The published 0.37.1 table fix is adopted in lockstep. The real Dispatch workflow
 checks four successive Enter/Space sorts with focus set only once, in light/dark
 at 1440px/390px, then opens historical details and returns to History. Static
 tables omit selection ARIA; the controlled file selector has grid semantics and
-one selected row. Embedded assets are regenerated. Shared contrast/name repairs
-remain a separate upstream batch; this table release does not close those findings.
-This cleanup requires
+one selected row. Embedded assets are regenerated. The 0.37.2 status/name adoption
+is verified separately from the remaining contrast findings. This cleanup requires
 its own review; PR #41 approval does not authorize another merge or deployment.
 
 ## Box Open Elements boundary
@@ -149,7 +167,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.37.1 contracts. Keep the
+All planned migration phases are complete within published 0.37.2 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -274,9 +292,9 @@ Any path printed by `gofmt -l .` is a failure.
 
 - **Current Status:** Independent Dispatch accessibility repairs are implemented on
   `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
-  are aligned on verified published 0.37.1; shared contrast/name fixes stay with
-  the BOE owner.
+  are aligned on verified published 0.37.2; numeric gutter contrast
+  incompletes remain evidence for assessment.
 - **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
-  track the separate upstream contrast/name batch.
-- **Blockers:** Shared contrast/naming findings need upstream contracts. Existing
+  track the precise remaining upstream contrast findings.
+- **Blockers:** Numeric gutter contrast and other axe incompletes require assessment. Existing
   bundle warning remains. Merge/deploy require separate approval.

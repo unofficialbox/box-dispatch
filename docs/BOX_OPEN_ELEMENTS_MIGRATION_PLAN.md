@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.37.1`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.37.2`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -53,6 +53,12 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   historical-detail navigation in both themes at desktop/mobile widths, static
   table selection-ARIA omission and controlled file-selector grid semantics.
   Shared status contrast and native-name findings remain upstream.
+- **0.37.2 accessibility follow-up:** verified published core/React artifacts
+  repair the original status foregrounds and Resource Row/Diff Viewer names.
+  Real-app light/dark scoped checks cover these contracts without loosening the
+  owned-text contrast gate. All Path stage labels are audited after theme fills
+  settle. Full-page evidence retains numeric Diff Viewer gutter and other
+  incompletes; no global-clean claim.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
@@ -325,7 +331,9 @@ names and adaptive status foregrounds remain upstream. Fact-list styles that pas
 after entrance animations settle are preserved. The existing E2E suite adds scoped
 axe checks and real keyboard scrolling; full-page audits continue to report shared
 findings. The verified published 0.37.1 table release is adopted and the combined
-application is retested; shared contrast/name work remains a separate dependency.
+application is retested. Published 0.37.2 also repairs the original shared
+status/name contracts; numeric Diff Viewer gutter and other incompletes remain
+explicit assessment evidence.
 
 ## Delivery order and pull-request boundaries
 
