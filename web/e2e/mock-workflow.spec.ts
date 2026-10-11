@@ -50,6 +50,35 @@ async function expectSharedAccessibilityInBothThemes(page: Page, selectors: (str
   }
 }
 
+async function expectDiffGutterContrast(page: Page) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme)
+    const measurements = await page.locator('box-diff-viewer').evaluate((viewer) => {
+      const rgb = (color: string) => {
+        const match = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/)
+        if (!match) throw new Error(`Expected opaque RGB gutter color: ${color}`)
+        return match.slice(1).map(Number)
+      }
+      const luminance = (color: number[]) => color.map((value) => {
+        const channel = value / 255
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0)
+      const background = getComputedStyle(viewer.shadowRoot!.querySelector('[part="panel"]')!).backgroundColor
+      return [...viewer.shadowRoot!.querySelectorAll<HTMLElement>('[part="line-number"]')].filter((cell) => cell.textContent?.trim()).map((cell) => {
+        const style = getComputedStyle(cell)
+        // Numeric-only content can be inapplicable to axe's text heuristic.
+        // Measure the visible native text instead of accepting an empty audit.
+        const values = [luminance(rgb(style.color)), luminance(rgb(background))].sort((a, b) => a - b)
+        return { text: cell.textContent, color: style.color, background, opacity: style.opacity, visible: cell.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }), ratio: (values[1] + 0.05) / (values[0] + 0.05) }
+      })
+    })
+    await test.info().attach(`diff-gutter-${colorScheme}`, { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' })
+    expect(measurements.length).toBeGreaterThan(0)
+    expect(measurements.every(({ visible, opacity, ratio }) => visible && opacity === '1' && ratio >= 4.5)).toBe(true)
+  }
+}
+
 test('follows the system color preference across primary pages', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.goto('/')
@@ -234,6 +263,15 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
+  const requiredSwitch = page.locator('box-switch[description="Required"]').getByRole('switch')
+  const optionalSwitch = page.locator('box-switch[description="Optional"]').getByRole('switch')
+  await expect(requiredSwitch).toHaveAccessibleName('Included')
+  await expect(requiredSwitch).toHaveAccessibleDescription('Required')
+  await expect(requiredSwitch).toBeDisabled()
+  await expect(requiredSwitch).toHaveAttribute('aria-checked', 'true')
+  await expect(optionalSwitch).toHaveAccessibleName('Included')
+  await expect(optionalSwitch).toHaveAccessibleDescription('Optional')
+  await expect(optionalSwitch).toBeEnabled()
   await expect(page.locator('.component-scope p').first()).toHaveCSS('color', 'rgb(188, 188, 188)')
   await expectAccessible(page, ['.component-scope p'], ['color-contrast'])
   const providerControls = await page.locator('.configuration-resource-row box-switch').evaluateAll((switches) => switches.map((control) => {
@@ -292,6 +330,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
   await expectSharedAccessibilityInBothThemes(page, ['box-table.validation-change-table'])
   await expectSharedAccessibilityInBothThemes(page, ['box-diff-viewer'], ['label-content-name-mismatch'])
+  await expectDiffGutterContrast(page)
   expect(await page.locator('box-diff-viewer').evaluate((viewer) => ({
     before: viewer.getAttribute('before-label'),
     after: viewer.getAttribute('after-label'),
@@ -426,6 +465,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 })
       const table = page.getByRole('table', { name: 'All deployments' })
+      await expect(table.getByRole('link', { name: 'Northstar CLM rollout' })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
       const header = table.getByRole('columnheader', { name: /Deployment/ }).first()
       const sortButton = header.getByRole('button')
       await sortButton.focus()

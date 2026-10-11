@@ -30,7 +30,7 @@ The classifications match the
 ## Verification baseline
 
 The current Dispatch web package uses verified published core and React adapter
-versions 0.37.2.
+versions 0.38.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -113,7 +113,7 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.37.2 adoption
+## Remaining enhancements after the 0.38.0 adoption
 
 The `box-table` keyboard sort-focus gap is resolved in verified published 0.37.1.
 Real Dispatch tests retain focus through four consecutive Enter/Space sorts without
@@ -122,12 +122,15 @@ details. Static-table and selectable-grid semantics are also verified. Published
 0.37.2 repairs the original Badge/status foregrounds and Resource Row/Diff Viewer
 native names; scoped real Dispatch light/dark checks cover those contracts.
 All Path stage labels pass after theme transitions settle; transient fills are
-not treated as a component gap. Remaining contrast incompletes below are retained
-separately from those resolved gaps.
+not treated as a component gap. Version 0.38.0 additionally resolves numeric
+gutter text contrast and Switch description association. Real Dispatch tests cover
+light/dark gutter cells, native Required/Optional descriptions, checked/disabled
+state, compact mobile tables and repeated sorts without refocus. Native Drawer
+scrim qualifications and pre-existing Switch invalid-error stress contrast remain
+explicit baseline evidence; no global conformance claim is made.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
-| P2 | Patterns | Diff Viewer numeric gutter contrast | Rendered 13.12px line-number text is visible, with no aria-hidden and opacity 1. Computed alpha and screenshot pixels confirm #979797 on white at 2.92:1; axe marks shortTextContent incomplete. | Confirmed upstream contrast failure; use an adaptive gutter foreground. Native Previous name is resolved in 0.37.2. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 

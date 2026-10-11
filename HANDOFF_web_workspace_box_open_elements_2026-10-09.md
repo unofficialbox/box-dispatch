@@ -8,7 +8,7 @@
 - **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.37.2
+  `@unofficialbox/box-open-elements-react` 0.38.0
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -95,8 +95,8 @@ and the adoption notes are refreshed. PR #41 was squash-merged as
 ### Current branch — independent Dispatch accessibility cleanup
 
 The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
-The branch adopts verified published core/React 0.37.2 from upstream commit
-`cfa40dc70cc5829677c09d8cfb2b85cede2941ee`; both downloaded tarballs match
+The branch adopts verified published core/React 0.38.0 from upstream commit
+`4e7da132911563e1cb3f80720134cb16b8aa1755`; both downloaded tarballs match
 the registry SHA-512 integrity and the React core peer range is compatible.
 It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
 
@@ -127,33 +127,39 @@ scoped checks as global conformance.
 An early light Path scan sampled the theme-transition fill #e9e9e9 at 4.13:1.
 Settled screenshot pixels verify #6f6f6f on #f4f4f4 at 4.57:1; the regression
 waits for the native fill before auditing all stage labels. This is not an open gap.
-Diff Viewer numeric gutters produce shortTextContent incompletes, but bounded
-rendered assessment confirms a real upstream text contrast failure: visible
-13.12px line-number cells have no aria-hidden, opacity 1 and #979797 on white at
-2.92:1. Computed secondary-text alpha is 72%; screenshot pixels independently
-confirm the same foreground/background. No local fix or rule suppression is added. Non-text hidden
+Published 0.38.0 resolves the confirmed numeric-gutter contrast failure with
+opaque secondary text. The real diff drawer now checks its native line-number cells
+in both themes, independently of the pre-existing changed-code overlap incompletes.
+It also resolves Switch public-description association: native AX descriptions are
+Required/Optional, while Included/Not included names, checked state, required disabled
+state and optional focusability are preserved before/after toggling. The earlier
+2.92:1 gutter measurement and absent Switch descriptions remain historical evidence,
+not current open gaps. No local override or rule suppression is introduced.
+Non-text hidden
 Path markers and Run Trace overlap incompletes are also retained by full-page scans;
 they are not waived through the strict owned-text helper.
 
-The independent cleanup passes 79 unit tests, all five updated mock E2E workflows,
-frontend lint/build, frozen installation, and the full Go gate. A further seven-check
-instrumented run retains 41 full-page axe/screenshot states across desktop/mobile
-and both themes, with no page overflow. Eight additional real-workflow light/dark
-checkpoints retain full-page results and screenshots. In the 41 matched states,
-original contrast-node reports drop from 151 to six native-Drawer scrim reports,
-and name-mismatch violations drop from 16 to zero. Contrast and name incompletes
-remain assessment evidence (453 and four node occurrences respectively; duplicated
-states included). The original sidebar IDREF, brand name,
-history ARIA, mobile scroll-focus and affected body-copy findings are cleared on
-the audited normal surfaces. Full-page results retain the specific residuals above;
-original status/name findings are reassessed against the installed release. A light
-native Drawer scan additionally computes scrim gray behind transparent slotted
-headers/copy and a tile legend even though screenshots render them on the white
-inner panel;
-the outer dialog is rgba(0,0,0,.75), while the inner panel and screenshot
-background are white. Actual #222 headings and #6f6f6f copy measure 15.91:1 and
-5.02:1 on that panel. This specific scrim-resolution limitation does not waive
-other findings or claim formal conformance.
+The final cleanup/adoption passes 79 unit tests, all five updated mock E2E
+workflows, frontend lint/build, frozen installation, and the full Go gate. Final
+attachments retain 18 scoped audits with zero violations/incompletes and nine
+resolved contrast contexts, plus explicit numeric-gutter measurements. Gutter
+computed colors and screenshot pixels measure 5.02:1 light and 9.68:1 dark.
+Two focused read-only probes retain native Switch AX before/after toggling and
+rendered gutter screenshots. The isolated six-check full-page replay retains 41
+matched states with no page overflow. It reports six qualified native-Drawer scrim
+contrast nodes, zero name-mismatch violations, 453 contrast and four name-rule
+incomplete node occurrences (repeated states included). The four name incompletes
+are Switch valueText heuristics; native AX now independently confirms the correct
+primary names, Required/Optional descriptions and checked/disabled states.
+
+The original sidebar IDREF, brand name, history ARIA, mobile scroll focus and owned
+body-copy findings are cleared on audited normal surfaces. The Drawer scan derives
+scrim gray for headings/copy and a tile legend despite the painted white inner
+panel. Outer dialog is rgba(0,0,0,.75); panel and screenshot background are white.
+Actual #222 headings and #6f6f6f copy measure 15.91:1 and 5.02:1. That specific
+background-resolution qualification does not waive unrelated findings or claim
+formal conformance. Other gradient/image, hidden-glyph and overlap incompletes
+retain the bounded computed/pixel classifications from the earlier assessment.
 
 The published 0.37.1 table fix is adopted in lockstep. The real Dispatch workflow
 checks four successive Enter/Space sorts with focus set only once, in light/dark
@@ -170,7 +176,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.37.2 contracts. Keep the
+All planned migration phases are complete within published 0.38.0 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -295,13 +301,13 @@ Any path printed by `gofmt -l .` is a failure.
 
 - **Current Status:** Independent Dispatch accessibility repairs are implemented on
   `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
-  are aligned on verified published 0.37.2; numeric gutter text contrast
-  is a confirmed upstream failure.
+  are aligned on verified published 0.38.0; gutter contrast and Switch
+  description association are verified resolved.
 - **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
-  track the precise remaining upstream contrast findings.
-- **Blockers:** BOE Diff Viewer numeric gutter contrast remains upstream. Switch
-  valueText incompletes need semantic assessment: Included matches the primary
-  visible label; Required/Optional descriptions are not explicitly linked. Sampled
-  sidebar/select/visible-overlap contrast passes; hidden Path glyphs and modal-covered
-  background nodes are separately qualified. These classifications do not imply
-  global conformance. Bundle warning remains. Merge/deploy require approval.
+  confirm exact-head merge approval; deployment remains separately gated.
+- **Remaining qualifications:** Native Drawer scrim reports retain the verified
+  white-panel interpretation. Sidebar/select/visible-overlap samples pass; hidden
+  Path glyphs and modal-covered content are separately classified. Pre-existing
+  Switch invalid-error stress contrast remains upstream baseline evidence, outside
+  this normal-workflow adoption; it is not a new regression or a global-clean claim.
+  Bundle warning remains. Merge/deploy require approval.

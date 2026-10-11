@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.37.2`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.38.0`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -59,6 +59,12 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   owned-text contrast gate. All Path stage labels are audited after theme fills
   settle. Full-page evidence retains numeric Diff Viewer gutter and other
   incompletes; no global-clean claim.
+- **0.38.0 final follow-up:** verified published core/React artifacts resolve
+  numeric Diff Viewer gutter contrast and Switch native-description association.
+  Real-app checks cover both themes, native names/descriptions/states, compact
+  mobile tables and repeated keyboard sorting. Qualified Drawer/overlap findings
+  and pre-existing Switch invalid-error stress contrast remain baseline evidence;
+  this does not claim global conformance.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
@@ -332,8 +338,9 @@ after entrance animations settle are preserved. The existing E2E suite adds scop
 axe checks and real keyboard scrolling; full-page audits continue to report shared
 findings. The verified published 0.37.1 table release is adopted and the combined
 application is retested. Published 0.37.2 also repairs the original shared
-status/name contracts; numeric Diff Viewer gutter and other incompletes remain
-explicit assessment evidence.
+status/name contracts. Published 0.38.0 additionally resolves the measured numeric
+gutter and Switch-description gaps. Other incompletes and qualified baseline
+findings remain explicit assessment evidence.
 
 ## Delivery order and pull-request boundaries
 
