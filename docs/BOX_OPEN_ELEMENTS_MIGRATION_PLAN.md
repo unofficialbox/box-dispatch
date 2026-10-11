@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.37.0`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.37.1`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -48,6 +48,11 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   and Go checks pass. Chromium comparisons cover desktop/mobile, both themes, modal
   focus, icon actions, table selection/sorting, and repeated mock workflows.
   Automated accessibility retains existing findings; see the current handoff.
+- **0.37.1 table follow-up:** verified published core/React artifacts are aligned.
+  Real Dispatch regressions cover repeated keyboard sorting without refocus,
+  historical-detail navigation in both themes at desktop/mobile widths, static
+  table selection-ARIA omission and controlled file-selector grid semantics.
+  Shared status contrast and native-name findings remain upstream.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
@@ -319,8 +324,8 @@ light-color usage through normal DOM and theme tokens. Shared component native
 names and adaptive status foregrounds remain upstream. Fact-list styles that pass
 after entrance animations settle are preserved. The existing E2E suite adds scoped
 axe checks and real keyboard scrolling; full-page audits continue to report shared
-findings. Adopt the reviewed upstream table release only after publication and
-retest the combined application before closing those dependencies.
+findings. The verified published 0.37.1 table release is adopted and the combined
+application is retested; shared contrast/name work remains a separate dependency.
 
 ## Delivery order and pull-request boundaries
 

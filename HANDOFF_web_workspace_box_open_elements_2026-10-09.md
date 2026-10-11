@@ -8,7 +8,7 @@
 - **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.37.0
+  `@unofficialbox/box-open-elements-react` 0.37.1
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -95,7 +95,9 @@ and the adoption notes are refreshed. PR #41 was squash-merged as
 ### Current branch — independent Dispatch accessibility cleanup
 
 The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
-The branch keeps core/React on published 0.37.0 while BOE's table fixes are reviewed.
+The branch adopts verified published core/React 0.37.1 from upstream commit
+`4ff52871a002bc30f5a4b2e9e7d511c43859cb5e`; both downloaded tarballs match
+the registry SHA-512 integrity and the React core peer range is compatible.
 It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
 
 - the brand name includes its visible B/ glyph, Dispatch and Solution delivery copy,
@@ -131,10 +133,13 @@ headers/copy even though the screenshot renders them on the white inner panel;
 that evidence is retained for review, without recoloring the visible surface or
 claiming formal conformance.
 
-The upstream table change is PR #512, with planned 0.37.1 release metadata in #513.
-Do not pin an unpublished version. Final combined verification must adopt a reviewed,
-verified publication in lockstep and exercise repeated keyboard sorting without
-explicit refocus, along with the corrected table semantics. This cleanup requires
+The published 0.37.1 table fix is adopted in lockstep. The real Dispatch workflow
+checks four successive Enter/Space sorts with focus set only once, in light/dark
+at 1440px/390px, then opens historical details and returns to History. Static
+tables omit selection ARIA; the controlled file selector has grid semantics and
+one selected row. Embedded assets are regenerated. Shared contrast/name repairs
+remain a separate upstream batch; this table release does not close those findings.
+This cleanup requires
 its own review; PR #41 approval does not authorize another merge or deployment.
 
 ## Box Open Elements boundary
@@ -144,7 +149,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.37.0 contracts. Keep the
+All planned migration phases are complete within published 0.37.1 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -269,8 +274,9 @@ Any path printed by `gofmt -l .` is a failure.
 
 - **Current Status:** Independent Dispatch accessibility repairs are implemented on
   `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
-  remain published 0.37.0; shared component fixes stay with the BOE owner.
-- **Recommended Next Step:** Review the cleanup draft and retest the combined app
-  after the reviewed upstream fixes are published.
-- **Blockers:** Shared contrast/naming findings and table focus/semantics need upstream
-  contracts. Existing bundle warning remains. Merge/deploy require separate approval.
+  are aligned on verified published 0.37.1; shared contrast/name fixes stay with
+  the BOE owner.
+- **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
+  track the separate upstream contrast/name batch.
+- **Blockers:** Shared contrast/naming findings need upstream contracts. Existing
+  bundle warning remains. Merge/deploy require separate approval.

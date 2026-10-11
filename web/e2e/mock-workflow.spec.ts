@@ -283,6 +283,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     hasPackaged: viewer.getAttribute('after-text')?.includes('true'),
   }))).toEqual({ before: 'Current org', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="1"]').click()
+  await expect(page.locator('box-table.validation-change-table').getByRole('grid')).toBeVisible()
+  await expect(page.locator('box-table.validation-change-table').getByRole('row', { selected: true })).toHaveCount(1)
   await expect(page.locator('box-diff-viewer[heading="objects/Contract__c/fields/Amount__c.field-meta.xml"]')).toBeVisible()
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="0"]').click()
   await expect(page.locator('box-diff-viewer[heading="settings/Communities.settings-meta.xml"]')).toBeVisible()
@@ -402,6 +404,31 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByLabel('System', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Result', { exact: true })).toBeVisible()
   await expect(page.getByLabel('Strategy', { exact: true })).toBeVisible()
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      const table = page.getByRole('table', { name: 'All deployments' })
+      const header = table.getByRole('columnheader', { name: /Deployment/ }).first()
+      const sortButton = header.getByRole('button')
+      await sortButton.focus()
+      // Controlled React row/sort updates must preserve keyboard focus. Focus
+      // once only: subsequent activations use the surviving native button.
+      for (let activation = 0; activation < 4; activation++) {
+        const next = await header.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending'
+        await page.keyboard.press(activation % 2 === 0 ? 'Enter' : 'Space')
+        await expect(header).toHaveAttribute('aria-sort', next)
+        await expect(sortButton).toBeFocused()
+      }
+      await expect(table.locator('[aria-selected]')).toHaveCount(0)
+      await expectAccessible(page, ['box-table.deployment-history-table'], ['aria-allowed-attr', 'aria-required-children', 'aria-required-parent', 'aria-valid-attr-value'])
+      await test.info().attach(`history-sort-${colorScheme}-${width}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+      await table.getByRole('link', { name: 'Northstar CLM rollout' }).click()
+      await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
+      await expect(page.getByRole('table', { name: 'Components deployed by this deployment' })).toBeVisible()
+      await page.getByRole('link', { name: 'Back to deployment history' }).click()
+    }
+  }
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('link', { name: 'Northstar CLM rollout' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
