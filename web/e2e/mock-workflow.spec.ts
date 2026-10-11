@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import axe from 'axe-core'
 
-// Scoped owned and shared regressions retain complete axe results. Full-page
-// review evidence covers the documented residuals outside these contexts.
+// Scoped audits retain all violations and incompletes, plus color-contrast passes.
+// Full-page review evidence covers residuals outside these contexts.
 async function expectAccessible(page: Page, selectors: (string | string[])[], rules: string[]) {
   await page.addScriptTag({ content: axe.source })
   const audit = await page.evaluate(async ({ selectors, rules }) => {

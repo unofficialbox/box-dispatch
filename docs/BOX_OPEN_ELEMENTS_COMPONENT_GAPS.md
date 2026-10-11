@@ -127,7 +127,7 @@ separately from those resolved gaps.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
-| P2 | Patterns | Diff Viewer numeric gutter contrast | Axe reports shortTextContent incompletes for #979797 line numbers on white, measuring 2.92:1. | Retain for rendered contrast assessment; native Previous name is resolved in 0.37.2. |
+| P2 | Patterns | Diff Viewer numeric gutter contrast | Rendered 13.12px line-number text is visible, with no aria-hidden and opacity 1. Computed alpha and screenshot pixels confirm #979797 on white at 2.92:1; axe marks shortTextContent incomplete. | Confirmed upstream contrast failure; use an adaptive gutter foreground. Native Previous name is resolved in 0.37.2. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 

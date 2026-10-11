@@ -127,8 +127,11 @@ scoped checks as global conformance.
 An early light Path scan sampled the theme-transition fill #e9e9e9 at 4.13:1.
 Settled screenshot pixels verify #6f6f6f on #f4f4f4 at 4.57:1; the regression
 waits for the native fill before auditing all stage labels. This is not an open gap.
-Diff Viewer numeric gutters additionally produce contrast incompletes with
-shortTextContent, #979797 on white at 2.92:1, retained for assessment. Non-text hidden
+Diff Viewer numeric gutters produce shortTextContent incompletes, but bounded
+rendered assessment confirms a real upstream text contrast failure: visible
+13.12px line-number cells have no aria-hidden, opacity 1 and #979797 on white at
+2.92:1. Computed secondary-text alpha is 72%; screenshot pixels independently
+confirm the same foreground/background. No local fix or rule suppression is added. Non-text hidden
 Path markers and Run Trace overlap incompletes are also retained by full-page scans;
 they are not waived through the strict owned-text helper.
 
@@ -292,9 +295,13 @@ Any path printed by `gofmt -l .` is a failure.
 
 - **Current Status:** Independent Dispatch accessibility repairs are implemented on
   `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
-  are aligned on verified published 0.37.2; numeric gutter contrast
-  incompletes remain evidence for assessment.
+  are aligned on verified published 0.37.2; numeric gutter text contrast
+  is a confirmed upstream failure.
 - **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
   track the precise remaining upstream contrast findings.
-- **Blockers:** Numeric gutter contrast and other axe incompletes require assessment. Existing
-  bundle warning remains. Merge/deploy require separate approval.
+- **Blockers:** BOE Diff Viewer numeric gutter contrast remains upstream. Switch
+  valueText incompletes need semantic assessment: Included matches the primary
+  visible label; Required/Optional descriptions are not explicitly linked. Sampled
+  sidebar/select/visible-overlap contrast passes; hidden Path glyphs and modal-covered
+  background nodes are separately qualified. These classifications do not imply
+  global conformance. Bundle warning remains. Merge/deploy require approval.
