@@ -37,6 +37,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
       try {
         await expect(page.getByRole('button', { name: 'Starting deployment…' })).toBeDisabled()
         await expect(page.getByRole('dialog')).toHaveCount(0)
+        await page.getByRole('link', { name: 'Settings', exact: true }).click()
+        await page.locator('box-nav-sidebar').getByRole('link', { name: 'Deployments', exact: true }).click()
+        await expect(page.getByText('Deployment is starting. Wait for its status before starting another deployment.', { exact: true })).toBeVisible()
+        await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
+        await expect(page.getByRole('heading', { name: 'Validation', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Prepare package', exact: true })).toHaveCount(0)
+        expect((await (await request.get('/api/plan')).json()).name).toBe(name)
         await expect.poll(() => responseBody?.id).toBeTruthy()
         const replay = await request.post(deploymentURL)
         expect(replay.status()).toBe(202)
@@ -50,6 +57,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const runs = await (await request.get('/api/runs')).json() as { deployment: string; action: string }[]
       expect(runs.filter((run) => run.deployment === name && run.action === 'deploy')).toHaveLength(1)
       await page.screenshot({ path: testInfo.outputPath('completed.png'), fullPage: true })
+      await page.locator('box-nav-sidebar').getByRole('link', { name: 'Deployments', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
+      const nextName = `${name} next`
+      await page.getByRole('textbox', { name: 'Name this deployment' }).fill(nextName)
+      await page.getByRole('button', { name: 'Prepare package', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Confirm connections' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: nextName, exact: true })).toBeVisible()
+      await expect(page.locator('box-path')).toHaveAttribute('current', 'Connect')
+      expect((await (await request.get('/api/plan')).json()).name).toBe(nextName)
     })
   }
 }

@@ -29,4 +29,6 @@ Focused backend tests send 32 concurrent requests, replay failure, restore persi
 
 No live provider calls, credential or authorization-grant changes, deployment, or merge are part of this work. Acceptance uses Chromium, keyboard checks, and automated accessibility. The existing large-bundle build warning remains.
 
+Review follow-up: while a deployment-start response is pending, New deployment returns to the current workflow with visible guidance and preserves its plan/run. It cannot prepare a replacement package that a late response could overwrite. Once the response resolves, a new package can be prepared normally. The real mock-backend tests cover Settings navigation, attempted New deployment, one accepted server run, and the next workflow in all four theme/viewport combinations.
+
 P1 gate: empty `gofmt -l .`; Go build/vet/tests and webapi race tests pass. Frontend lint, 80 unit tests, production build, and all 9 isolated Chromium E2E scenarios pass. Rendered pending/completed screenshots are retained under `/workspace/box-dispatch-cloud-evidence/ux-remediation/p1`. No theme files changed.

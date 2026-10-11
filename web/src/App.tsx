@@ -603,7 +603,7 @@ function App() {
     const timer = window.setTimeout(() => { void poll() }, 250)
     return () => { stopped = true; window.clearTimeout(timer) }
   }, [scratchJobID, scratchJobStatus])
-  const beginNewDeployment = () => { navigateTo('workflow'); setRun(null); setRunEvents([]); setDeploymentName(''); setSelectedTemplateID(deploymentDefaults.templateId); setSelectedComponents(deploymentDefaults.components); setActivePhase('Choose'); setNotice('Name the deployment, then confirm the solution and systems.') }
+  const beginNewDeployment = () => { if (deploymentStartPending.current) { navigateTo('workflow'); setNotice('Deployment is starting. Wait for its status before starting another deployment.'); return } navigateTo('workflow'); setRun(null); setRunEvents([]); setDeploymentName(''); setSelectedTemplateID(deploymentDefaults.templateId); setSelectedComponents(deploymentDefaults.components); setActivePhase('Choose'); setNotice('Name the deployment, then confirm the solution and systems.') }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
   const assemblePackage = () => {
     if (!deploymentName.trim()) { setNotice('Enter a deployment name to continue.'); return }
