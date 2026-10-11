@@ -110,16 +110,30 @@ func persistRotatedBoxRefresh(original AuthConfig, refreshToken string) {
 	})
 }
 
-// InvalidateSelectedOAuthConnection clears only the verified snapshot after
-// Box rejects a stored refresh token. The connection remains available in the
-// browser so the user can reconnect it instead of recreating its alias.
-func InvalidateSelectedOAuthConnection() {
+// InvalidateOAuthConnection clears readiness only for the connection whose
+// captured refresh failed. A later selection or successful rotation is retained.
+func (original AuthConfig) InvalidateOAuthConnection() {
+	if original.connectionID == "" {
+		return
+	}
 	_, _ = shellstate.UpdateConnectionSettings(func(settings config.ConnectionSettings) (config.ConnectionSettings, error) {
-		app, ok := settings.SelectedBoxConnection()
-		if !ok || strings.TrimSpace(app.RefreshToken) == "" {
+		settings = settings.HydrateBoxConnections()
+		for index, app := range settings.BoxConnections {
+			if app.ID != original.connectionID {
+				continue
+			}
+			clientID, _ := BoxOAuthApp()
+			if firstNonEmpty(app.ClientID, clientID) != original.ClientID || app.RefreshToken != original.RefreshToken {
+				return settings, nil
+			}
+			app.VerifiedAt = ""
+			settings.BoxConnections[index] = app
+			if settings.BoxSelectedConnectionID == app.ID {
+				delete(settings.VerifiedConnections, "box")
+			}
 			return settings, nil
 		}
-		return settings.MarkSelectedBoxUnverified(), nil
+		return settings, nil
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/unofficialbox/box-dispatch/internal/bcl"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 )
 
@@ -66,6 +67,17 @@ func fingerprintValidationContext(plan config.SolutionPlan, settings config.Conn
 		strings.EqualFold(strings.TrimSpace(os.Getenv("BOX_ALLOW_ROOT_FOLDER")), "true"),
 	})
 	hash.Write(targetEnvironment)
+	// Read the reference without solution.Load's deployment-config creation.
+	reference := ".dispatch/deployment.bcl"
+	if document, err := bcl.LoadBCL(filepath.Join(root, "dispatch.bcl")); err == nil {
+		data, _ := json.Marshal(document.Metadata["manifest"])
+		var manifest struct {
+			DeploymentConfig string `json:"deployment_config"`
+		}
+		if json.Unmarshal(data, &manifest) == nil && manifest.DeploymentConfig != "" {
+			reference = filepath.ToSlash(filepath.Clean(manifest.DeploymentConfig))
+		}
+	}
 	var bytesRead int64
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -76,13 +88,13 @@ func fingerprintValidationContext(plan config.SolutionPlan, settings config.Conn
 			return err
 		}
 		name := filepath.ToSlash(relative)
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "node_modules" || name == "dispatch/audit") {
+		containsReference := name == reference || strings.HasPrefix(reference, name+"/")
+		if entry.IsDir() && !containsReference && (entry.Name() == ".git" || entry.Name() == "node_modules" || name == "dispatch/audit") {
 			return filepath.SkipDir
 		}
-		if strings.HasPrefix(name, ".dispatch/") && name != ".dispatch/package.json" {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
+		// Only known operator state is excluded. Deployment settings, including
+		// custom manifest references inside .dispatch, remain meaningful inputs.
+		if name != reference && (name == ".dispatch/connection-settings.bcl" || name == ".dispatch/solution-plan.bcl" || name == ".dispatch/deployment-defaults.bcl") {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {

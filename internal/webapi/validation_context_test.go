@@ -20,6 +20,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 type guardedFixture struct {
@@ -827,5 +828,63 @@ func TestGuardedConnectionSavePreservesEnvironmentBootstrap(t *testing.T) {
 	}
 	if saved.SalesforceOrgID != "bootstrap-org" || saved.SalesforceClientID != "fixture-bootstrap-client" || saved.SalesforceAccessToken != "fixture-bootstrap-access" {
 		t.Fatal("bootstrap state was not safely promoted")
+	}
+}
+
+func TestRealDeploymentBCLDriftRejectsBeforeExecutor(t *testing.T) {
+	for _, mutation := range []string{"run-id", "selection", "deletion", "custom-reference", "operator-named-reference"} {
+		t.Run(mutation, func(t *testing.T) {
+			var calls atomic.Int32
+			f := newGuardedFixture(t, nil, func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+				calls.Add(1)
+				return nil, nil
+			})
+			if err := solution.WriteBundled(f.plan.PackagePath, "clm"); err != nil {
+				t.Fatal(err)
+			}
+			manifest, err := solution.Load(f.plan.PackagePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reference := manifest.DeploymentConfig
+			if mutation == "custom-reference" || mutation == "operator-named-reference" {
+				reference = ".dispatch/custom/deployment.bcl"
+				if mutation == "operator-named-reference" {
+					reference = ".dispatch/solution-plan.bcl"
+				}
+				manifest.DeploymentConfig = reference
+				if err := solution.WriteManifest(f.plan.PackagePath, manifest); err != nil {
+					t.Fatal(err)
+				}
+			}
+			settings := solution.DefaultDeploymentSettings()
+			settings.Box.GlobalStrategy = solution.StrategyCreateNew
+			settings.Box.RunID = "validated-run"
+			if err := solution.WriteDeploymentSettings(f.plan.PackagePath, reference, settings); err != nil {
+				t.Fatal(err)
+			}
+			id := f.validate(t)
+			switch mutation {
+			case "selection":
+				settings.Box.Components = solution.ComponentSelection{Mode: "custom", Selections: map[string]bool{"folder_structure": false}}
+			case "deletion":
+				if err := os.Remove(filepath.Join(f.plan.PackagePath, reference)); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				settings.Box.RunID = "changed-run"
+			}
+			if mutation != "deletion" {
+				if err := solution.WriteDeploymentSettings(f.plan.PackagePath, reference, settings); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.manager.startDeployment(id); !errors.Is(err, errStaleValidation) {
+				t.Fatalf("changed %s accepted: %v", reference, err)
+			}
+			if calls.Load() != 0 {
+				t.Fatal("deployment BCL drift invoked executor")
+			}
+		})
 	}
 }

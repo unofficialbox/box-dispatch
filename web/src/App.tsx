@@ -382,15 +382,15 @@ function App() {
         const failure = await response.json().catch(() => null) as { error?: string; code?: string } | null
         if (failure?.code === 'stale_validation') {
           validationReviewRequired.current = true
-          setRun(null)
-          setRunEvents([])
-          setActivePhase('Review')
           try {
             const currentPlan = await fetchJSON<DeploymentPlan>('/api/plan', new AbortController().signal)
             setPlan(currentPlan)
           } catch {
             setDataErrors((current) => ({ ...current, plan: 'Current deployment plan could not be loaded.' }))
           }
+          setRun(null)
+          setRunEvents([])
+          setActivePhase('Review')
         }
         throw new Error(failure?.error?.trim() || 'Deployment could not start. Try again.')
       }

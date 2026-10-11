@@ -32,40 +32,39 @@ type salesforceExperiencePath func(context.Context, salesforceapi.Credential, st
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
-	ContextFingerprint             validationContextReader
-	coordinatePersistedConnections bool
-	Profile                        string
-	DeploymentStore                deploymentStore
-	ConnectionStore                connectionStore
-	ConnectionSaver                connectionSaver
-	BoxCheck                       boxConnectionCheck
-	SalesforceTargets              salesforceTargetStore
-	SalesforceCheck                salesforceCheck
-	SalesforceDevHubCheck          salesforceDevHubCheck
-	SalesforceCreate               salesforceScratchCreate
-	SalesforcePackagePrepare       salesforcePackagePrepare
-	SalesforceOAuth                salesforceOAuthExchange
-	SalesforceRefresh              salesforceTokenRefresh
-	SalesforceScratchAccess        salesforceScratchAccess
-	SalesforceScratchOpen          salesforceScratchOpen
-	SalesforceExperiencePath       salesforceExperiencePath
-	BoxOAuth                       boxOAuthExchange
-	SalesforceCallbackReady        func() bool
-	BoxCallbackReady               func() bool
-	PlanStore                      planStore
-	PlanSaver                      planSaver
-	DefaultsStore                  deploymentDefaultsStore
-	DefaultsSaver                  deploymentDefaultsSaver
-	Templates                      templateStore
-	PackageAssembler               packageAssembler
-	Runs                           *runManager
-	Now                            func() time.Time
+	ContextFingerprint       validationContextReader
+	Profile                  string
+	DeploymentStore          deploymentStore
+	ConnectionStore          connectionStore
+	ConnectionSaver          connectionSaver
+	BoxCheck                 boxConnectionCheck
+	SalesforceTargets        salesforceTargetStore
+	SalesforceCheck          salesforceCheck
+	SalesforceDevHubCheck    salesforceDevHubCheck
+	SalesforceCreate         salesforceScratchCreate
+	SalesforcePackagePrepare salesforcePackagePrepare
+	SalesforceOAuth          salesforceOAuthExchange
+	SalesforceRefresh        salesforceTokenRefresh
+	SalesforceScratchAccess  salesforceScratchAccess
+	SalesforceScratchOpen    salesforceScratchOpen
+	SalesforceExperiencePath salesforceExperiencePath
+	BoxOAuth                 boxOAuthExchange
+	SalesforceCallbackReady  func() bool
+	BoxCallbackReady         func() bool
+	PlanStore                planStore
+	PlanSaver                planSaver
+	DefaultsStore            deploymentDefaultsStore
+	DefaultsSaver            deploymentDefaultsSaver
+	Templates                templateStore
+	PackageAssembler         packageAssembler
+	Runs                     *runManager
+	Now                      func() time.Time
 }
 
 // NewHandler returns the API exposed to a local browser. Mount it only on a
 // loopback listener; the handler intentionally has no CORS policy.
 func NewHandler(profile string) http.Handler {
-	return NewHandlerWithOptions(ServerOptions{Profile: profile, coordinatePersistedConnections: true})
+	return NewHandlerWithOptions(ServerOptions{Profile: profile})
 }
 
 // NewHandlerWithOptions returns a handler with injectable read-only stores.
@@ -187,7 +186,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}, apply)
 		return err
 	}
-	if options.coordinatePersistedConnections {
+	if usesPersistedConnections {
 		shellstate.SetConnectionWriteGuard(options.Runs.guardConnectionUpdate)
 	}
 	if options.Now == nil {

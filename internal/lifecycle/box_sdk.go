@@ -73,7 +73,7 @@ func newBoxSDK() (*boxSDK, error) {
 	accessToken, err := connection.AccessToken(context.Background())
 	if err != nil {
 		if boxOAuthSessionExpired(err) {
-			boxconn.InvalidateSelectedOAuthConnection()
+			connection.InvalidateOAuthConnection()
 			return nil, fmt.Errorf("Box OAuth session has expired. Return to Connect and reconnect the selected Box account: %w", err)
 		}
 		return nil, err

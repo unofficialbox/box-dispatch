@@ -105,6 +105,12 @@ func boxLoginRedirectHandler(api http.Handler) http.Handler {
 	})
 }
 
+// Shared with the entry-construction regression: production persisted stores
+// must install the same coordinator used by direct provider refresh writes.
+func newWebApplicationAPI(profile string, salesforceReady, boxReady func() bool) http.Handler {
+	return webapi.NewHandlerWithOptions(webapi.ServerOptions{Profile: profile, SalesforceCallbackReady: salesforceReady, BoxCallbackReady: boxReady})
+}
+
 func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	listener, err := net.Listen("tcp", address)
@@ -114,11 +120,7 @@ func runWebApplication(cmd *cobra.Command, port int, openBrowser bool) error {
 	defer listener.Close()
 
 	var salesforceCallbackReady, boxCallbackReady atomic.Bool
-	var api http.Handler = webapi.NewHandlerWithOptions(webapi.ServerOptions{
-		Profile:                 profileFromCommand(cmd),
-		SalesforceCallbackReady: salesforceCallbackReady.Load,
-		BoxCallbackReady:        boxCallbackReady.Load,
-	})
+	var api http.Handler = newWebApplicationAPI(profileFromCommand(cmd), salesforceCallbackReady.Load, boxCallbackReady.Load)
 	recordPath, _ := cmd.Flags().GetString("record-api")
 	if strings.TrimSpace(recordPath) != "" {
 		recorder, recordErr := webapi.NewHTTPRecorder(recordPath)
