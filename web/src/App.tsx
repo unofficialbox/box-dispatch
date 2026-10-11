@@ -104,6 +104,7 @@ function App() {
   const [initialDataLoaded, setInitialDataLoaded] = useState(false)
   const workflowResumeRequested = useRef(viewFromHash() === 'workflow')
   const workflowNavigationVersion = useRef(0)
+  const workflowDraftGeneration = useRef(0)
   const [deploymentConfirmationOpen, setDeploymentConfirmationOpen] = useState(false)
   const [deploymentStarting, setDeploymentStarting] = useState(false)
   const deploymentStartPending = useRef(false)
@@ -151,6 +152,7 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController()
+    const draftGenerationAtStart = workflowDraftGeneration.current
     // oxlint-disable-next-line react/set-state-in-effect
     setInitialDataLoaded(false)
     if (viewFromHash() === 'workflow') workflowResumeRequested.current = true
@@ -164,16 +166,19 @@ function App() {
         if (result.status === 'rejected') failed[key] = `${label} could not be loaded.`
       }
       setDataErrors(failed)
+      const ownsDraft = workflowDraftGeneration.current === draftGenerationAtStart
       if (templatesResult.status === 'fulfilled' && templatesResult.value.length > 0) {
         setTemplates(templatesResult.value)
-        setSelectedTemplateID((current) => templatesResult.value.some((template) => template.id === current) ? current : templatesResult.value[0].id)
+        if (ownsDraft) setSelectedTemplateID((current) => templatesResult.value.some((template) => template.id === current) ? current : templatesResult.value[0].id)
       }
       if (defaultsResult.status === 'fulfilled') {
         setDeploymentDefaults(defaultsResult.value)
-        setSelectedTemplateID(defaultsResult.value.templateId)
-        setSelectedComponents(defaultsResult.value.components)
+        if (ownsDraft) {
+          setSelectedTemplateID(defaultsResult.value.templateId)
+          setSelectedComponents(defaultsResult.value.components)
+        }
       }
-      if (planResult.status === 'fulfilled' && planResult.value.exists) {
+      if (ownsDraft && planResult.status === 'fulfilled' && planResult.value.exists) {
         setPlan(markPlanConnectionsChecking(planResult.value))
         setDeploymentName(planResult.value.name)
         const latestRun = runsResult.status === 'fulfilled' ? runsResult.value.find((candidate) => !candidate.deployment || candidate.deployment === planResult.value.name) ?? null : null
@@ -181,7 +186,7 @@ function App() {
         setRun(latestRun)
         setActivePhase(resumedPhase)
         setNotice(workflowResumeNotice(resumedPhase, latestRun))
-      } else {
+      } else if (ownsDraft) {
         setActivePhase('Choose')
         setNotice('Choose a supported solution to start a deployment.')
       }
@@ -259,7 +264,7 @@ function App() {
       if (terminalObserved && (next.status === 'queued' || next.status === 'running')) return
       setRun(next)
       if (next.status !== 'completed' && next.status !== 'failed') return
-      setStreamNotice('')
+      setStreamNotice(terminalObserved ? '' : 'Run status is confirmed, but activity history is incomplete because live updates were interrupted. Displayed activity may reflect an earlier state.')
       if (next.status === 'completed' && next.action === 'deploy') setActivePhase('Summary')
       stopStream()
       if (next.status === 'completed') {
@@ -411,9 +416,10 @@ function App() {
     setConnectionDrawerOpen(true)
   }
   const closeSalesforceConnection = () => {
-    salesforceLoginAttempt.current?.abort()
+    const attempt = salesforceLoginAttempt.current
+    attempt?.abort()
     salesforceLoginAttempt.current = null
-    setConnectionsLoading(false)
+    if (attempt) setConnectionsLoading(false)
     setOauthJob(null)
     setSalesforceConnectionError('')
     setConnectionDrawerOpen(false)
@@ -455,9 +461,10 @@ function App() {
     openDestination(connection.launchUrl, connection.name)
   }
   const closeBoxConnection = () => {
-    boxLoginAttempt.current?.abort()
+    const attempt = boxLoginAttempt.current
+    attempt?.abort()
     boxLoginAttempt.current = null
-    setBoxConnectionLoading(false)
+    if (attempt) setBoxConnectionLoading(false)
     setBoxOauthJob(null)
     setBoxConnectionError('')
     setBoxConnectionDrawerOpen(false)
@@ -493,10 +500,16 @@ function App() {
         const message = error instanceof Error ? error.message : 'Box login status is unavailable.'
         setBoxConnectionError(message)
         setBoxOauthJob({ id: started.id, status: 'failed', message })
-      }).finally(() => { if (boxLoginAttempt.current === controller) setBoxConnectionLoading(false) })
+      }).finally(() => {
+        if (boxLoginAttempt.current === controller) {
+          boxLoginAttempt.current = null
+          setBoxConnectionLoading(false)
+        }
+      })
       return true
     } catch (error: unknown) {
       if (boxLoginAttempt.current !== controller || controller.signal.aborted) return false
+      boxLoginAttempt.current = null
       setBoxConnectionError(error instanceof Error ? error.message : 'Box login could not start.')
       setBoxConnectionLoading(false)
       return false
@@ -629,10 +642,16 @@ function App() {
         const message = error instanceof Error ? error.message : 'Salesforce login status is unavailable.'
         setSalesforceConnectionError(message)
         setOauthJob({ id: started.id, status: 'failed', message, role })
-      }).finally(() => { if (salesforceLoginAttempt.current === controller) setConnectionsLoading(false) })
+      }).finally(() => {
+        if (salesforceLoginAttempt.current === controller) {
+          salesforceLoginAttempt.current = null
+          setConnectionsLoading(false)
+        }
+      })
       return true
     } catch (error: unknown) {
       if (salesforceLoginAttempt.current !== controller || controller.signal.aborted) return false
+      salesforceLoginAttempt.current = null
       setSalesforceConnectionError(error instanceof Error ? error.message : 'Salesforce login could not start.')
       setConnectionsLoading(false)
       return false
@@ -703,7 +722,22 @@ function App() {
     const timer = window.setTimeout(() => { void poll() }, 250)
     return () => { stopped = true; window.clearTimeout(timer) }
   }, [scratchJobID, scratchJobStatus])
-  const beginNewDeployment = () => { navigateTo('workflow'); setRun(null); setRunEvents([]); setDeploymentName(''); setSelectedTemplateID(deploymentDefaults.templateId); setSelectedComponents(deploymentDefaults.components); setActivePhase('Choose'); setNotice('Name the deployment, then confirm the solution and systems.') }
+  const beginNewDeployment = () => {
+    if (deploymentStartPending.current) {
+      navigateTo('workflow')
+      setNotice('Deployment is starting. Wait for its status before starting another deployment.')
+      return
+    }
+    workflowDraftGeneration.current += 1
+    navigateTo('workflow')
+    setRun(null)
+    setRunEvents([])
+    setDeploymentName('')
+    setSelectedTemplateID(deploymentDefaults.templateId)
+    setSelectedComponents(deploymentDefaults.components)
+    setActivePhase('Choose')
+    setNotice('Name the deployment, then confirm the solution and systems.')
+  }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
   const assemblePackage = () => {
     if (!deploymentName.trim()) { setNotice('Enter a deployment name to continue.'); return }

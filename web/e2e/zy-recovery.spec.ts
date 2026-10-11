@@ -241,3 +241,103 @@ test('reopens a stream closed by an HTTP failure without starting provider work'
   await expect(page.getByRole('heading', { name: 'Recovery fixture is ready' })).toBeVisible()
   expect(state.validations).toBe(0); expect(state.deployments).toBe(0)
 })
+
+for (const provider of ['Box', 'Salesforce'] as const) for (const operation of ['select', 'remove'] as const) {
+  test(`${provider} ${operation} remains serialized across drawer close and reopen`, async ({ page, request }) => {
+    const state = await fixtures(page, request)
+    const connection = state.connections.find((entry) => entry.name === provider)!
+    const records = ['A', 'B', 'C'].map((alias) => ({ id: alias, alias, selected: alias === 'A', status: 'Ready', kind: 'Org', identity: `${alias}@example.com`, username: `${alias}@example.com` }))
+    if (provider === 'Box') connection.connections = []
+    else connection.orgs = []
+    connection.oauthConfigured = true
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    let calls = 0
+    const endpoint = provider === 'Box' ? '/api/connections/box/selection' : '/api/connections/salesforce'
+    await page.route(`**${operation === 'select' ? endpoint : '/api/connections/' + provider.toLowerCase() + '/B'}`, async (route) => {
+      calls++
+      await held
+      if (operation === 'select') for (const record of records) record.selected = record.id === 'B'
+      else if (provider === 'Box') connection.connections = records.filter((record) => record.id !== 'B')
+      else connection.orgs = records.filter((record) => record.id !== 'B')
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(connection) })
+    })
+    await page.goto('/#settings')
+    const panel = page.getByRole('region', { name: provider === 'Box' ? 'Box connections' : 'Salesforce environments', exact: true })
+    await panel.getByRole('button', { name: 'Manage', exact: true }).click()
+    const popupPromise = page.waitForEvent('popup')
+    await page.getByRole('button', { name: provider === 'Box' ? 'Connect Box user' : 'Connect org', exact: true }).click()
+    const popup = await popupPromise
+    if (provider === 'Box') connection.connections = records
+    else connection.orgs = records
+    state.oauthStatus = 'active'
+    await expect(page.locator('box-resource-row[label="B"]')).toBeVisible()
+    await expect(page.locator('box-drawer.connection-drawer')).not.toHaveAttribute('busy')
+    await popup.close()
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
+    await panel.getByRole('button', { name: 'Manage', exact: true }).click()
+    if (operation === 'select') await page.locator('box-resource-row[label="B"]').locator('button').first().click()
+    else await page.locator('box-drawer.connection-drawer').getByRole('button', { name: 'Remove B', exact: true }).click()
+    await expect.poll(() => calls).toBe(1)
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
+    await panel.getByRole('button', { name: 'Manage', exact: true }).click()
+    await expect(page.locator('box-resource-row[label="C"]')).toHaveAttribute('disabled')
+    await expect(page.locator('box-drawer.connection-drawer').getByRole('button', { name: 'Remove C', exact: true })).toBeDisabled()
+    release()
+    await expect(page.locator('box-drawer.connection-drawer').getByRole('button', { name: 'Remove C', exact: true })).toBeEnabled()
+    if (operation === 'select') await expect(page.locator('box-resource-row[label="B"]')).toHaveAttribute('selected')
+    else await expect(page.locator('box-resource-row[label="B"]')).toHaveCount(0)
+    expect(calls).toBe(1)
+    expect(state.deployments).toBe(0); expect(state.validations).toBe(0)
+  })
+}
+
+test('terminal REST status keeps incomplete validation activity explicitly qualified', async ({ page, request }) => {
+  const state = await fixtures(page, request)
+  state.run = { ...state.run, action: 'validate', status: 'running', providers: [] }
+  let events = 0
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  await page.route('**/api/runs/failed-original', async (route) => {
+    await held
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...state.run, status: 'completed', providers: [{ name: 'box', status: 'present' }, { name: 'salesforce', status: 'present' }] }) })
+  })
+  await page.route('**/api/runs/failed-original/events', async (route) => {
+    events++
+    if (events > 1) return route.fulfill({ status: 503, body: 'Unavailable' })
+    await route.fulfill({ contentType: 'text/event-stream', body: `event: dispatch\ndata: ${JSON.stringify({ sequence: 1, type: 'activity', provider: 'salesforce', component: 'ApexClass:Held', progressState: 'running', status: 'running', message: 'Checking Held', at: '2026-10-11T18:00:00Z' })}\n\n` })
+  })
+  await page.goto('/#workspace')
+  await expect(page.locator('box-run-trace')).toContainText('Checking Held')
+  release()
+  await expect(page.getByRole('button', { name: 'Continue to deployment' })).toBeVisible()
+  await expect(page.getByText(/Run status is confirmed, but activity history is incomplete/)).toBeVisible()
+  await expect(page.getByText('Provider progress updates automatically.', { exact: true })).toHaveCount(0)
+  expect(state.deployments).toBe(0); expect(state.validations).toBe(0)
+})
+
+test('a history retry cannot restore its saved workflow over a newly requested draft', async ({ page, request }) => {
+  const state = await fixtures(page, request)
+  state.unavailable.add('/api/deployments')
+  await page.goto('/#history')
+  await expect(page.getByRole('button', { name: 'Retry loading' })).toBeVisible()
+  state.unavailable.clear()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  let requested = false
+  await page.route('**/api/plan', async (route) => {
+    requested = true
+    await held
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(state.plan) })
+  })
+  await page.getByRole('button', { name: 'Retry loading' }).click()
+  await expect.poll(() => requested).toBe(true)
+  await page.locator('box-nav-sidebar').getByRole('link', { name: 'Deployments', exact: true }).click()
+  release()
+  await expect(page.getByRole('button', { name: 'Prepare package' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Name this deployment' })).toHaveValue('')
+  await page.getByRole('textbox', { name: 'Name this deployment' }).fill('New draft after history retry')
+  await expect(page.getByRole('heading', { name: 'New draft after history retry', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry validation' })).toHaveCount(0)
+  expect(state.validations).toBe(0); expect(state.deployments).toBe(0)
+})
