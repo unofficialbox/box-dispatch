@@ -29,7 +29,7 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.33.0.
+The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.37.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -43,6 +43,12 @@ read-only deployment lifecycle, and Tile Group for connection-mode choices. The
 read-only connection summaries remain application composition because they do not
 offer a selection target. Version 0.29.0 resolves the native TypeScript/React JSX and
 Run Trace geometry gaps; Dispatch adopted both contracts in the 0.33.0 update.
+
+The 0.37.0 published core and React artifacts were checked together. Additive
+split-view keyboard resizing, dialog confirmation tone, table descriptors,
+metric sizing/tone, and icon size/variant preserve the existing Dispatch defaults.
+Process Modeler additions in 0.34–0.36 do not affect Dispatch imports. No new local
+wrapper, event bridge, or theme override is required.
 
 ## Adopted in Dispatch
 
@@ -106,10 +112,11 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.33.0 review
+## Remaining enhancements after the 0.37.0 review
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
+| P2 | Components | `box-table` keyboard sort focus | Controlled sort updates rebuild the header and lose focus on its sort button in both 0.33.0 and 0.37.0. | Seek upstream focus preservation; do not patch the component shadow DOM. Repeated keyboard audit activations refocus the header. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 

@@ -2,13 +2,13 @@
 
 ## Current state
 
-- **Date:** 2026-10-10
-- **Repo:** `/Users/massnerder/Developer/unofficialbox/box-dispatch`
-- **Branch:** `codex/box-open-elements-0.33.0`
-- **Remote main:** `604878e77a1e9f39880c9d9918eabb0f29269fea`
+- **Date:** 2026-10-11
+- **Repo:** `unofficialbox/box-dispatch`; cloud checkout `/workspace/box-dispatch-cloud-verified`
+- **Branch:** `codex/box-open-elements-0.37.0`
+- **Base main:** `c1663ac0b992749245b5b6472a6736d9c581a772` (PR #40)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.33.0
+  `@unofficialbox/box-open-elements-react` 0.37.0
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -70,7 +70,7 @@ It delivered and verified:
   Dispatch imports none of those surfaces, so no local component adaptation is needed.
 - The change was squash-merged to `main` as `604878e77a1e9f39880c9d9918eabb0f29269fea`.
 
-### Current branch — Box Open Elements 0.33.0
+### PR #39 — Box Open Elements 0.33.0 (merged)
 
 - Core and React adapter packages are upgraded together from 0.28.6 to 0.33.0.
 - Version 0.29.0 ships the declarations from issue #379 and Run Trace geometry tokens
@@ -79,6 +79,19 @@ It delivered and verified:
 - Releases 0.30.0 through 0.33.0 add Process Modeler capabilities that Dispatch does
   not consume, so they require no additional application adaptation.
 
+### PR #40 — charcoal and mint theme (merged)
+
+Main includes the charcoal/dark-mint and white/light-green themes. The 0.37 update
+preserves `web/src/theme.ts`, all application CSS, and existing theme assertions.
+
+### Current branch — Box Open Elements 0.37.0
+
+Both packages upgrade from 0.33.0 to 0.37.0 with no other lockfile resolution
+changes. Published APIs and generated declarations remain compatible. The optional
+new component features do not require Dispatch application changes. Embedded assets
+and the adoption notes are refreshed. This branch is prepared for review; merge and
+deployment require separate approval.
+
 ## Box Open Elements boundary
 
 Use [`docs/BOX_OPEN_ELEMENTS_MIGRATION_PLAN.md`](docs/BOX_OPEN_ELEMENTS_MIGRATION_PLAN.md)
@@ -86,7 +99,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.33.0 contracts. Keep the
+All planned migration phases are complete within published 0.37.0 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -117,25 +130,46 @@ issue state, before changing a future integration contract.
 
 ## Verification evidence
 
-The 0.33.0 branch passed:
+The cloud continuation tested exact main `c1663ac0b992749245b5b6472a6736d9c581a772`
+on 0.33.0 first, then the 0.37.0 upgrade:
 
-- 23 Vitest files / 76 unit tests;
-- all 5 Playwright mock workflows, including the 390px mobile path;
-- frontend lint and production build;
-- `gofmt -l .`, `go build ./...`, `go vet ./...`, and `go test ./...`;
-- live Chrome verification through Overview, Choose, Connect, Configure, Review, and
-  completed Validation;
-- desktop and 390px visual checks with no page overflow or browser console warnings;
-  and
-- Run Trace public-token values plus marker/connector geometry through the mock
-  end-to-end assertion.
+- 23 Vitest files / 77 unit tests, frontend lint, TypeScript and production build;
+- all 5 isolated Playwright mock workflows before and after the upgrade, plus a
+  second instrumented run at each version;
+- desktop and 390px Chromium, both system themes, keyboard activation, modal focus
+  containment, Escape/focus restoration, validation file selection, history links,
+  replay/reload, failure recovery, and Run Trace geometry;
+- a further four-combination check (1440px/390px, light/dark) of metrics, native icon
+  activation, connection drawer focus restoration, and keyboard table sorting;
+- `gofmt -l .` (empty), `go build ./...`, `go vet ./...`, and `go test ./...`;
+- axe-core 4.14.0 WCAG A/AA checks and screenshots at 28 matched workflow/page states
+  before and after the upgrade, with no page overflow or new violation targets after
+  normalizing dynamic event timestamps.
 
-The production build still reports the pre-existing JavaScript chunk-size warning. Treat
-that as a separate performance task unless a future change measurably increases it.
+Automated accessibility is **not clean** at the baseline. Existing findings include
+badge/body-copy contrast, sidebar toggle `aria-controls` across a shadow boundary,
+visible-label/accessibility-name mismatch for brand/provider actions, mobile Path
+scroll focus, and prohibited ARIA on a historical-detail surface. These remain
+separate follow-up work; this dependency update does not alter the theme or claim
+formal accessibility conformance. Table sorting also replaces the focused header
+button; repeated keyboard sorts currently require refocusing it. Both published
+0.33.0 and 0.37.0 table implementations rebuild the header in `update()`. The
+four-combination sort check explicitly refocuses between activations. This should
+be addressed through the upstream table contract rather than a shadow-DOM patch.
+Axe also reports incomplete checks requiring
+interpretation. Chromium keyboard, focus, semantics and automated checks are the
+acceptance scope; Safari and human screen-reader checks are not required.
 
-Human VoiceOver validation was explicitly deferred for this internal demo. Do not report
-it as complete. Reintroduce it if production, compliance, or formal accessibility sign-off
-requires it.
+No browser runtime exceptions or console warnings occurred. Expected mock HTTP
+failures include scratch-org lookup 404s and deliberately exercised authentication
+recovery failures. The pre-existing bundle warning remains: main JavaScript changes
+from 1,363.02 to 1,369.57 kB (gzip 388.28 to 389.87 kB).
+
+Cloud tools: Go 1.26.0, Bun 1.4.2, system Chromium 151.0.7922.173. Source
+`/workspace/box-dispatch-cloud-env.sh` before commands. The cloud Playwright override
+uses system Chromium because the managed browser download was unavailable. Port
+8788 is reserved for isolated mock tests. Screenshots and structured audit evidence
+are outside the repo in `/workspace/box-dispatch-cloud-evidence/boe037/`.
 
 ## Build and run
 
@@ -188,12 +222,10 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The 0.33.0 core and React upgrade is implemented and verified on
-  `codex/box-open-elements-0.33.0`; official native types and Run Trace tokens replace
-  the final two local compatibility boundaries.
-- **Recommended Next Step:** Review and merge the 0.33.0 pull request.
-- **Why This Next:** The code now consumes the upstream contracts directly and all
-  frontend, browser, and repository gates pass.
-- **Expected Outcome:** Dispatch runs on Box Open Elements 0.33.0 with both packages in
-  lockstep and no local JSX or Run Trace geometry workaround.
-- **Blockers:** None known.
+- **Current Status:** The 0.37.0 core/React upgrade is implemented and verified on
+  `codex/box-open-elements-0.37.0`, based on merged PR #40. Official native types and
+  Run Trace tokens remain adopted; application source and themes are unchanged.
+- **Recommended Next Step:** Review the upgrade diff and its draft pull request.
+- **Expected Outcome:** Dispatch consumes both 0.37.0 packages in lockstep.
+- **Blockers:** No upgrade blocker found. Existing automated accessibility findings
+  and bundle-size warning remain follow-up work. Merge/deploy await approval.

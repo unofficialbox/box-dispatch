@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.33.0`, reviewed on October 10, 2026.
+- the Box Open Elements packages at version `0.37.0`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -19,6 +19,14 @@ The 0.33.0 update keeps both packages aligned. Version 0.29.0 publishes generate
 native-element and React JSX declarations plus Run Trace geometry tokens, resolving
 the two remaining Dispatch compatibility boundaries. Releases 0.30.0 through 0.33.0
 add Process Modeler capabilities that Dispatch does not consume.
+
+The 0.37.0 update retains those integrations. Published 0.34–0.36 changes mostly
+extend Process Modeler, which Dispatch does not consume. Version 0.37 adds optional
+split-view keyboard resizing, dialog confirmation tone, table report descriptors,
+metric-card sizing/tone, and icon-button size/variant options. Dispatch retains the
+existing defaults: fixed split views, primary deployment confirmation, standard
+metrics and icon actions, and controlled table sorting/selection. No application
+compatibility shim is needed. The current charcoal/mint themes remain unchanged.
 
 ## Implementation status
 
@@ -35,6 +43,11 @@ add Process Modeler capabilities that Dispatch does not consume.
 - **0.33.0 update complete:** Dispatch imports the official React JSX and typed native
   event maps, removes its local `boe.d.ts` bridge, and configures Run Trace density
   through the published geometry tokens instead of coupled part/pseudo-element CSS.
+- **0.37.0 maintenance update complete:** both packages and their integrity-locked
+  artifacts are aligned; embedded assets are regenerated. Unit, browser, lint/build,
+  and Go checks pass. Chromium comparisons cover desktop/mobile, both themes, modal
+  focus, icon actions, table selection/sorting, and repeated mock workflows.
+  Automated accessibility retains existing findings; see the current handoff.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
