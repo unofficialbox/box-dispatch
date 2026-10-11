@@ -82,6 +82,11 @@ func (manager *boxOAuthManager) get(id string) (boxOAuthJob, bool) {
 	if !ok {
 		return boxOAuthJob{}, false
 	}
+	if job.Status == "pending" && !manager.now().Before(job.expires) {
+		job.Status = "failed"
+		job.Message = "Box login timed out. Start login again from Dispatch."
+		delete(manager.byState, job.state)
+	}
 	return job.public(), true
 }
 

@@ -104,6 +104,11 @@ func (manager *salesforceOAuthManager) get(id string) (salesforceOAuthJob, bool)
 	if !ok {
 		return salesforceOAuthJob{}, false
 	}
+	if job.Status == "pending" && !manager.now().Before(job.expires) {
+		job.Status = "failed"
+		job.Message = "Salesforce login timed out. Start login again from Dispatch."
+		delete(manager.byState, job.state)
+	}
 	return job.public(), true
 }
 

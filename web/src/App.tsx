@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import '@unofficialbox/box-open-elements/app-shell'
+import { Alert } from '@unofficialbox/box-open-elements-react/alert'
 import './App.css'
 import { AppToast, type AppToastNotice } from './components/AppToast'
 import { BoxConnectionDrawer, DiagnosticsDrawer, SalesforceConnectionDrawer } from './components/Drawers'
@@ -12,6 +13,7 @@ import { ConnectPage } from './pages/ConnectPage'
 import { ConfigurePage } from './pages/ConfigurePage'
 import { DeployPage } from './pages/DeployPage'
 import { OverviewPage } from './pages/OverviewPage'
+import { HelpPage } from './pages/HelpPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -19,6 +21,7 @@ import { SummaryPage } from './pages/SummaryPage'
 import type { BoxOAuthJob, ConnectionSummary, DeploymentDefaults, DeploymentPlan, DeploymentSummary, DispatchRun, Phase, RunDiagnostic, RunEvent, SalesforceOAuthJob, ScratchOrgJob, SolutionTemplate, ValidationFileChange, ValidationChanges } from './types'
 import { refreshProviderReadiness } from './connectionReadiness'
 import { markConnectionsChecking, markPlanConnectionsChecking, refreshPlanReadiness, revalidateConnections } from './connectionRefresh'
+import { watchLoginJob } from './loginPolling'
 import { scratchOrgRequest } from './scratchOrg'
 import { connectionsReadyForPlan, guardedWorkflowPhase, resumeWorkflowPhase } from './workflowResume'
 
@@ -34,6 +37,7 @@ const fallbackTemplates: SolutionTemplate[] = [
 const viewFromHash = (): AppView => {
   const hash = window.location.hash.toLowerCase()
   if (hash === '#history' || hash.startsWith('#history/')) return 'history'
+  if (hash === '#help') return 'help'
   if (hash === '#settings') return 'settings'
   if (hash === '#workspace') return 'workflow'
   return 'overview'
@@ -68,8 +72,12 @@ function App() {
   const [selectedComponents, setSelectedComponents] = useState<string[]>(['box', 'salesforce'])
   const [assembling, setAssembling] = useState(false)
   const [run, setRun] = useState<DispatchRun | null>(null)
+  const [streamNotice, setStreamNotice] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
   const [diagnostic, setDiagnostic] = useState<RunDiagnostic | null>(null)
+  const [diagnosticError, setDiagnosticError] = useState('')
+  const [diagnosticLoading, setDiagnosticLoading] = useState(false)
+  const [diagnosticRetry, setDiagnosticRetry] = useState(0)
   const [diagnosticRunID, setDiagnosticRunID] = useState<string | null>(null)
   const [connectionDrawerOpen, setConnectionDrawerOpen] = useState(false)
   const [boxConnectionDrawerOpen, setBoxConnectionDrawerOpen] = useState(false)
@@ -80,11 +88,19 @@ function App() {
   const [scratchJob, setScratchJob] = useState<ScratchOrgJob | null>(null)
   const [oauthJob, setOauthJob] = useState<SalesforceOAuthJob | null>(null)
   const [boxOauthJob, setBoxOauthJob] = useState<BoxOAuthJob | null>(null)
+  const boxLoginAttempt = useRef<AbortController | null>(null)
+  const salesforceLoginAttempt = useRef<AbortController | null>(null)
+  useEffect(() => () => { boxLoginAttempt.current?.abort(); salesforceLoginAttempt.current?.abort() }, [])
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [boxConnectionLoading, setBoxConnectionLoading] = useState(false)
   const [boxConnectionError, setBoxConnectionError] = useState('')
   const [checkingConnections, setCheckingConnections] = useState(false)
   const [connectionsRefreshing, setConnectionsRefreshing] = useState(false)
+  const [dataErrors, setDataErrors] = useState<Record<string, string>>({})
+  const [dataRetry, setDataRetry] = useState(0)
+  const [connectionRetry, setConnectionRetry] = useState(0)
+  const [connectionError, setConnectionError] = useState('')
+  const [connectionsKnown, setConnectionsKnown] = useState(false)
   const [initialDataLoaded, setInitialDataLoaded] = useState(false)
   const workflowResumeRequested = useRef(viewFromHash() === 'workflow')
   const workflowNavigationVersion = useRef(0)
@@ -135,7 +151,19 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController()
+    // oxlint-disable-next-line react/set-state-in-effect
+    setInitialDataLoaded(false)
+    if (viewFromHash() === 'workflow') workflowResumeRequested.current = true
     void Promise.allSettled([fetchJSON<DeploymentPlan>('/api/plan', controller.signal), fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal), fetchJSON<DeploymentDefaults>('/api/defaults', controller.signal), fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal), fetchJSON<DispatchRun[]>('/api/runs', controller.signal), fetchJSON<ScratchOrgJob>('/api/salesforce/scratch-orgs/latest', controller.signal)]).then(([planResult, templatesResult, defaultsResult, deploymentsResult, runsResult, scratchResult]) => {
+      if (controller.signal.aborted) return
+      const failed: Record<string, string> = {}
+      for (const [key, label, result] of [
+        ['plan', 'Saved deployment plan', planResult], ['templates', 'Solution catalog', templatesResult],
+        ['defaults', 'Workspace defaults', defaultsResult], ['deployments', 'Deployment history', deploymentsResult], ['runs', 'Run history', runsResult],
+      ] as const) {
+        if (result.status === 'rejected') failed[key] = `${label} could not be loaded.`
+      }
+      setDataErrors(failed)
       if (templatesResult.status === 'fulfilled' && templatesResult.value.length > 0) {
         setTemplates(templatesResult.value)
         setSelectedTemplateID((current) => templatesResult.value.some((template) => template.id === current) ? current : templatesResult.value[0].id)
@@ -162,7 +190,7 @@ function App() {
       setInitialDataLoaded(true)
     })
     return () => controller.abort()
-  }, [])
+  }, [dataRetry])
 
   const connectionSurface = screen === 'overview' || screen === 'settings'
     ? screen
@@ -179,10 +207,13 @@ function App() {
     // This effect is the route-entry boundary for a live external-system refresh.
     // oxlint-disable-next-line react/set-state-in-effect
     setConnectionsRefreshing(true)
+    setConnectionError('')
     setConnections((current) => markConnectionsChecking(current))
     setPlan((current) => markPlanConnectionsChecking(current))
     void revalidateConnections(fetch, controller.signal).then((nextConnections) => {
       const refreshedPlan = refreshPlanReadiness(plan, nextConnections)
+      if (controller.signal.aborted) return
+      setConnectionsKnown(true)
       setConnections(nextConnections)
       setPlan((current) => refreshPlanReadiness(current, nextConnections))
       if (shouldResumeWorkflow && workflowNavigationVersion.current === navigationVersionAtRefreshStart) {
@@ -193,6 +224,8 @@ function App() {
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return
       const message = error instanceof Error ? error.message : 'Connection readiness could not be refreshed.'
+      setConnectionsKnown(true)
+      setConnectionError('Saved connections could not be loaded. Retry when Dispatch’s local service is available.')
       setNotice(message)
       showToast(message, 'error')
     }).finally(() => {
@@ -202,29 +235,94 @@ function App() {
   // Re-run only when the rendered connection surface changes. `screen` and
   // `plan` and `run` are snapshots for a route-entry resume decision.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionSurface, initialDataLoaded])
+  }, [connectionSurface, initialDataLoaded, connectionRetry])
 
   useEffect(() => {
     if (!activeRunID) return
-    const stream = new EventSource(`/api/runs/${activeRunID}/events`)
-    const receiveEvent = (message: MessageEvent<string>) => {
-      const event = JSON.parse(message.data) as RunEvent
-      setRunEvents((events) => events.some((existing) => existing.sequence === event.sequence) ? events : [...events, event])
-      if (event.type === 'status' && (event.status === 'completed' || event.status === 'failed')) {
-        setRun((current) => current ? { ...current, status: event.status } : current)
-        if (event.status === 'completed' && run?.action === 'deploy') setActivePhase('Summary')
-        void fetch(`/api/runs/${activeRunID}`).then(async (response) => {
-          if (!response.ok) throw new Error('Run details are unavailable.')
-          return (await response.json()) as DispatchRun
-        }).then(setRun).catch(() => undefined)
-        if (event.status === 'completed') {
-          void fetch('/api/deployments').then(async (response) => response.ok ? await response.json() as DeploymentSummary[] : []).then((records) => { if (records.length > 0) setDeployments(records) }).catch(() => undefined)
-        }
-        stream.close()
+    const controller = new AbortController()
+    let stream = new EventSource(`/api/runs/${activeRunID}/events`)
+    let stopped = false
+    let disconnected = false
+    let fetching = false
+    let terminalObserved = false
+    let retryDelay = 1000
+    let timer: number | undefined
+    // oxlint-disable-next-line react/set-state-in-effect
+    setStreamNotice('')
+    const stopStream = () => {
+      stopped = true
+      window.clearTimeout(timer)
+      stream.close()
+    }
+    const acceptRun = (next: DispatchRun) => {
+      if (controller.signal.aborted || stopped) return
+      if (terminalObserved && (next.status === 'queued' || next.status === 'running')) return
+      setRun(next)
+      if (next.status !== 'completed' && next.status !== 'failed') return
+      setStreamNotice('')
+      if (next.status === 'completed' && next.action === 'deploy') setActivePhase('Summary')
+      stopStream()
+      if (next.status === 'completed') {
+        void fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal)
+          .then((records) => { if (!controller.signal.aborted) setDeployments(records) }).catch(() => undefined)
       }
     }
+    const reconcile = async () => {
+      if (stopped || fetching) return
+      fetching = true
+      try {
+        const next = await fetchJSON<DispatchRun>(`/api/runs/${activeRunID}`, controller.signal)
+        acceptRun(next)
+        retryDelay = 1000
+      } catch {
+        if (!controller.signal.aborted && !stopped) setStreamNotice('Live updates are disconnected and run status is unavailable. Dispatch will keep retrying; the run may still be active.')
+        retryDelay = Math.min(retryDelay * 2, 10_000)
+      } finally {
+        fetching = false
+        if (disconnected && !stopped && !controller.signal.aborted) timer = window.setTimeout(() => {
+          // HTTP failures can permanently close EventSource. Resume the stream
+          // at the same bounded retry boundary as read-only status checks.
+          if (stream.readyState === EventSource.CLOSED) {
+            const onError = stream.onerror
+            stream.close()
+            stream = new EventSource(`/api/runs/${activeRunID}/events`)
+            stream.addEventListener('dispatch', receiveEvent)
+            stream.onerror = onError
+          }
+          void reconcile()
+        }, retryDelay)
+      }
+    }
+    const receiveEvent = (message: MessageEvent<string>) => {
+      if (stopped || controller.signal.aborted) return
+      try {
+        const event = JSON.parse(message.data) as RunEvent
+        setRunEvents((events) => events.some((existing) => existing.sequence === event.sequence) ? events : [...events, event])
+        disconnected = false
+        window.clearTimeout(timer)
+        setStreamNotice('')
+        if (event.type === 'status' && (event.status === 'completed' || event.status === 'failed')) {
+          terminalObserved = true
+          disconnected = true
+          setRun((current) => current ? { ...current, status: event.status } : current)
+          if (event.status === 'completed' && run?.action === 'deploy') setActivePhase('Summary')
+          void reconcile()
+        }
+      } catch {
+        disconnected = true
+        setStreamNotice('Live updates could not be read. Checking the run status…')
+        void reconcile()
+      }
+    }
+    stream.onerror = () => {
+      if (stopped || controller.signal.aborted) return
+      const wasDisconnected = disconnected
+      disconnected = true
+      setStreamNotice('Live updates are disconnected. Dispatch is checking the run status and reconnecting…')
+      if (!wasDisconnected) { window.clearTimeout(timer); void reconcile() }
+    }
     stream.addEventListener('dispatch', receiveEvent)
-    return () => stream.close()
+    return () => { stopStream(); controller.abort() }
   }, [activeRunID, run?.action])
 
   useEffect(() => {
@@ -276,12 +374,23 @@ function App() {
     }
   }
   const openDiagnostics = (runID: string) => {
-    setDiagnosticRunID(runID); setDiagnostic(null)
-    void fetch(`/api/runs/${runID}/diagnostics`).then(async (response) => {
-      if (!response.ok) throw new Error('Diagnostic guidance is unavailable.')
-      return (await response.json()) as RunDiagnostic
-    }).then(setDiagnostic).catch(() => setNotice('Diagnostic guidance is unavailable. Refresh the failed run and try again.'))
+    setDiagnostic(null)
+    setDiagnosticError('')
+    setDiagnosticLoading(true)
+    setDiagnosticRunID(runID)
   }
+  useEffect(() => {
+    if (!diagnosticRunID) return
+    const controller = new AbortController()
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDiagnosticLoading(true)
+    setDiagnosticError('')
+    void fetchJSON<RunDiagnostic>(`/api/runs/${encodeURIComponent(diagnosticRunID)}/diagnostics`, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setDiagnostic(result) })
+      .catch(() => { if (!controller.signal.aborted) setDiagnosticError('Diagnostic guidance is unavailable. Check that Dispatch is running, then retry.') })
+      .finally(() => { if (!controller.signal.aborted) setDiagnosticLoading(false) })
+    return () => controller.abort()
+  }, [diagnosticRunID, diagnosticRetry])
   const openChanges = (url: string, stage: 'validation' | 'deployment') => {
     setChangeReview({ url, stage })
     setValidationChanges([])
@@ -302,6 +411,10 @@ function App() {
     setConnectionDrawerOpen(true)
   }
   const closeSalesforceConnection = () => {
+    salesforceLoginAttempt.current?.abort()
+    salesforceLoginAttempt.current = null
+    setConnectionsLoading(false)
+    setOauthJob(null)
     setSalesforceConnectionError('')
     setConnectionDrawerOpen(false)
   }
@@ -342,54 +455,49 @@ function App() {
     openDestination(connection.launchUrl, connection.name)
   }
   const closeBoxConnection = () => {
+    boxLoginAttempt.current?.abort()
+    boxLoginAttempt.current = null
+    setBoxConnectionLoading(false)
+    setBoxOauthJob(null)
     setBoxConnectionError('')
     setBoxConnectionDrawerOpen(false)
   }
   const startBoxOAuth = async () => {
+    boxLoginAttempt.current?.abort()
+    const controller = new AbortController()
+    boxLoginAttempt.current = controller
     setBoxConnectionError('')
     setBoxConnectionLoading(true)
     try {
-      const response = await fetch('/api/connections/box/oauth/start', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+      const response = await fetch('/api/connections/box/oauth/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal })
       if (!response.ok) throw new Error(await responseError(response, 'Box login could not start.'))
       const started = await response.json() as { id: string; authorizeUrl: string }
+      if (controller.signal.aborted) return false
       const popup = window.open(started.authorizeUrl, 'dispatch-box-login', 'width=520,height=720')
-      if (!popup) {
-        setBoxConnectionError('The browser blocked the Box login window. Allow popups for Dispatch, then try again.')
-        setBoxConnectionLoading(false)
-        return false
-      }
+      if (!popup) throw new Error('The browser blocked the Box login window. Allow popups for Dispatch, then try again.')
       setBoxOauthJob({ id: started.id, status: 'pending', message: 'Complete Box login in the browser window.' })
-      const poll = async () => {
-        const statusResponse = await fetch(`/api/connections/box/oauth/${started.id}`)
-        if (!statusResponse.ok) throw new Error(await responseError(statusResponse, 'Box login status is unavailable.'))
-        const job = await statusResponse.json() as BoxOAuthJob
+      void watchLoginJob<BoxOAuthJob>(`/api/connections/box/oauth/${started.id}`, popup, controller, async (job) => {
+        if (boxLoginAttempt.current !== controller || controller.signal.aborted) return
         setBoxOauthJob(job)
         if (job.status === 'active') {
-          await refreshBoxConnection()
+          await refreshBoxConnection(controller.signal)
+          if (boxLoginAttempt.current !== controller || controller.signal.aborted) return
           const added = job.identity || job.alias || 'Box user'
           setNotice(`${added} is ready.`)
           showToast(`Connected ${added}.`)
-          setBoxConnectionLoading(false)
-          return
-        }
-        if (job.status === 'failed') {
+        } else if (job.status === 'failed') {
           setBoxConnectionError(job.message)
-          setBoxConnectionLoading(false)
-          return
         }
-        window.setTimeout(() => { void poll().catch(handleBoxOAuthError) }, 1000)
-      }
-      const handleBoxOAuthError = (error: unknown) => {
+      }).catch((error: unknown) => {
+        if (boxLoginAttempt.current !== controller || (controller.signal.aborted && controller.signal.reason?.name === 'AbortError')) return
         const message = error instanceof Error ? error.message : 'Box login status is unavailable.'
         setBoxConnectionError(message)
         setBoxOauthJob({ id: started.id, status: 'failed', message })
-        setBoxConnectionLoading(false)
-      }
-      void poll().catch(handleBoxOAuthError)
+      }).finally(() => { if (boxLoginAttempt.current === controller) setBoxConnectionLoading(false) })
       return true
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Box login could not start.'
-      setBoxConnectionError(message)
+      if (boxLoginAttempt.current !== controller || controller.signal.aborted) return false
+      setBoxConnectionError(error instanceof Error ? error.message : 'Box login could not start.')
       setBoxConnectionLoading(false)
       return false
     }
@@ -435,17 +543,19 @@ function App() {
       setBoxConnectionLoading(false)
     }
   }
-  const refreshBoxConnection = async () => {
-    const response = await fetch('/api/connections')
+  const refreshBoxConnection = async (signal?: AbortSignal) => {
+    const response = await fetch('/api/connections', { signal })
     if (!response.ok) throw new Error('Box connection state could not be refreshed.')
     const nextConnections = await response.json() as ConnectionSummary[]
+    if (signal?.aborted) return
     setConnections(nextConnections)
     setPlan((current) => refreshProviderReadiness(current, nextConnections, 'box'))
   }
-  const refreshSalesforceConnection = async () => {
-    const response = await fetch('/api/connections')
+  const refreshSalesforceConnection = async (signal?: AbortSignal) => {
+    const response = await fetch('/api/connections', { signal })
     if (!response.ok) throw new Error('Salesforce connection state could not be refreshed.')
     const nextConnections = await response.json() as ConnectionSummary[]
+    if (signal?.aborted) return
     setConnections(nextConnections)
     setPlan((current) => refreshProviderReadiness(current, nextConnections, 'salesforce'))
   }
@@ -489,51 +599,41 @@ function App() {
     }
   }
   const startSalesforceOAuth = async (loginHost: 'production' | 'sandbox', role: 'org' | 'devhub') => {
+    salesforceLoginAttempt.current?.abort()
+    const controller = new AbortController()
+    salesforceLoginAttempt.current = controller
     setSalesforceConnectionError('')
     setConnectionsLoading(true)
     try {
-      const response = await fetch('/api/connections/salesforce/oauth/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loginHost, role }) })
+      const response = await fetch('/api/connections/salesforce/oauth/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loginHost, role }), signal: controller.signal })
       if (!response.ok) throw new Error(await responseError(response, 'Salesforce login could not start.'))
       const started = await response.json() as { id: string; authorizeUrl: string }
+      if (controller.signal.aborted) return false
       const popup = window.open(started.authorizeUrl, 'dispatch-salesforce-login', 'width=520,height=720')
-      if (!popup) {
-        setSalesforceConnectionError('The browser blocked the Salesforce login window. Allow popups for Dispatch, then try again.')
-        setConnectionsLoading(false)
-        return false
-      }
+      if (!popup) throw new Error('The browser blocked the Salesforce login window. Allow popups for Dispatch, then try again.')
       setOauthJob({ id: started.id, status: 'pending', message: 'Complete Salesforce login in the browser window.', role })
-      const poll = async () => {
-        const statusResponse = await fetch(`/api/connections/salesforce/oauth/${started.id}`)
-        if (!statusResponse.ok) throw new Error(await responseError(statusResponse, 'Salesforce login status is unavailable.'))
-        const job = await statusResponse.json() as SalesforceOAuthJob
+      void watchLoginJob<SalesforceOAuthJob>(`/api/connections/salesforce/oauth/${started.id}`, popup, controller, async (job) => {
+        if (salesforceLoginAttempt.current !== controller || controller.signal.aborted) return
         setOauthJob(job)
         if (job.status === 'active') {
-          await refreshSalesforceConnection()
+          await refreshSalesforceConnection(controller.signal)
+          if (salesforceLoginAttempt.current !== controller || controller.signal.aborted) return
           const added = job.username || job.alias || (role === 'devhub' ? 'Salesforce Dev Hub' : 'Salesforce org')
           setNotice(role === 'devhub' ? 'Salesforce Dev Hub is ready.' : 'Salesforce org is ready.')
           showToast(`Connected ${added}.`)
-          setConnectionsLoading(false)
-          return
-        }
-        if (job.status === 'failed') {
+        } else if (job.status === 'failed') {
           setSalesforceConnectionError(job.message)
-          setConnectionsLoading(false)
-          return
         }
-        window.setTimeout(() => { void poll().catch(handleOAuthError) }, 1000)
-      }
-      const handleOAuthError = (error: unknown) => {
+      }).catch((error: unknown) => {
+        if (salesforceLoginAttempt.current !== controller || (controller.signal.aborted && controller.signal.reason?.name === 'AbortError')) return
         const message = error instanceof Error ? error.message : 'Salesforce login status is unavailable.'
         setSalesforceConnectionError(message)
         setOauthJob({ id: started.id, status: 'failed', message, role })
-        setConnectionsLoading(false)
-      }
-      void poll().catch(handleOAuthError)
+      }).finally(() => { if (salesforceLoginAttempt.current === controller) setConnectionsLoading(false) })
       return true
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Salesforce login could not start.'
-      setSalesforceConnectionError(message)
-      setNotice(message)
+      if (salesforceLoginAttempt.current !== controller || controller.signal.aborted) return false
+      setSalesforceConnectionError(error instanceof Error ? error.message : 'Salesforce login could not start.')
       setConnectionsLoading(false)
       return false
     }
@@ -703,20 +803,32 @@ function App() {
     }
     if (nextPhase === 'Choose') setNotice('Confirm the solution and systems.')
     if (nextPhase === 'Connect') setNotice(plan.components.every((component) => component.ready) ? 'All selected connections are verified.' : 'Connect the remaining systems to continue.')
-    if (nextPhase === 'Configure') setNotice('Confirm the strategy and included components.')
+    if (nextPhase === 'Configure') setNotice('Confirm the strategy and included providers.')
   }
   const continueSavedDeployment = () => setWorkflowPhase(resumeWorkflowPhase(plan, connections, run))
 
-  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} refreshing={connectionsRefreshing} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} refreshing={connectionsRefreshing} checkingConnections={checkingConnections} onToggleProvider={toggleProvider} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage starting={deploymentStarting} plan={plan} run={run} events={runEvents} notice={notice} onApply={() => { if (!deploymentStartPending.current) setDeploymentConfirmationOpen(true) }} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onViewChanges={openCompletedRunChanges} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
+  const workflow = <><DeploymentHeader plan={plan} draftName={activePhase === 'Choose' ? deploymentName : undefined} activePhase={activePhase} run={run}/>{activePhase === 'Choose' ? <ChoosePage templates={templates} selectedTemplateID={selectedTemplateID} selectedComponents={selectedComponents} deploymentName={deploymentName} assembling={assembling} notice={notice} onTemplateChange={setSelectedTemplateID} onToggleSalesforce={toggleSalesforce} onDeploymentNameChange={setDeploymentName} onAssemble={assemblePackage}/> : activePhase === 'Connect' ? <ConnectPage plan={plan} connections={connections} refreshing={connectionsRefreshing} notice={notice} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onBack={() => setWorkflowPhase('Choose')} onNext={() => setWorkflowPhase('Configure')}/> : activePhase === 'Configure' ? <ConfigurePage plan={plan} connections={connections} notice={notice} refreshing={connectionsRefreshing} checkingConnections={checkingConnections} onToggleProvider={toggleProvider} onStrategyChange={setStrategy} onBack={() => setWorkflowPhase('Connect')} onNext={continueToReview}/> : activePhase === 'Deploy' ? <DeployPage retrying={checkingConnections} onRetryValidation={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} starting={deploymentStarting} plan={plan} run={run} events={runEvents} notice={notice} onApply={() => { if (!deploymentStartPending.current) setDeploymentConfirmationOpen(true) }} onDiagnostics={openDiagnostics} onViewChanges={openValidationChanges}/> : activePhase === 'Summary' && run ? <SummaryPage plan={plan} connections={connections} run={run} onOpenProvider={openProvider} onViewChanges={openCompletedRunChanges} onOverview={() => navigateTo('overview')}/> : <ReviewPage plan={plan} notice={notice} checkingConnections={checkingConnections} onDeploy={beginValidation} onEditConnections={() => setWorkflowPhase('Connect')} onBack={() => setWorkflowPhase('Configure')}/>}</>
   const content = screen === 'overview'
     ? <OverviewPage plan={plan} connections={connections} connectionsRefreshing={connectionsRefreshing} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
     : screen === 'history'
       ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onCloseDeployment={() => navigateTo('history')} onOpenDestination={openDestination} onViewChanges={openDeploymentChanges}/>
       : screen === 'settings'
         ? <SettingsPage defaults={deploymentDefaults} connections={connections} connectionsRefreshing={connectionsRefreshing} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
-        : workflow
+        : screen === 'help' ? <HelpPage/> : workflow
 
-  return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{content}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
+  const requiredData = screen === 'history' ? ['deployments']
+    : screen === 'settings' ? ['defaults']
+    : screen === 'workflow' ? ['plan', 'runs', 'templates', 'defaults']
+    : screen === 'overview' ? ['plan', 'runs', 'deployments'] : []
+  const needsConnections = screen === 'overview' || screen === 'settings' || (screen === 'workflow' && ['Connect', 'Configure', 'Summary'].includes(activePhase))
+  const loadErrors = requiredData.map((key) => dataErrors[key]).filter(Boolean)
+  if (needsConnections && connectionError) loadErrors.push(connectionError)
+  const waitingForData = screen !== 'help' && (!initialDataLoaded || (needsConnections && !connectionsKnown))
+  const visibleContent = loadErrors.length > 0
+    ? <section className="task-surface" aria-label="Workspace data unavailable"><Alert heading="Workspace data unavailable" message={`${loadErrors.join(' ')} Existing records may still be present. Check that Dispatch is running, then retry.`} tone="error" open/><box-button label="Retry loading" tone="primary" onClick={() => { if (requiredData.some((key) => dataErrors[key])) setDataRetry((current) => current + 1); if (needsConnections && connectionError) setConnectionRetry((current) => current + 1) }}></box-button></section>
+    : waitingForData ? <section className="task-surface" role="status">Loading workspace data…</section> : content
+
+  return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{streamNotice && <p className="notice" role="status">{streamNotice}</p>}{visibleContent}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} loading={diagnosticLoading} error={diagnosticError} onRetry={() => setDiagnosticRetry((current) => current + 1)} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
