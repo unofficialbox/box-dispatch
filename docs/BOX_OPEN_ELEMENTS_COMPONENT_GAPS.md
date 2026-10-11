@@ -30,7 +30,7 @@ The classifications match the
 ## Verification baseline
 
 The current Dispatch web package uses verified published core and React adapter
-versions 0.38.0.
+versions 0.39.0.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -113,7 +113,14 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.38.0 adoption
+## 0.39.0 chart boundary
+
+Box Plot and Trace Waterfall enhancements are available in the published package
+but are not consumed by Dispatch. No chart element or series model is imported.
+Overview/History Metric Cards use value/message properties and do not depend on
+a chart element. This upgrade introduces no chart UI or local compatibility shim.
+
+## Remaining enhancements after the 0.39.0 adoption
 
 The `box-table` keyboard sort-focus gap is resolved in verified published 0.37.1.
 Real Dispatch tests retain focus through four consecutive Enter/Space sorts without

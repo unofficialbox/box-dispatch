@@ -4,11 +4,11 @@
 
 - **Date:** 2026-10-11
 - **Repo:** `unofficialbox/box-dispatch`; cloud checkout `/workspace/box-dispatch-cloud-verified`
-- **Branch:** `codex/dispatch-accessibility-cleanup`
-- **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
+- **Branch:** `codex/boe-0-39-upgrade`
+- **Base main:** `331273e727218be46bfb76f54ea9bd80e2dc27ca` (merged PR #42)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
-  `@unofficialbox/box-open-elements-react` 0.38.0
+  `@unofficialbox/box-open-elements-react` 0.39.0
 
 The default no-subcommand experience is the React browser workspace served by the Go
 application. The older August handoff describes a Bubble Tea launch shell and should not
@@ -92,9 +92,12 @@ new component features do not require Dispatch application changes. Embedded ass
 and the adoption notes are refreshed. PR #41 was squash-merged as
 `27936b11a21b34685e1c49f097b75dbd551d140e` with specific user approval.
 
-### Current branch — independent Dispatch accessibility cleanup
+### PR #42 — accessibility cleanup and BOE 0.38.0 (merged)
 
-The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
+Kyle approved PR #42, squash-merged as
+`331273e727218be46bfb76f54ea9bd80e2dc27ca`. Its post-merge checks passed with
+79 unit tests and five E2E workflows; local/remote main and the reviewed tree matched.
+The historical cleanup allocation began October 11 at **02:34:00 UTC**.
 The branch adopts verified published core/React 0.38.0 from upstream commit
 `4e7da132911563e1cb3f80720134cb16b8aa1755`; both downloaded tarballs match
 the registry SHA-512 integrity and the React core peer range is compatible.
@@ -166,8 +169,27 @@ checks four successive Enter/Space sorts with focus set only once, in light/dark
 at 1440px/390px, then opens historical details and returns to History. Static
 tables omit selection ARIA; the controlled file selector has grid semantics and
 one selected row. Embedded assets are regenerated. The 0.37.2 status/name adoption
-is verified separately from the remaining contrast findings. This cleanup requires
-its own review; PR #41 approval does not authorize another merge or deployment.
+was verified separately from the qualified residuals. The PR #42 merge approval
+was specific; the current 0.39.0 draft needs new merge approval and no deployment
+is authorized.
+
+### Current branch — BOE 0.39.0 upgrade
+
+Published core/React 0.39.0 are adopted together from upstream release
+`5732d0098eccf594b924fdade409e58bda285ed5`. Registry metadata, downloaded
+SHA-512 integrity and the React core peer range are independently verified. Only
+those two dependency resolutions change; no application or theme compatibility
+change is needed. Embedded assets are regenerated and remain byte-identical.
+
+Runtime artifact changes from 0.38.0 are Box Plot and Trace Waterfall enhancements.
+Dispatch consumes neither element and has no chart series or chart UI; Overview
+and History use Metric Card value/message properties. Its metrics and existing
+workflow are verified alongside desktop/mobile light/dark sorting, gutter contrast
+and Switch descriptions. The original accessibility fixes and qualifications remain.
+
+The fixed effort estimate for this requested continuation is 20 minutes of active
+work beginning 13:16:08 UTC, excluding later external review/approval waits. Prepare
+an independent-review draft; prior merge approvals do not apply to this upgrade.
 
 ## Box Open Elements boundary
 
@@ -176,7 +198,7 @@ as the migration authority and
 [`docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md`](docs/BOX_OPEN_ELEMENTS_COMPONENT_GAPS.md)
 as the adopted/retained/gap inventory.
 
-All planned migration phases are complete within published 0.38.0 contracts. Keep the
+All planned migration phases are complete within published 0.39.0 contracts. Keep the
 following behavior Dispatch-owned:
 
 - routing, API calls, provider launch URLs, and deployment resume state;
@@ -299,12 +321,10 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** Independent Dispatch accessibility repairs are implemented on
-  `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
-  are aligned on verified published 0.38.0; gutter contrast and Switch
-  description association are verified resolved.
-- **Recommended Next Step:** Review the combined cleanup/table-adoption draft;
-  confirm exact-head merge approval; deployment remains separately gated.
+- **Current Status:** PR #42 is merged on main. `codex/boe-0-39-upgrade` adopts
+  verified published core/React 0.39.0; the rebuilt embedded assets are unchanged.
+- **Recommended Next Step:** Independently review the 0.39.0 draft and obtain new
+  exact-head merge approval. Deployment remains separately unapproved.
 - **Remaining qualifications:** Native Drawer scrim reports retain the verified
   white-panel interpretation. Sidebar/select/visible-overlap samples pass; hidden
   Path glyphs and modal-covered content are separately classified. Pre-existing
