@@ -29,7 +29,8 @@ The classifications match the
 
 ## Verification baseline
 
-The current Dispatch web package uses `@unofficialbox/box-open-elements` 0.37.0.
+The current Dispatch web package uses verified published core and React adapter
+versions 0.37.1.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -112,14 +113,19 @@ state to a low-level element.
 | Patterns | Selectable master-detail workspace | `box-split-view`, `box-table`, `box-empty-state`, `box-skeleton`, `box-drawer` | Document controlled row/card selection, keyboard behavior, empty/loading detail states, and narrow-screen detail presentation. Dispatch owns selected provider/component state. |
 | Patterns | Compact application navigation | Light-DOM `<a aria-current>`, `box-badge`, icons, optional drawer | Document expanded and collapsed navigation with accessible labels, tooltips, badges, link semantics, and responsive drawer behavior. Dispatch owns routes and active state. |
 
-## Remaining enhancements after the 0.37.0 review
+## Remaining enhancements after the 0.37.1 adoption
+
+The `box-table` keyboard sort-focus gap is resolved in verified published 0.37.1.
+Real Dispatch tests retain focus through four consecutive Enter/Space sorts without
+refocusing in each light/dark and desktop/mobile context, then open historical
+details. Static-table and selectable-grid semantics are also verified. Shared
+contrast and native-name findings below remain open.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
 | P2 | Components | Shared status contrast | Badge uses white text on bright fills; Path, Run Trace, Table and Timeline darken semantic foregrounds through color mixing. | Upstream adaptive foreground contracts are needed; preserve Dispatch charcoal/mint fills and avoid shadow-DOM patches. |
 | P2 | Components | Resource Row accessible name | Visible label/meta are inside the native select button, but its `aria-label` names only the label. | Seek upstream visible-name alignment with nonduplicated status descriptions. No local wrapper or host-label workaround. |
 | P2 | Patterns | Diff Viewer previous-control name | Visible `Prev` differs from the native button's `Previous change` name. | Align visible text and accessible name upstream; the published API has no navigation-label override. |
-| P2 | Components | `box-table` keyboard sort focus | Controlled sort updates rebuild the header and lose focus on its sort button in both 0.33.0 and 0.37.0. | Seek upstream focus preservation; do not patch the component shadow DOM. Repeated keyboard audit activations refocus the header. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 
