@@ -69,3 +69,50 @@ for (const colorScheme of ['light', 'dark'] as const) {
     })
   }
 }
+
+test('an unready Overview resume cannot replace a package while deployment start is pending', async ({ page, request }, info) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'New deployment' }).click()
+  const name = 'Pending start Overview resume safeguard'
+  await page.getByRole('textbox', { name: 'Name this deployment' }).fill(name)
+  await page.getByRole('button', { name: 'Prepare package' }).click()
+  await page.getByRole('button', { name: 'Continue to configure' }).click()
+  await page.getByRole('button', { name: 'Review plan' }).click()
+  await page.getByRole('button', { name: 'Validate deployment' }).click()
+  await page.getByRole('button', { name: 'Continue to deployment' }).waitFor()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  let acceptedID = ''
+  await page.route('**/api/runs/*/deploy', async (route) => {
+    const response = await route.fetch()
+    acceptedID = (await response.json()).id
+    await held
+    await route.fulfill({ response })
+  })
+  await page.getByRole('button', { name: 'Continue to deployment' }).click()
+  await page.getByRole('button', { name: 'Start deployment' }).click()
+  try {
+    await expect.poll(() => acceptedID).not.toBe('')
+    const connections = await (await request.get('/api/connections')).json() as { name: string; verified: boolean }[]
+    for (const connection of connections) connection.verified = false
+    await page.route('**/api/connections', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(connections) }))
+    await page.route(/\/api\/connections\/(box|salesforce)\/check$/, (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(connections.find((connection) => connection.name.toLowerCase() === new URL(route.request().url()).pathname.split('/')[3])) }))
+    let replacementPackages = 0
+    await page.route('**/api/packages', (route) => { replacementPackages++; return route.abort() })
+    await page.getByRole('link', { name: 'Overview', exact: true }).click()
+    await page.getByRole('button', { name: 'Connect systems', exact: true }).click()
+    await expect(page.getByText('Deployment is starting. Wait for its status before changing this workflow.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Validation', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Confirm connections', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Prepare package', exact: true })).toHaveCount(0)
+    expect(replacementPackages).toBe(0)
+    expect((await (await request.get('/api/plan')).json()).name).toBe(name)
+    await page.screenshot({ path: info.outputPath('pending-overview-resume.png'), fullPage: true })
+  } finally { release() }
+  await expect(page.getByRole('heading', { name: `${name} is ready` })).toBeVisible()
+  const runs = await (await request.get('/api/runs')).json() as { id: string; deployment: string; action: string }[]
+  const accepted = runs.filter((run) => run.deployment === name && run.action === 'deploy')
+  expect(accepted).toHaveLength(1)
+  expect(accepted[0].id).toBe(acceptedID)
+})

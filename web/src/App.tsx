@@ -334,7 +334,15 @@ function App() {
     window.scrollTo(0, 0)
   }, [activePhase, screen])
 
+  const keepPendingDeploymentWorkflow = () => {
+    if (!deploymentStartPending.current) return false
+    navigateTo('workflow')
+    setActivePhase('Deploy')
+    setNotice('Deployment is starting. Wait for its status before changing this workflow.')
+    return true
+  }
   const beginValidation = async () => {
+    if (keepPendingDeploymentWorkflow()) return
     if (checkingConnections) return
     setCheckingConnections(true)
     setNotice('Checking live authentication before validation…')
@@ -740,6 +748,7 @@ function App() {
   }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
   const assemblePackage = () => {
+    if (keepPendingDeploymentWorkflow()) return
     if (!deploymentName.trim()) { setNotice('Enter a deployment name to continue.'); return }
     setAssembling(true); setNotice('Preparing the selected package…')
     void fetch('/api/packages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deploymentName.trim(), templateId: selectedTemplateID, components: selectedComponents, strategy: deploymentDefaults.strategy }) }).then(async (response) => {
@@ -801,6 +810,7 @@ function App() {
   }
   const setStrategy = (strategy: DeploymentPlan['strategy']) => setPlan((current) => ({ ...current, strategy }))
   const continueToReview = async () => {
+    if (keepPendingDeploymentWorkflow()) return
     if (checkingConnections) return
     setCheckingConnections(true)
     setNotice('Saving the plan and checking live authentication…')
@@ -824,6 +834,7 @@ function App() {
     }
   }
   const setWorkflowPhase = (phase: Phase) => {
+    if (keepPendingDeploymentWorkflow()) return
     if (phase === 'Review') {
       void continueToReview()
       return
