@@ -3,7 +3,7 @@ import { DetailList, DetailsRail } from '../components/DetailsRail'
 import { RunTimeline } from '../components/RunTimeline'
 import { presentProviderProgress } from '../components/runTimelineModel'
 
-export function DeployPage({ plan, run, events, notice, onApply, onDiagnostics, onViewChanges }: { plan: DeploymentPlan; run: DispatchRun | null; events: RunEvent[]; notice: string; onApply: () => void; onDiagnostics: (runID: string) => void; onViewChanges: (runID: string) => void }) {
+export function DeployPage({ plan, run, events, notice, starting = false, onApply, onDiagnostics, onViewChanges }: { plan: DeploymentPlan; run: DispatchRun | null; events: RunEvent[]; notice: string; starting?: boolean; onApply: () => void; onDiagnostics: (runID: string) => void; onViewChanges: (runID: string) => void }) {
   const title = run?.action === 'deploy' ? 'Deployment' : 'Validation'
   const state = run?.status ?? 'queued'
   const status = state === 'completed' ? 'Complete' : state === 'failed' ? 'Needs attention' : 'In progress'
@@ -21,7 +21,7 @@ export function DeployPage({ plan, run, events, notice, onApply, onDiagnostics, 
       <div className="run-overall-progress"><box-progress-bar label={`${completedProviders} of ${providers.length} systems complete`} value={completedProviders} max={providers.length}></box-progress-bar></div>
       <RunTimeline providers={providers}/>
       {notice && <p className="notice" role="status">{notice}</p>}
-      <footer className="action-row"><div className="stage-navigation">{run?.action === 'validate' && run.status === 'completed' && <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button>}{run?.action === 'validate' && run.status === 'completed' && <box-button label="Continue to deployment" tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <box-button label="View diagnostic guidance" tone="primary" onClick={() => onDiagnostics(run.id)}></box-button>}</div></footer>
+      <footer className="action-row"><div className="stage-navigation">{run?.action === 'validate' && run.status === 'completed' && <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(run.id)}></box-button>}{run?.action === 'validate' && run.status === 'completed' && <box-button label={starting ? 'Starting deployment…' : 'Continue to deployment'} disabled={starting} tone="primary" onClick={onApply}></box-button>}{run?.status === 'failed' && <box-button label="View diagnostic guidance" tone="primary" onClick={() => onDiagnostics(run.id)}></box-button>}</div></footer>
     </section>
     <DetailsRail title="Run details" description={detailCopy}><DetailList rows={[["Deployment", plan.name], ["Status", status], ['Run ID', run?.id || 'Preparing'], ['Current system', currentProvider?.name || (state === 'completed' ? 'All systems complete' : 'Waiting')], ['Completed', `${completedProviders} of ${providers.length}`], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
   </section>
