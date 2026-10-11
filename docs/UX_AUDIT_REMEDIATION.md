@@ -27,6 +27,6 @@ The browser synchronously guards the request and disables continuation while wai
 
 Focused backend tests send 32 concurrent requests, replay failure, restore persisted history, validate again for an intentional retry, and simulate storage failure. Browser tests hold a real mock-backend deployment response and repeat the accepted HTTP request at 390px and 1440px in light/dark themes. They assert one run, a disabled pending action, and honest scope text.
 
-No live provider calls, auth changes, deployment, or merge are part of this work. Chromium is the cloud rendered-check browser; Safari and human screen-reader checks remain external acceptance work. The existing large-bundle build warning remains.
+No live provider calls, credential or authorization-grant changes, deployment, or merge are part of this work. Acceptance uses Chromium, keyboard checks, and automated accessibility. The existing large-bundle build warning remains.
 
 P1 gate: empty `gofmt -l .`; Go build/vet/tests and webapi race tests pass. Frontend lint, 80 unit tests, production build, and all 9 isolated Chromium E2E scenarios pass. Rendered pending/completed screenshots are retained under `/workspace/box-dispatch-cloud-evidence/ux-remediation/p1`. No theme files changed.
