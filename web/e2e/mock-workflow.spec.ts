@@ -5,14 +5,36 @@ import axe from 'axe-core'
 // in the full-page review evidence until the upstream fixes are published.
 async function expectAccessible(page: Page, selectors: string[], rules: string[]) {
   await page.addScriptTag({ content: axe.source })
-  const violations = await page.evaluate(async ({ selectors, rules }) => {
+  const audit = await page.evaluate(async ({ selectors, rules }) => {
     const result = await (window as Window & { axe: typeof axe }).axe.run(
       { include: selectors },
       { runOnly: { type: 'rule', values: rules } },
     )
-    return result.violations.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, any }) => ({ target, checks: any.map(({ data }) => data) })) }))
+    const summarize = (results: typeof result.violations) => results.map(({ id, nodes }) => ({
+      id,
+      nodes: nodes.map(({ target, failureSummary, any, all, none }) => ({
+        target,
+        failureSummary,
+        checks: [...any, ...all, ...none].map(({ id, data, message }) => ({ id, data, message })),
+      })),
+    }))
+    return {
+      violations: summarize(result.violations),
+      incomplete: summarize(result.incomplete),
+      contrastPasses: summarize(result.passes.filter(({ id }) => id === 'color-contrast')),
+    }
   }, { selectors, rules })
-  expect(violations).toEqual([])
+  await test.info().attach('owned-accessibility-audit', {
+    body: JSON.stringify({ selectors, rules, ...audit }, null, 2),
+    contentType: 'application/json',
+  })
+  expect(audit.violations).toEqual([])
+  if (rules.includes('color-contrast')) {
+    // These contexts contain visible owned copy with known theme backgrounds.
+    // An indeterminate contrast result must be assessed rather than passing.
+    expect(audit.incomplete.filter(({ id }) => id === 'color-contrast')).toEqual([])
+    expect(audit.contrastPasses.flatMap(({ nodes }) => nodes).length).toBeGreaterThan(0)
+  }
 }
 
 test('follows the system color preference across primary pages', async ({ page }) => {

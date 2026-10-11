@@ -107,7 +107,10 @@ It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
 - affected muted text and the live activity feed use existing theme tokens instead
   of hardcoded light colors; charcoal/mint fills and registered themes are unchanged;
 - focused unit tests and scoped axe/keyboard checks are added to the existing E2E
-  workflows. `axe-core` 4.14.0 is a test-only dependency.
+  workflows. `axe-core` 4.14.0 is a test-only dependency. Scoped audits attach
+  violations, incomplete checks and contrast passes; the visible owned text contexts
+  require at least one resolved contrast pass and no incomplete contrast result.
+  Other incomplete categories remain evidence for assessment, not blanket failures.
 
 Fact-list styles remain unchanged: their earlier contrast findings disappeared once
 entrance animations settled. No BOE source, native control names or status color-mix
