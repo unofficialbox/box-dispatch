@@ -105,6 +105,7 @@ function App() {
   const workflowResumeRequested = useRef(viewFromHash() === 'workflow')
   const workflowNavigationVersion = useRef(0)
   const workflowDraftGeneration = useRef(0)
+  const validationReviewRequired = useRef(false)
   const [deploymentConfirmationOpen, setDeploymentConfirmationOpen] = useState(false)
   const [deploymentStarting, setDeploymentStarting] = useState(false)
   const deploymentStartPending = useRef(false)
@@ -181,8 +182,10 @@ function App() {
       if (ownsDraft && planResult.status === 'fulfilled' && planResult.value.exists) {
         setPlan(markPlanConnectionsChecking(planResult.value))
         setDeploymentName(planResult.value.name)
-        const latestRun = runsResult.status === 'fulfilled' ? runsResult.value.find((candidate) => !candidate.deployment || candidate.deployment === planResult.value.name) ?? null : null
-        const resumedPhase = resumeWorkflowPhase(planResult.value, [], latestRun)
+        const latestRun = !validationReviewRequired.current && runsResult.status === 'fulfilled' ? runsResult.value.find((candidate) => !candidate.deployment || candidate.deployment === planResult.value.name) ?? null : null
+        const resumedPhase = validationReviewRequired.current
+          ? 'Connect'
+          : resumeWorkflowPhase(planResult.value, [], latestRun)
         setRun(latestRun)
         setActivePhase(resumedPhase)
         setNotice(workflowResumeNotice(resumedPhase, latestRun))
@@ -353,6 +356,7 @@ function App() {
       const response = await fetch('/api/runs', { method: 'POST' })
       if (!response.ok) throw new Error(await responseError(response, 'Validation could not start.'))
       const nextRun = await response.json() as DispatchRun
+      validationReviewRequired.current = false
       setRun(nextRun)
       setRunEvents([])
       setActivePhase('Deploy')
@@ -374,7 +378,22 @@ function App() {
     setDeploymentConfirmationOpen(false)
     try {
       const response = await fetch(`/api/runs/${run.id}/deploy`, { method: 'POST' })
-      if (!response.ok) throw new Error(await responseError(response, 'Deployment could not start. Try again.'))
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null) as { error?: string; code?: string } | null
+        if (failure?.code === 'stale_validation') {
+          validationReviewRequired.current = true
+          try {
+            const currentPlan = await fetchJSON<DeploymentPlan>('/api/plan', new AbortController().signal)
+            setPlan(currentPlan)
+          } catch {
+            setDataErrors((current) => ({ ...current, plan: 'Current deployment plan could not be loaded.' }))
+          }
+          setRun(null)
+          setRunEvents([])
+          setActivePhase('Review')
+        }
+        throw new Error(failure?.error?.trim() || 'Deployment could not start. Try again.')
+      }
       const nextRun = await response.json() as DispatchRun
       setRun(nextRun)
       setRunEvents([])
@@ -737,6 +756,7 @@ function App() {
       return
     }
     workflowDraftGeneration.current += 1
+    validationReviewRequired.current = false
     navigateTo('workflow')
     setRun(null)
     setRunEvents([])

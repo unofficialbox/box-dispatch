@@ -47,6 +47,7 @@ func newSalesforceRESTSession(settings config.ConnectionSettings) *salesforceRES
 }
 
 func (session *salesforceRESTSession) refresh(ctx context.Context) error {
+	original, _ := session.settings.SelectedSalesforceOrg()
 	refreshToken := strings.TrimSpace(session.settings.SalesforceRefreshToken)
 	if refreshToken == "" {
 		return session.invalidate(fmt.Errorf("the Salesforce session expired and this connection has no refresh token; reconnect the selected org"))
@@ -69,7 +70,8 @@ func (session *salesforceRESTSession) refresh(ctx context.Context) error {
 			session.settings.SalesforceInstanceURL = strings.TrimRight(refreshed.InstanceURL, "/")
 		}
 		session.settings = session.settings.SyncSelectedSalesforceOrg()
-		if err := shellstate.SaveConnectionSettings(session.settings); err != nil {
+		updated, _ := session.settings.SelectedSalesforceOrg()
+		if err := persistSalesforceSessionUpdate(original, updated, false); err != nil {
 			return fmt.Errorf("save refreshed Salesforce connection: %w", err)
 		}
 		session.credential = salesforceRESTCredential(session.settings)
@@ -115,8 +117,10 @@ func (session *salesforceRESTSession) enrichOrgStatus(org salesforceapi.OrgStatu
 }
 
 func (session *salesforceRESTSession) invalidate(authenticationErr error) error {
+	original, _ := session.settings.SelectedSalesforceOrg()
 	session.settings = session.settings.InvalidateSelectedSalesforceVerification("Unavailable")
-	if err := shellstate.SaveConnectionSettings(session.settings); err != nil {
+	updated, _ := session.settings.SelectedSalesforceOrg()
+	if err := persistSalesforceSessionUpdate(original, updated, true); err != nil {
 		return fmt.Errorf("%w; clear stale Salesforce readiness: %v", authenticationErr, err)
 	}
 	return authenticationErr
@@ -810,4 +814,32 @@ func salesforceRESTFailure(item Item, prefix string, err error) Item {
 	item.Detail = strings.TrimSpace(prefix) + ": " + err.Error()
 	item.Diagnostic = err.Error()
 	return item
+}
+
+// Persist only this session's original record, without reselecting it or
+// restoring a captured whole-settings snapshot over another provider's edits.
+func persistSalesforceSessionUpdate(original, updated config.SalesforceOrgConnection, invalidate bool) error {
+	_, err := shellstate.UpdateConnectionSettings(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+		current = current.HydrateSalesforceOrgs()
+		for index, org := range current.SalesforceOrgs {
+			if org.ID != original.ID {
+				continue
+			}
+			if org.ID == "" || org.OrgID != original.OrgID || org.Username != original.Username || org.ClientID != original.ClientID || org.RefreshToken != original.RefreshToken {
+				return current, fmt.Errorf("Salesforce connection changed while the session was being checked; check it again")
+			}
+			if invalidate {
+				org.Status = updated.Status
+				if current.SalesforceSelectedOrgID == org.ID {
+					delete(current.VerifiedConnections, "salesforce")
+				}
+			} else {
+				org.AccessToken, org.RefreshToken, org.InstanceURL = updated.AccessToken, updated.RefreshToken, updated.InstanceURL
+			}
+			current.SalesforceOrgs[index] = org
+			return current.HydrateSalesforceOrgs(), nil
+		}
+		return current, fmt.Errorf("Salesforce connection is no longer available; reconnect it")
+	})
+	return err
 }

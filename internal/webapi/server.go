@@ -6,6 +6,7 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -30,6 +32,7 @@ type salesforceExperiencePath func(context.Context, salesforceapi.Credential, st
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
+	ContextFingerprint       validationContextReader
 	Profile                  string
 	DeploymentStore          deploymentStore
 	ConnectionStore          connectionStore
@@ -66,6 +69,7 @@ func NewHandler(profile string) http.Handler {
 
 // NewHandlerWithOptions returns a handler with injectable read-only stores.
 func NewHandlerWithOptions(options ServerOptions) http.Handler {
+	usesPersistedConnections := options.ConnectionStore == nil && options.ConnectionSaver == nil
 	if options.DeploymentStore == nil {
 		options.DeploymentStore = audit.ListDeployments
 	}
@@ -134,6 +138,56 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.Runs == nil {
 		options.Runs = newRunManager()
+	}
+	if options.ContextFingerprint == nil {
+		options.ContextFingerprint = fingerprintValidationContext
+	}
+	originalStore := options.ConnectionStore
+	options.ConnectionStore = func() (config.ConnectionSettings, error) {
+		settings, err := originalStore()
+		settings = config.CloneConnectionSettings(settings.HydrateBoxConnections().HydrateSalesforceOrgs())
+		settings.ObservedConnectionState = nil
+		baseline := config.CloneConnectionSettings(settings)
+		settings.ObservedConnectionState = &baseline
+		return settings, err
+	}
+	options.Runs.mu.Lock()
+	options.Runs.fingerprint = options.ContextFingerprint
+	options.Runs.contextReader = func() (config.SolutionPlan, config.ConnectionSettings, error) {
+		plan, err := options.PlanStore()
+		if err != nil {
+			return plan, config.ConnectionSettings{}, err
+		}
+		settings, err := options.ConnectionStore()
+		return plan, settings, err
+	}
+	options.Runs.mu.Unlock()
+	originalSaver := options.ConnectionSaver
+	options.ConnectionSaver = func(next config.ConnectionSettings) error {
+		apply := func(update shellstate.ConnectionUpdate) (config.ConnectionSettings, error) {
+			current, err := options.ConnectionStore()
+			if err != nil {
+				return current, err
+			}
+			value, err := update(current)
+			if err != nil {
+				return current, err
+			}
+			return value, originalSaver(config.CloneConnectionSettings(value))
+		}
+		if usesPersistedConnections {
+			apply = shellstate.ApplyConnectionUpdate
+		}
+		_, err := options.Runs.guardConnectionUpdate(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+			if usesPersistedConnections {
+				current = bootstrapConnectionEnvironment(current).HydrateBoxConnections().HydrateSalesforceOrgs()
+			}
+			return config.MergeObservedConnectionUpdate(next, current)
+		}, apply)
+		return err
+	}
+	if usesPersistedConnections {
+		shellstate.SetConnectionWriteGuard(options.Runs.guardConnectionUpdate)
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -248,7 +302,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		settings = saveSalesforceREST(settings, input)
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not save the Salesforce connection")
+			writeConnectionSaveError(w, err, "could not save the Salesforce connection")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
@@ -318,7 +372,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			}
 		}
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "Salesforce is available, but Dispatch could not save the check")
+			writeConnectionSaveError(w, err, "Salesforce is available, but Dispatch could not save the check")
 			return
 		}
 		writeJSON(w, http.StatusOK, status)
@@ -363,7 +417,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			scratchTarget = target
 			credential = targetCredential(settings)
 			if err := options.ConnectionSaver(settings); err != nil {
-				writeError(w, http.StatusInternalServerError, "Salesforce renewed the scratch-org session, but Dispatch could not save it")
+				writeConnectionSaveError(w, err, "Salesforce renewed the scratch-org session, but Dispatch could not save it")
 				return
 			}
 		} else if settings.SalesforceRefreshToken != "" {
@@ -379,7 +433,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			settings = refreshed
 			credential = targetCredential(settings)
 			if err := options.ConnectionSaver(settings); err != nil {
-				writeError(w, http.StatusInternalServerError, "Salesforce renewed the session, but Dispatch could not save it")
+				writeConnectionSaveError(w, err, "Salesforce renewed the session, but Dispatch could not save it")
 				return
 			}
 		}
@@ -419,6 +473,10 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		w.WriteHeader(http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /api/connections/salesforce/oauth/start", func(w http.ResponseWriter, r *http.Request) {
+		if err := options.Runs.checkConnectionWorkflow(); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		defer r.Body.Close()
 		if options.SalesforceCallbackReady != nil && !options.SalesforceCallbackReady() {
 			writeError(w, http.StatusConflict, "Salesforce login needs port 1717. Stop anything using 1717 and restart Dispatch.")
@@ -493,8 +551,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			if hubErr == nil && !hasHub {
 				settings = applySalesforceOAuthToken(settings, "org", job.clientID, job.clientSecret, token, username, orgID)
 				if err := options.ConnectionSaver(settings); err != nil {
-					oauthJobs.finish(job, "failed", "Salesforce login succeeded, but Dispatch could not save the connection", username, username, orgID)
-					writeOAuthCallbackPage(w, "Salesforce login", "Salesforce login succeeded, but Dispatch could not save the connection", false)
+					oauthJobs.finish(job, "failed", connectionSaveMessage(err, "Salesforce login succeeded, but Dispatch could not save the connection"), username, username, orgID)
+					writeOAuthCallbackPage(w, "Salesforce login", connectionSaveMessage(err, "Salesforce login succeeded, but Dispatch could not save the connection"), false)
 					return
 				}
 				message := "This Salesforce org is not a Dev Hub. Enable Dev Hub in Setup, then log in as that org."
@@ -512,8 +570,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			Identity: username, OrgID: orgID, OrgStatus: status.Status, AuthType: "Salesforce OAuth",
 		}
 		if err := options.ConnectionSaver(settings); err != nil {
-			oauthJobs.finish(job, "failed", "Salesforce login succeeded, but Dispatch could not save the connection", username, username, orgID)
-			writeOAuthCallbackPage(w, "Salesforce login", "Salesforce login succeeded, but Dispatch could not save the connection", false)
+			oauthJobs.finish(job, "failed", connectionSaveMessage(err, "Salesforce login succeeded, but Dispatch could not save the connection"), username, username, orgID)
+			writeOAuthCallbackPage(w, "Salesforce login", connectionSaveMessage(err, "Salesforce login succeeded, but Dispatch could not save the connection"), false)
 			return
 		}
 		message := "Salesforce org connected and verified."
@@ -538,6 +596,10 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, job)
 	})
 	mux.HandleFunc("POST /api/salesforce/scratch-orgs", func(w http.ResponseWriter, r *http.Request) {
+		if err := options.Runs.checkConnectionWorkflow(); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		defer r.Body.Close()
 		var input scratchCreateInput
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
@@ -606,7 +668,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		settings = settings.MarkBoxVerified(verification)
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "Box accepted the connection, but Dispatch could not save it")
+			writeConnectionSaveError(w, err, "Box accepted the connection, but Dispatch could not save it")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
@@ -639,7 +701,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		}
 		settings = settings.MarkBoxVerified(verification)
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "Box is available, but Dispatch could not save the check")
+			writeConnectionSaveError(w, err, "Box is available, but Dispatch could not save the check")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, verification))
@@ -670,7 +732,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not save the Box selection")
+			writeConnectionSaveError(w, err, "could not save the Box selection")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, settings.VerifiedConnections["box"]))
@@ -692,12 +754,16 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not remove the Box connection")
+			writeConnectionSaveError(w, err, "could not remove the Box connection")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentBoxConnection(settings, settings.VerifiedConnections["box"]))
 	})
 	mux.HandleFunc("POST /api/connections/box/oauth/start", func(w http.ResponseWriter, r *http.Request) {
+		if err := options.Runs.checkConnectionWorkflow(); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if options.BoxCallbackReady != nil && !options.BoxCallbackReady() {
 			writeError(w, http.StatusConflict, "Box login needs port 4400. Stop anything using 4400 and restart Dispatch.")
 			return
@@ -755,8 +821,8 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		settings = applyBoxOAuthToken(settings, job.clientID, job.clientSecret, token, verification.Identity, verification.Account, verification.Enterprise)
 		settings = settings.MarkBoxVerified(verification)
 		if err := options.ConnectionSaver(settings); err != nil {
-			boxOAuthJobs.finish(job, "failed", "Box login succeeded, but Dispatch could not save the connection", verification.Identity, verification.Identity, verification.Account)
-			writeOAuthCallbackPage(w, "Box login", "Box login succeeded, but Dispatch could not save the connection", false)
+			boxOAuthJobs.finish(job, "failed", connectionSaveMessage(err, "Box login succeeded, but Dispatch could not save the connection"), verification.Identity, verification.Identity, verification.Account)
+			writeOAuthCallbackPage(w, "Box login", connectionSaveMessage(err, "Box login succeeded, but Dispatch could not save the connection"), false)
 			return
 		}
 		boxOAuthJobs.finish(job, "active", "Box connected and verified.", settings.BoxCCGAlias, verification.Identity, verification.Account)
@@ -789,7 +855,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		if err := options.ConnectionSaver(settings); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not remove the Salesforce org")
+			writeConnectionSaveError(w, err, "could not remove the Salesforce org")
 			return
 		}
 		writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
@@ -825,7 +891,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			}
 			settings = selected
 			if err := options.ConnectionSaver(settings); err != nil {
-				writeError(w, http.StatusInternalServerError, "could not save the Salesforce selection")
+				writeConnectionSaveError(w, err, "could not save the Salesforce selection")
 				return
 			}
 			writeJSON(w, http.StatusOK, presentSalesforceConnection(settings))
@@ -840,7 +906,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			if strings.EqualFold(target.Alias, input.Alias) && target.Healthy(options.Now()) {
 				settings = saveSalesforceSelection(settings, target)
 				if err := options.ConnectionSaver(settings); err != nil {
-					writeError(w, http.StatusInternalServerError, "could not save the Salesforce selection")
+					writeConnectionSaveError(w, err, "could not save the Salesforce selection")
 					return
 				}
 				writeJSON(w, http.StatusOK, connectionSummary{Name: "Salesforce", Configured: true, Selection: settings.SalesforceAlias, Status: settings.SalesforceOrgStatus, ExpiresAt: settings.SalesforceExpirationDate})
@@ -933,6 +999,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		release, err := options.Runs.beginContextMutation()
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
 		existing, err := options.PlanStore()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "saved plan is unavailable")
@@ -1001,6 +1073,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			writeError(w, http.StatusBadRequest, "choose an available solution quickstart")
 			return
 		}
+		release, err := options.Runs.beginContextMutation()
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
 		plan, err := options.PackageAssembler(selected, input.Components, input.Strategy)
 		if err != nil {
 			// Workspace and git diagnostics can reveal local paths. Keep those
@@ -1025,12 +1103,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, options.Runs.history())
 	})
 	mux.HandleFunc("POST /api/runs", func(w http.ResponseWriter, _ *http.Request) {
-		plan, err := options.PlanStore()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "saved plan is unavailable")
-			return
-		}
-		run, err := options.Runs.startValidation(plan)
+		run, err := options.Runs.startValidation(config.SolutionPlan{})
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return
@@ -1064,7 +1137,11 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	mux.HandleFunc("POST /api/runs/{id}/deploy", func(w http.ResponseWriter, r *http.Request) {
 		run, err := options.Runs.startDeployment(r.PathValue("id"))
 		if err != nil {
-			writeError(w, http.StatusConflict, err.Error())
+			if errors.Is(err, errStaleValidation) {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "stale_validation"})
+			} else {
+				writeError(w, http.StatusConflict, err.Error())
+			}
 			return
 		}
 		writeJSON(w, http.StatusAccepted, run)
@@ -1573,4 +1650,19 @@ func noStore(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func writeConnectionSaveError(w http.ResponseWriter, err error, fallback string) {
+	if errors.Is(err, config.ErrConnectionConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, fallback)
+}
+
+func connectionSaveMessage(err error, fallback string) string {
+	if errors.Is(err, config.ErrConnectionConflict) {
+		return err.Error()
+	}
+	return fallback
 }

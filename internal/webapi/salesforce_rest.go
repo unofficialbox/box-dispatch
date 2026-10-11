@@ -324,6 +324,11 @@ func (manager *scratchJobManager) run(id string, input scratchCreateInput) {
 		manager.fail(id, explainScratchCreateFailure(err, settings))
 		return
 	}
+	// Keep the created resource identifiable even if its delayed selected-org
+	// save is rejected by an active run or a concurrent target change.
+	manager.update(id, func(job *scratchJob) {
+		job.Alias, job.Username, job.OrgID, job.ExpirationDate = org.Alias, org.Username, org.OrgID, org.ExpirationDate
+	})
 	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{
 		Alias: org.Alias, Username: org.Username, OrgID: org.OrgID, OrgType: "scratch",
 		InstanceURL: org.InstanceURL, AccessToken: org.AccessToken, RefreshToken: org.RefreshToken,
@@ -338,7 +343,7 @@ func (manager *scratchJobManager) run(id string, input scratchCreateInput) {
 	}
 	settings.VerifiedConnections["salesforce"] = config.VerifiedConnection{VerifiedAt: time.Now().UTC().Format(time.RFC3339), Selection: org.Alias, Identity: org.Username, OrgID: org.OrgID, OrgStatus: org.Status, OrgType: "scratch", ExpiresAt: org.ExpirationDate, AuthType: authType}
 	if err := manager.save(settings); err != nil {
-		manager.fail(id, "The scratch org was created, but Dispatch could not save the connection")
+		manager.fail(id, "The scratch org was created, but its connection could not be selected. "+connectionSaveMessage(err, "Check the saved connections and connect the created org again."))
 		return
 	}
 	manager.update(id, func(job *scratchJob) {

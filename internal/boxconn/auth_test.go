@@ -106,3 +106,63 @@ func isolateConnectionSettings(t *testing.T, settings config.ConnectionSettings)
 		t.Fatal(err)
 	}
 }
+
+func TestBoxRotationUpdatesItsOriginalRecordWithoutReselecting(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "a", ClientID: "client", RefreshToken: "original", Identity: "a@test"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "b", ClientID: "other", RefreshToken: "other", Identity: "b@test"}, true)
+	isolateConnectionSettings(t, settings)
+	persistRotatedBoxRefresh(AuthConfig{connectionID: "a", ClientID: "client", RefreshToken: "original"}, "rotated")
+	current, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.BoxSelectedConnectionID != "b" || current.BoxConnections[0].RefreshToken != "rotated" || current.BoxConnections[1].RefreshToken != "other" {
+		t.Fatal("rotation restored another selected account or changed its token")
+	}
+	persistRotatedBoxRefresh(AuthConfig{connectionID: "a", ClientID: "client", RefreshToken: "original"}, "late-stale")
+	current, _ = shellstate.LoadConnectionSettings()
+	if current.BoxConnections[0].RefreshToken != "rotated" {
+		t.Fatal("late rotation overwrote a newer token")
+	}
+}
+
+func TestDelayedOAuthInvalidationOnlyClearsItsOriginalRecord(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "box-a", ClientID: "client-a", RefreshToken: "refresh-a", VerifiedAt: "verified-a", Identity: "a@example.test", Account: "account-a", Enterprise: "enterprise"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "box-b", ClientID: "client-b", RefreshToken: "refresh-b", VerifiedAt: "verified-b", Identity: "b@example.test", Account: "account-b", Enterprise: "enterprise"}, false)
+	isolateConnectionSettings(t, settings)
+	original, err := ResolveAuth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = shellstate.UpdateConnectionSettings(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+		return current.SelectBoxConnection("box-b")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.InvalidateOAuthConnection()
+	current, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.BoxSelectedConnectionID != "box-b" || current.BoxConnections[1].VerifiedAt != "verified-b" || current.BoxConnections[0].VerifiedAt != "" || current.VerifiedConnections["box"].Identity != "b@example.test" {
+		t.Fatal("delayed A failure cleared B readiness or changed selection")
+	}
+	// A successful replacement refresh wins over an earlier failure as well.
+	_, err = shellstate.UpdateConnectionSettings(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+		current.BoxConnections[0].RefreshToken = "reconnected-a"
+		current.BoxConnections[0].VerifiedAt = "verified-new-a"
+		return current, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.InvalidateOAuthConnection()
+	current, err = shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.BoxConnections[0].VerifiedAt != "verified-new-a" {
+		t.Fatal("delayed failure invalidated a renewed token")
+	}
+}

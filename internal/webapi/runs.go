@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
 type runAction string
@@ -68,18 +70,21 @@ type runDiagnostic struct {
 }
 
 type persistedRun struct {
-	ID              string              `json:"id"`
-	DeploymentRunID string              `json:"deploymentRunId,omitempty"`
-	Action          runAction           `json:"action"`
-	Status          runStatus           `json:"status"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	StartedAt       *time.Time          `json:"startedAt,omitempty"`
-	CompletedAt     *time.Time          `json:"completedAt,omitempty"`
-	Providers       []providerSummary   `json:"providers,omitempty"`
-	Plan            config.SolutionPlan `json:"plan,omitempty"`
-	Items           []lifecycle.Item    `json:"items,omitempty"`
-	Events          []runEvent          `json:"events,omitempty"`
-	Diagnostic      *runDiagnostic      `json:"diagnostic,omitempty"`
+	ContextVersion        int                 `json:"contextVersion,omitempty"`
+	ContextFingerprint    string              `json:"contextFingerprint,omitempty"`
+	ValidationInvalidated bool                `json:"validationInvalidated,omitempty"`
+	ID                    string              `json:"id"`
+	DeploymentRunID       string              `json:"deploymentRunId,omitempty"`
+	Action                runAction           `json:"action"`
+	Status                runStatus           `json:"status"`
+	CreatedAt             time.Time           `json:"createdAt"`
+	StartedAt             *time.Time          `json:"startedAt,omitempty"`
+	CompletedAt           *time.Time          `json:"completedAt,omitempty"`
+	Providers             []providerSummary   `json:"providers,omitempty"`
+	Plan                  config.SolutionPlan `json:"plan,omitempty"`
+	Items                 []lifecycle.Item    `json:"items,omitempty"`
+	Events                []runEvent          `json:"events,omitempty"`
+	Diagnostic            *runDiagnostic      `json:"diagnostic,omitempty"`
 }
 
 type runChangesResponse struct {
@@ -89,28 +94,36 @@ type runChangesResponse struct {
 type runExecutor func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error)
 
 type runManager struct {
-	mu       sync.RWMutex
-	runs     map[string]*deploymentRun
-	next     int
-	now      func() time.Time
-	validate runExecutor
-	deploy   runExecutor
-	store    runStore
+	mutating           bool
+	storageUnavailable bool
+	contextReader      func() (config.SolutionPlan, config.ConnectionSettings, error)
+	fingerprint        validationContextReader
+	mu                 sync.RWMutex
+	runs               map[string]*deploymentRun
+	next               int
+	now                func() time.Time
+	validate           runExecutor
+	deploy             runExecutor
+	store              runStore
 }
 
 type deploymentRun struct {
-	id              string
-	deploymentRunID string
-	action          runAction
-	status          runStatus
-	plan            config.SolutionPlan
-	items           []lifecycle.Item
-	createdAt       time.Time
-	startedAt       *time.Time
-	completedAt     *time.Time
-	events          []runEvent
-	listeners       map[chan runEvent]struct{}
-	diagnostic      *runDiagnostic
+	contextVersion        int
+	contextFingerprint    string
+	validationInvalidated bool
+	validationTargets     string
+	id                    string
+	deploymentRunID       string
+	action                runAction
+	status                runStatus
+	plan                  config.SolutionPlan
+	items                 []lifecycle.Item
+	createdAt             time.Time
+	startedAt             *time.Time
+	completedAt           *time.Time
+	events                []runEvent
+	listeners             map[chan runEvent]struct{}
+	diagnostic            *runDiagnostic
 }
 
 func newRunManager() *runManager {
@@ -128,10 +141,38 @@ func newRunManagerWithStore(validate, deploy runExecutor, now func() time.Time, 
 }
 
 func (m *runManager) startValidation(plan config.SolutionPlan) (runResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.mutating || m.activeContextLocked() {
+		return runResponse{}, fmt.Errorf("%s", activeContextMessage)
+	}
+	targets := ""
+	if m.contextReader != nil {
+		current, settings, err := m.contextReader()
+		if err != nil {
+			return runResponse{}, fmt.Errorf("%s", staleValidationMessage)
+		}
+		plan = current
+		if plan.TemplateID == "" || plan.PackagePath == "" {
+			return runResponse{}, fmt.Errorf("assemble a package in Dispatch before validation")
+		}
+		if _, err := m.fingerprint(plan, settings); err != nil {
+			return runResponse{}, fmt.Errorf("%s", staleValidationMessage)
+		}
+		targets = config.DeploymentTargetFingerprint(settings)
+	}
 	if plan.TemplateID == "" || plan.PackagePath == "" {
 		return runResponse{}, fmt.Errorf("assemble a package in Dispatch before validation")
 	}
-	return m.start(runActionValidate, plan, nil, m.validate), nil
+	response := m.startLocked(runActionValidate, plan, nil)
+	m.runs[response.ID].validationTargets = targets
+	if err := m.saveLocked(); err != nil {
+		delete(m.runs, response.ID)
+		m.next--
+		return runResponse{}, fmt.Errorf("validation could not be recorded; check local storage and try again")
+	}
+	go m.execute(response.ID, m.validate)
+	return response, nil
 }
 
 // A validation claims one deployment, including after a failed/lost response.
@@ -149,6 +190,22 @@ func (m *runManager) startDeployment(validationID string) (runResponse, error) {
 		}
 		return runResponse{}, fmt.Errorf("the recorded deployment is unavailable; run validation again before applying changes")
 	}
+	if m.mutating || m.activeContextLocked() {
+		return runResponse{}, fmt.Errorf("%s", activeContextMessage)
+	}
+	if m.contextReader != nil {
+		if validation.validationInvalidated || validation.contextVersion != validationContextVersion || validation.contextFingerprint == "" {
+			return runResponse{}, errStaleValidation
+		}
+		current, settings, err := m.contextReader()
+		if err != nil {
+			return runResponse{}, errStaleValidation
+		}
+		fingerprint, err := m.fingerprint(current, settings)
+		if err != nil || fingerprint != validation.contextFingerprint {
+			return runResponse{}, errStaleValidation
+		}
+	}
 	if validation.action != runActionValidate || validation.status != runCompleted {
 		return runResponse{}, fmt.Errorf("complete a successful validation before applying changes")
 	}
@@ -162,6 +219,8 @@ func (m *runManager) startDeployment(validationID string) (runResponse, error) {
 	}
 	response := m.startLocked(runActionDeploy, validation.plan, append([]lifecycle.Item(nil), validation.items...))
 	validation.deploymentRunID = response.ID
+	m.runs[response.ID].contextVersion = validation.contextVersion
+	m.runs[response.ID].contextFingerprint = validation.contextFingerprint
 	// Persist the claim and queued run together before any provider work starts.
 	if err := m.saveLocked(); err != nil {
 		validation.deploymentRunID = ""
@@ -173,16 +232,8 @@ func (m *runManager) startDeployment(validationID string) (runResponse, error) {
 	return response, nil
 }
 
-func (m *runManager) start(action runAction, plan config.SolutionPlan, items []lifecycle.Item, executor runExecutor) runResponse {
-	m.mu.Lock()
-	response := m.startLocked(action, plan, items)
-	m.saveLocked()
-	m.mu.Unlock()
-	go m.execute(response.ID, executor)
-	return response
-}
-
 func (m *runManager) startLocked(action runAction, plan config.SolutionPlan, items []lifecycle.Item) runResponse {
+	plan.Components = append([]string(nil), plan.Components...)
 	m.next++
 	now := m.now().UTC()
 	run := &deploymentRun{
@@ -200,6 +251,22 @@ func (m *runManager) execute(id string, executor runExecutor) {
 	if run == nil {
 		m.mu.Unlock()
 		return
+	}
+	if run.action == runActionDeploy && m.contextReader != nil {
+		current, settings, err := m.contextReader()
+		fingerprint := ""
+		if err == nil {
+			fingerprint, err = m.fingerprint(current, settings)
+		}
+		if err != nil || fingerprint != run.contextFingerprint {
+			completed := m.now().UTC()
+			run.status, run.completedAt = runFailed, &completed
+			run.diagnostic = safeDiagnostic(run.action, fmt.Errorf("%s", staleValidationMessage))
+			m.appendEventLocked(run, "status", "", staleValidationMessage, runFailed)
+			m.saveLocked()
+			m.mu.Unlock()
+			return
+		}
 	}
 	now := m.now().UTC()
 	run.status, run.startedAt = runRunning, &now
@@ -235,7 +302,29 @@ func (m *runManager) execute(id string, executor runExecutor) {
 		m.saveLocked()
 		return
 	}
+	if run.action == runActionValidate && m.contextReader != nil {
+		current, settings, contextErr := m.contextReader()
+		fingerprint := ""
+		if contextErr == nil {
+			fingerprint, contextErr = m.fingerprint(current, settings)
+		}
+		if contextErr != nil || !reflect.DeepEqual(current, run.plan) || config.DeploymentTargetFingerprint(settings) != run.validationTargets {
+			run.status = runFailed
+			run.validationInvalidated = true
+			run.diagnostic = safeDiagnostic(run.action, fmt.Errorf("%s", staleValidationMessage))
+			m.appendEventLocked(run, "status", "", staleValidationMessage, runFailed)
+			m.saveLocked()
+			return
+		}
+		run.contextVersion, run.contextFingerprint = validationContextVersion, fingerprint
+	}
 	run.status = runCompleted
+	if err := m.saveLocked(); err != nil && run.action == runActionValidate {
+		run.status, run.validationInvalidated = runFailed, true
+		run.diagnostic = safeDiagnostic(run.action, fmt.Errorf("validation context could not be recorded; check local storage and validate again"))
+		m.appendEventLocked(run, "status", "", "Validation context could not be recorded. Validate again.", runFailed)
+		return
+	}
 	m.appendEventLocked(run, "status", "", "Run completed", runCompleted)
 	m.saveLocked()
 }
@@ -409,6 +498,7 @@ func (m *runManager) restoreHistory() {
 	}
 	persisted, err := m.store.Load()
 	if err != nil {
+		m.storageUnavailable = true
 		return
 	}
 	m.mu.Lock()
@@ -418,6 +508,7 @@ func (m *runManager) restoreHistory() {
 			continue
 		}
 		run := &deploymentRun{
+			contextVersion: saved.ContextVersion, contextFingerprint: saved.ContextFingerprint, validationInvalidated: saved.ValidationInvalidated,
 			id: saved.ID, deploymentRunID: saved.DeploymentRunID, action: saved.Action, status: saved.Status, plan: saved.Plan, createdAt: saved.CreatedAt,
 			startedAt: saved.StartedAt, completedAt: saved.CompletedAt,
 			items: append([]lifecycle.Item(nil), saved.Items...), events: append([]runEvent(nil), saved.Events...),
@@ -445,12 +536,16 @@ func (m *runManager) restoreHistory() {
 }
 
 func (m *runManager) saveLocked() error {
+	if m.storageUnavailable {
+		return fmt.Errorf("run history is unavailable; repair local storage and restart Dispatch")
+	}
 	if m.store == nil {
 		return nil
 	}
 	persisted := make([]persistedRun, 0, len(m.runs))
 	for _, run := range m.runs {
 		persisted = append(persisted, persistedRun{
+			ContextVersion: run.contextVersion, ContextFingerprint: run.contextFingerprint, ValidationInvalidated: run.validationInvalidated,
 			ID: run.id, DeploymentRunID: run.deploymentRunID, Action: run.action, Status: run.status, CreatedAt: run.createdAt,
 			StartedAt: run.startedAt, CompletedAt: run.completedAt, Providers: summarizeRun(run).Providers,
 			Plan: run.plan, Items: append([]lifecycle.Item(nil), run.items...),
@@ -692,4 +787,79 @@ func emitDeploymentResult(item lifecycle.Item, emit func(string, lifecycle.Progr
 		return
 	}
 	emit(item.Provider, lifecycle.ProgressUpdate{Message: providerName(item.Provider) + " configuration applied", State: lifecycle.ProgressCompleted})
+}
+
+// Queued work owns its lease before its executor goroutine can run.
+func (m *runManager) activeContextLocked() bool {
+	for _, run := range m.runs {
+		if run.status == runQueued || run.status == runRunning {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *runManager) invalidateValidationsLocked() error {
+	if m.storageUnavailable {
+		return fmt.Errorf("run history is unavailable; repair local storage and restart Dispatch")
+	}
+	count := 0
+	for _, run := range m.runs {
+		if run.action == runActionValidate && run.deploymentRunID == "" {
+			run.validationInvalidated = true
+			count++
+		}
+	}
+	if count > 0 {
+		return m.saveLocked()
+	}
+	return nil
+}
+
+// Invalidation is persisted before even a partially failing package write.
+// The mutex is not held over clone/build/network work; the mutation reservation
+// prevents a validation or first claim from entering during that interval.
+func (m *runManager) beginContextMutation() (func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.mutating || m.activeContextLocked() {
+		return nil, fmt.Errorf("%s", activeContextMessage)
+	}
+	if err := m.invalidateValidationsLocked(); err != nil {
+		return nil, fmt.Errorf("input changes could not be recorded; check local storage and try again")
+	}
+	m.mutating = true
+	return func() { m.mu.Lock(); m.mutating = false; m.mu.Unlock() }, nil
+}
+
+func (m *runManager) guardConnectionUpdate(update shellstate.ConnectionUpdate, apply func(shellstate.ConnectionUpdate) (config.ConnectionSettings, error)) (config.ConnectionSettings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return apply(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+		before := config.DeploymentTargetFingerprint(current)
+		next, err := update(config.CloneConnectionSettings(current))
+		if err != nil {
+			return current, err
+		}
+		if before != config.DeploymentTargetFingerprint(next) {
+			if m.mutating || m.activeContextLocked() {
+				return current, fmt.Errorf("%s: %w", activeContextMessage, config.ErrConnectionConflict)
+			}
+			if err := m.invalidateValidationsLocked(); err != nil {
+				return current, fmt.Errorf("connection changes could not be recorded; check local storage and try again")
+			}
+		}
+		return next, nil
+	})
+}
+
+// Starting an asynchronous connection workflow does not reserve the context.
+// Its eventual save still passes through guardConnectionUpdate atomically.
+func (m *runManager) checkConnectionWorkflow() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.mutating || m.activeContextLocked() {
+		return fmt.Errorf("%s", activeContextMessage)
+	}
+	return nil
 }
