@@ -146,3 +146,29 @@ func TestMissingStateReturnsZeroValue(t *testing.T) {
 		t.Fatalf("expected zero value for absent state, got %+v", got)
 	}
 }
+
+func TestConnectionWriteGuardCoordinatesBothSaveAndOwnedUpdates(t *testing.T) {
+	isolateRoot(t)
+	calls := 0
+	restore := SetConnectionWriteGuard(func(update ConnectionUpdate, apply func(ConnectionUpdate) (config.ConnectionSettings, error)) (config.ConnectionSettings, error) {
+		calls++
+		return apply(update)
+	})
+	t.Cleanup(restore)
+	if err := SaveConnectionSettings(config.ConnectionSettings{BoxCCGSubjectID: "original"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateConnectionSettings(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+		current.SalesforceOrgID = "owned-org"
+		return current, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || stored.BoxCCGSubjectID != "original" || stored.SalesforceOrgID != "owned-org" {
+		t.Fatal("guarded owned update lost current state")
+	}
+}

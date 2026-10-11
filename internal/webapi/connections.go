@@ -216,6 +216,10 @@ func loadPersistedConnections() (config.ConnectionSettings, error) {
 	if err != nil {
 		return settings, err
 	}
+	return bootstrapConnectionEnvironment(settings), nil
+}
+
+func bootstrapConnectionEnvironment(settings config.ConnectionSettings) config.ConnectionSettings {
 	// Environment variables provide a server-side bootstrap path for CI and
 	// headless use. Persisted browser settings take precedence.
 	if settings.SalesforceInstanceURL == "" {
@@ -239,7 +243,7 @@ func loadPersistedConnections() (config.ConnectionSettings, error) {
 	if settings.SalesforceClientSecret == "" {
 		settings.SalesforceClientSecret = strings.TrimSpace(os.Getenv("SALESFORCE_CLIENT_SECRET"))
 	}
-	return settings, nil
+	return settings
 }
 
 func savePersistedConnections(settings config.ConnectionSettings) error {

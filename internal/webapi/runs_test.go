@@ -107,7 +107,8 @@ func TestRunEndpointsProvideSSEAndRequireCompletedValidationForDeploy(t *testing
 	}
 	runs := newRunManagerWithExecutors(validate, deploy, time.Now)
 	handler := NewHandlerWithOptions(ServerOptions{
-		Runs: runs,
+		Runs:               runs,
+		ContextFingerprint: func(config.SolutionPlan, config.ConnectionSettings) (string, error) { return "fixture-context", nil },
 		PlanStore: func() (config.SolutionPlan, error) {
 			return config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"box"}}, nil
 		},
@@ -506,9 +507,9 @@ func TestDeploymentClaimDeduplicatesConcurrentRequestsAndSurvivesRestart(t *test
 		return nil, errors.New("simulated provider failure")
 	}
 	plan := config.SolutionPlan{TemplateID: "clm", PackagePath: "/mock-package", Components: []string{"box"}}
-	store := &testRunStore{runs: []persistedRun{{ID: "validation", Action: runActionValidate, Status: runCompleted, CreatedAt: time.Now(), Plan: plan}}}
+	store := &testRunStore{runs: []persistedRun{{ID: "validation", Action: runActionValidate, Status: runCompleted, CreatedAt: time.Now(), Plan: plan, ContextVersion: validationContextVersion, ContextFingerprint: "fixture-context"}}}
 	manager := newRunManagerWithStore(validate, deploy, time.Now, store)
-	handler := NewHandlerWithOptions(ServerOptions{Runs: manager})
+	handler := NewHandlerWithOptions(ServerOptions{Runs: manager, PlanStore: func() (config.SolutionPlan, error) { return plan, nil }, ContextFingerprint: func(config.SolutionPlan, config.ConnectionSettings) (string, error) { return "fixture-context", nil }})
 	ids := make(chan string, 32)
 	var group sync.WaitGroup
 	for range 32 {

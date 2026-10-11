@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/bcl"
@@ -44,6 +45,12 @@ func legacyStatePath(name string) string {
 // LoadConnectionSettings reads the BCL-persisted connection settings, migrating
 // from the legacy JSON file when the BCL file is not yet present.
 func LoadConnectionSettings() (config.ConnectionSettings, error) {
+	connectionMu.Lock()
+	defer connectionMu.Unlock()
+	return loadConnectionSettings()
+}
+
+func loadConnectionSettings() (config.ConnectionSettings, error) {
 	var settings config.ConnectionSettings
 	if err := readState(statePath(connectionSettingsBCL), legacyStatePath(connectionSettingsJSON), &settings); err != nil {
 		return settings, fmt.Errorf("read connection settings: %w", err)
@@ -53,10 +60,61 @@ func LoadConnectionSettings() (config.ConnectionSettings, error) {
 
 // SaveConnectionSettings writes the connection settings as BCL.
 func SaveConnectionSettings(settings config.ConnectionSettings) error {
-	if err := writeState(statePath(connectionSettingsBCL), connectionSettingsCtx, settings); err != nil {
-		return fmt.Errorf("write connection settings: %w", err)
+	_, err := UpdateConnectionSettings(func(config.ConnectionSettings) (config.ConnectionSettings, error) { return settings, nil })
+	return err
+}
+
+// ConnectionUpdate changes only the caller-owned record using current state.
+// Token refresh must use this instead of saving a stale whole-state snapshot.
+type ConnectionUpdate func(config.ConnectionSettings) (config.ConnectionSettings, error)
+type ConnectionWriteGuard func(ConnectionUpdate, func(ConnectionUpdate) (config.ConnectionSettings, error)) (config.ConnectionSettings, error)
+
+var connectionMu sync.Mutex
+var connectionGuardMu sync.RWMutex
+var connectionGuard ConnectionWriteGuard
+
+// SetConnectionWriteGuard installs the local service's context coordinator.
+// The returned cleanup is useful for isolated tests; production owns it for
+// the lifetime of its sole local API handler.
+func SetConnectionWriteGuard(guard ConnectionWriteGuard) func() {
+	connectionGuardMu.Lock()
+	previous := connectionGuard
+	connectionGuard = guard
+	connectionGuardMu.Unlock()
+	return func() {
+		connectionGuardMu.Lock()
+		connectionGuard = previous
+		connectionGuardMu.Unlock()
 	}
-	return nil
+}
+
+func UpdateConnectionSettings(update ConnectionUpdate) (config.ConnectionSettings, error) {
+	connectionGuardMu.RLock()
+	guard := connectionGuard
+	connectionGuardMu.RUnlock()
+	if guard != nil {
+		return guard(update, ApplyConnectionUpdate)
+	}
+	return ApplyConnectionUpdate(update)
+}
+
+// ApplyConnectionUpdate commits under the persistence lock. A context
+// coordinator calls this only after acquiring its mutation/run boundary.
+func ApplyConnectionUpdate(update ConnectionUpdate) (config.ConnectionSettings, error) {
+	connectionMu.Lock()
+	defer connectionMu.Unlock()
+	current, err := loadConnectionSettings()
+	if err != nil {
+		return current, err
+	}
+	next, err := update(current)
+	if err != nil {
+		return current, err
+	}
+	if err := writeState(statePath(connectionSettingsBCL), connectionSettingsCtx, next); err != nil {
+		return current, fmt.Errorf("write connection settings: %w", err)
+	}
+	return next, nil
 }
 
 // LoadSolutionPlan reads the BCL-persisted solution plan, migrating from the

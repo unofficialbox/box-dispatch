@@ -25,6 +25,7 @@ const (
 // AuthConfig contains the credentials needed to mint a Box access token. It
 // is intentionally process-local; callers must never persist or render it.
 type AuthConfig struct {
+	connectionID string
 	Method       AuthMethod
 	ClientID     string
 	ClientSecret string
@@ -53,7 +54,7 @@ func ResolveAuth() (AuthConfig, error) {
 			if strings.TrimSpace(app.RefreshToken) != "" {
 				clientID, clientSecret := BoxOAuthApp()
 				return AuthConfig{
-					Method: AuthOAuth2, ClientID: firstNonEmpty(app.ClientID, clientID),
+					Method: AuthOAuth2, connectionID: app.ID, ClientID: firstNonEmpty(app.ClientID, clientID),
 					ClientSecret: firstNonEmpty(app.ClientSecret, clientSecret), RefreshToken: app.RefreshToken,
 				}, nil
 			}
@@ -87,32 +88,39 @@ func ResolveAuth() (AuthConfig, error) {
 	return AuthConfig{}, fmt.Errorf("no Box authentication configured: log in with Box, or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN")
 }
 
-func persistRotatedBoxRefresh(refreshToken string) {
-	settings, err := shellstate.LoadConnectionSettings()
-	if err != nil {
+func persistRotatedBoxRefresh(original AuthConfig, refreshToken string) {
+	if original.connectionID == "" {
 		return
 	}
-	app, ok := settings.SelectedBoxConnection()
-	if !ok || app.RefreshToken == "" {
-		return
-	}
-	app.RefreshToken = refreshToken
-	_ = shellstate.SaveConnectionSettings(settings.UpsertBoxConnection(app, true))
+	_, _ = shellstate.UpdateConnectionSettings(func(settings config.ConnectionSettings) (config.ConnectionSettings, error) {
+		settings = settings.HydrateBoxConnections()
+		for index, app := range settings.BoxConnections {
+			if app.ID != original.connectionID {
+				continue
+			}
+			clientID, _ := BoxOAuthApp()
+			if firstNonEmpty(app.ClientID, clientID) != original.ClientID || app.RefreshToken != original.RefreshToken {
+				return settings, fmt.Errorf("Box connection changed during token refresh")
+			}
+			app.RefreshToken = refreshToken
+			settings.BoxConnections[index] = app
+			return settings.HydrateBoxConnections(), nil
+		}
+		return settings, fmt.Errorf("Box connection is no longer available")
+	})
 }
 
 // InvalidateSelectedOAuthConnection clears only the verified snapshot after
 // Box rejects a stored refresh token. The connection remains available in the
 // browser so the user can reconnect it instead of recreating its alias.
 func InvalidateSelectedOAuthConnection() {
-	settings, err := shellstate.LoadConnectionSettings()
-	if err != nil {
-		return
-	}
-	app, ok := settings.SelectedBoxConnection()
-	if !ok || strings.TrimSpace(app.RefreshToken) == "" {
-		return
-	}
-	_ = shellstate.SaveConnectionSettings(settings.MarkSelectedBoxUnverified())
+	_, _ = shellstate.UpdateConnectionSettings(func(settings config.ConnectionSettings) (config.ConnectionSettings, error) {
+		app, ok := settings.SelectedBoxConnection()
+		if !ok || strings.TrimSpace(app.RefreshToken) == "" {
+			return settings, nil
+		}
+		return settings.MarkSelectedBoxUnverified(), nil
+	})
 }
 
 func firstNonEmpty(values ...string) string {
@@ -148,7 +156,7 @@ func (c AuthConfig) AccessToken(ctx context.Context) (string, error) {
 			return "", err
 		}
 		if token.RefreshToken != "" && token.RefreshToken != c.RefreshToken {
-			persistRotatedBoxRefresh(token.RefreshToken)
+			persistRotatedBoxRefresh(c, token.RefreshToken)
 		}
 		return token.AccessToken, nil
 	default:

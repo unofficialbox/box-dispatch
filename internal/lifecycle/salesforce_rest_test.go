@@ -15,6 +15,7 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -363,5 +364,31 @@ func TestSalesforceSeedValidationDefersQueryUntilPermissionsAreAssigned(t *testi
 	}
 	if len(updates) != 1 || updates[0].Component != component || updates[0].State != ProgressCompleted || !strings.Contains(updates[0].Message, "after required permissions are assigned") {
 		t.Fatalf("updates = %#v", updates)
+	}
+}
+
+func TestSalesforceSessionPersistenceUpdatesOwnedRecordWithoutRestoringSelection(t *testing.T) {
+	t.Chdir(t.TempDir())
+	settings := config.ConnectionSettings{}.UpsertSalesforceOrg(config.SalesforceOrgConnection{ID: "a", OrgID: "org-a", Username: "a@test", InstanceURL: "https://a.test", RefreshToken: "original"}, true)
+	original, _ := settings.SelectedSalesforceOrg()
+	settings = settings.UpsertSalesforceOrg(config.SalesforceOrgConnection{ID: "b", OrgID: "org-b", Username: "b@test", InstanceURL: "https://b.test", RefreshToken: "other"}, true)
+	if err := shellstate.SaveConnectionSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	updated := original
+	updated.RefreshToken = "rotated"
+	updated.AccessToken = "access"
+	if err := persistSalesforceSessionUpdate(original, updated, false); err != nil {
+		t.Fatal(err)
+	}
+	current, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.SalesforceSelectedOrgID != "b" || current.SalesforceOrgs[0].RefreshToken != "rotated" || current.SalesforceOrgs[1].RefreshToken != "other" {
+		t.Fatal("session restored a previous selection or another token")
+	}
+	if err := persistSalesforceSessionUpdate(original, updated, false); err == nil {
+		t.Fatal("late refresh accepted an outdated token")
 	}
 }

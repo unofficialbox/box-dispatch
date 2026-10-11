@@ -106,3 +106,22 @@ func isolateConnectionSettings(t *testing.T, settings config.ConnectionSettings)
 		t.Fatal(err)
 	}
 }
+
+func TestBoxRotationUpdatesItsOriginalRecordWithoutReselecting(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "a", ClientID: "client", RefreshToken: "original", Identity: "a@test"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "b", ClientID: "other", RefreshToken: "other", Identity: "b@test"}, true)
+	isolateConnectionSettings(t, settings)
+	persistRotatedBoxRefresh(AuthConfig{connectionID: "a", ClientID: "client", RefreshToken: "original"}, "rotated")
+	current, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.BoxSelectedConnectionID != "b" || current.BoxConnections[0].RefreshToken != "rotated" || current.BoxConnections[1].RefreshToken != "other" {
+		t.Fatal("rotation restored another selected account or changed its token")
+	}
+	persistRotatedBoxRefresh(AuthConfig{connectionID: "a", ClientID: "client", RefreshToken: "original"}, "late-stale")
+	current, _ = shellstate.LoadConnectionSettings()
+	if current.BoxConnections[0].RefreshToken != "rotated" {
+		t.Fatal("late rotation overwrote a newer token")
+	}
+}

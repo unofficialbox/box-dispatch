@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -116,6 +117,10 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 	runs := newRunManagerWithExecutors(validate, deploy, time.Now)
 	return NewHandlerWithOptions(ServerOptions{
 		Profile: "mock",
+		ContextFingerprint: func(plan config.SolutionPlan, settings config.ConnectionSettings) (string, error) {
+			data, err := json.Marshal(plan)
+			return string(data) + config.DeploymentTargetFingerprint(settings), err
+		},
 		PlanStore: func() (config.SolutionPlan, error) {
 			mu.Lock()
 			defer mu.Unlock()

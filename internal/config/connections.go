@@ -8,12 +8,15 @@ package config
 // BoxCCGClientSecret is a credential. The whole record is written 0600, but it
 // is on-disk plaintext, so the store is only as private as the file.
 type ConnectionSettings struct {
-	SalesforceAlias          string `json:"salesforceAlias,omitempty"`
-	SalesforceOrgID          string `json:"salesforceOrgId,omitempty"`
-	SalesforceOrgType        string `json:"salesforceOrgType,omitempty"`
-	SalesforceOrgStatus      string `json:"salesforceOrgStatus,omitempty"`
-	SalesforceExpirationDate string `json:"salesforceExpirationDate,omitempty"`
-	SalesforceDevHubAlias    string `json:"salesforceDevHubAlias,omitempty"`
+	// ObservedConnectionState is a process-local read snapshot for guarded saves.
+	// It is never persisted or sent to the browser.
+	ObservedConnectionState  *ConnectionSettings `json:"-"`
+	SalesforceAlias          string              `json:"salesforceAlias,omitempty"`
+	SalesforceOrgID          string              `json:"salesforceOrgId,omitempty"`
+	SalesforceOrgType        string              `json:"salesforceOrgType,omitempty"`
+	SalesforceOrgStatus      string              `json:"salesforceOrgStatus,omitempty"`
+	SalesforceExpirationDate string              `json:"salesforceExpirationDate,omitempty"`
+	SalesforceDevHubAlias    string              `json:"salesforceDevHubAlias,omitempty"`
 	// Salesforce REST credentials are owned by the local Go backend. The browser
 	// may submit them during connection setup, but API responses never return
 	// them. Like Box CCG credentials, these values are stored in the 0600 BCL
