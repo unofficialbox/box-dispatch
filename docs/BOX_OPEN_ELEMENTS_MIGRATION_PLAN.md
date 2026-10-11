@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.39.0`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.40.0`, reviewed on October 11, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -71,6 +71,14 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   no application compatibility change is needed. Rebuilt embedded assets are
   byte-identical. Existing Chromium light/dark desktop/mobile, sorting, gutter
   contrast and Switch description regressions remain the acceptance boundary.
+- **0.40.0 maintenance update:** core and React are pinned together to the verified
+  published release at `084f94dd16ccc3ff3666b25a6d974d78417ec765`. Process Modeler
+  #527–531 and shared chooser changes are not consumed by Dispatch. The React
+  runtime and rebuilt embedded app assets remain byte-identical; no application
+  compatibility or design change is needed. Matched Chromium baseline/candidate
+  results and inherited accessibility limits are recorded in
+  `docs/BOE_0_40_UPGRADE.md`. The adoption PR requires independent review and
+  separate merge approval.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
