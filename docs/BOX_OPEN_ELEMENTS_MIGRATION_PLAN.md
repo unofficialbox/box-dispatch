@@ -313,6 +313,15 @@ history table/detail, validation diff, and completed summary. Browser acceptance
 uses Chromium at those two viewport sizes; keyboard, focus, semantic accessibility,
 and automated checks remain in scope.
 
+The October 11 accessibility follow-up keeps the migration boundary intact:
+Dispatch repairs its names, scroll-region focus, group semantics and hardcoded
+light-color usage through normal DOM and theme tokens. Shared component native
+names and adaptive status foregrounds remain upstream. Fact-list styles that pass
+after entrance animations settle are preserved. The existing E2E suite adds scoped
+axe checks and real keyboard scrolling; full-page audits continue to report shared
+findings. Adopt the reviewed upstream table release only after publication and
+retest the combined application before closing those dependencies.
+
 ## Delivery order and pull-request boundaries
 
 Keep each phase reviewable:

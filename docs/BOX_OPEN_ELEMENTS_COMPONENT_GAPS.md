@@ -116,6 +116,9 @@ state to a low-level element.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
+| P2 | Components | Shared status contrast | Badge uses white text on bright fills; Path, Run Trace, Table and Timeline darken semantic foregrounds through color mixing. | Upstream adaptive foreground contracts are needed; preserve Dispatch charcoal/mint fills and avoid shadow-DOM patches. |
+| P2 | Components | Resource Row accessible name | Visible label/meta are inside the native select button, but its `aria-label` names only the label. | Seek upstream visible-name alignment with nonduplicated status descriptions. No local wrapper or host-label workaround. |
+| P2 | Patterns | Diff Viewer previous-control name | Visible `Prev` differs from the native button's `Previous change` name. | Align visible text and accessible name upstream; the published API has no navigation-label override. |
 | P2 | Components | `box-table` keyboard sort focus | Controlled sort updates rebuild the header and lose focus on its sort button in both 0.33.0 and 0.37.0. | Seek upstream focus preservation; do not patch the component shadow DOM. Repeated keyboard audit activations refocus the header. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
@@ -123,6 +126,15 @@ state to a low-level element.
 Accessibility corrections for `box-dropdown`, `box-selectable-card`, and
 `box-action-bar` are reported complete by the maintainer. Dispatch should consume
 them through the next containing package release rather than applying local forks.
+
+## Dispatch-owned accessibility composition
+
+The October 11 cleanup names all visible brand text, omits the optional cross-shadow
+sidebar control reference, makes lifecycle overflow a named focusable region, gives
+history actions a group role, and uses current muted/surface tokens for affected
+application copy and the live feed. It leaves the settled-clean Fact List styles and
+all BOE status/naming internals unchanged. Scoped axe regressions cover the owned
+surfaces; shared findings above remain explicit in full-page audits.
 
 ## Resolved component gaps
 

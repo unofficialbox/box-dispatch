@@ -6,6 +6,12 @@ import { Sidebar } from './Sidebar'
 describe('Sidebar', () => {
   beforeEach(() => window.localStorage.clear())
 
+  it('names all visible brand copy without a cross-shadow control reference', () => {
+    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
+    expect(within(container).getByRole('link', { name: 'B/ Dispatch Solution delivery overview' }).textContent).toBe('B/ Dispatch Solution delivery')
+    expect(container.querySelector('box-sidebar-toggle-button')?.hasAttribute('controls')).toBe(false)
+  })
+
   it('exposes only the current route and updates it after navigation', () => {
     const callbacks = { onOverview: vi.fn(), onNewDeployment: vi.fn(), onHistory: vi.fn(), onSettings: vi.fn() }
     const { container, rerender } = render(<Sidebar activeView="overview" {...callbacks}/>)

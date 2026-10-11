@@ -1,4 +1,19 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import axe from 'axe-core'
+
+// Audit the application-owned surfaces here. Shared component findings remain
+// in the full-page review evidence until the upstream fixes are published.
+async function expectAccessible(page: Page, selectors: string[], rules: string[]) {
+  await page.addScriptTag({ content: axe.source })
+  const violations = await page.evaluate(async ({ selectors, rules }) => {
+    const result = await (window as Window & { axe: typeof axe }).axe.run(
+      { include: selectors },
+      { runOnly: { type: 'rule', values: rules } },
+    )
+    return result.violations.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, any }) => ({ target, checks: any.map(({ data }) => data) })) }))
+  }, { selectors, rules })
+  expect(violations).toEqual([])
+}
 
 test('follows the system color preference across primary pages', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -11,6 +26,8 @@ test('follows the system color preference across primary pages', async ({ page }
     heading: getComputedStyle(document.querySelector('.overview-heading h1')!).color,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
   }))).toEqual({ page: 'rgb(18, 21, 19)', heading: 'rgb(244, 244, 244)', token: '#121513' })
+  await expect(page.locator('.overview-summary')).toHaveCSS('color', 'rgb(188, 188, 188)')
+  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
@@ -34,6 +51,9 @@ test('follows the system color preference across primary pages', async ({ page }
     page: getComputedStyle(document.querySelector('.workspace')!).backgroundColor,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
   }))).toEqual({ page: 'rgb(255, 255, 255)', token: '#ffffff' })
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
 })
 
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
@@ -46,6 +66,9 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.locator('box-metric-card[heading="Connections"]')).not.toHaveAttribute('value', 'Checking')
   await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('link', { name: 'B/ Dispatch Solution delivery overview', exact: true })).toBeVisible()
+  await expect(page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' })).not.toHaveAttribute('aria-controls')
+  await expectAccessible(page, ['.brand', 'box-sidebar-toggle-button'], ['label-content-name-mismatch', 'aria-valid-attr-value'])
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
   await expect(page.getByRole('navigation')).toHaveCount(1)
   const sidebar = page.locator('box-nav-sidebar')
@@ -175,6 +198,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
+  await expect(page.locator('.component-scope p').first()).toHaveCSS('color', 'rgb(188, 188, 188)')
+  await expectAccessible(page, ['.component-scope p'], ['color-contrast'])
   const providerControls = await page.locator('.configuration-resource-row box-switch').evaluateAll((switches) => switches.map((control) => {
     const bounds = control.getBoundingClientRect()
     return {
@@ -217,6 +242,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByText('Validation results restored. Review changes or continue to deployment.')).toBeVisible()
   const liveActivity = page.locator('box-timeline[aria-label="Live validation log"]')
   await expect(liveActivity).toBeVisible()
+  await expect(page.locator('.live-activity-feed')).toHaveCSS('background-color', 'rgb(18, 21, 19)')
   await liveActivity.focus()
   await page.keyboard.press('PageDown')
   const liveActivityState = await liveActivity.evaluate((element) => ({ focused: document.activeElement === element, tabIndex: (element as HTMLElement).tabIndex, events: (element as HTMLElement & { events: unknown[] }).events.length }))
@@ -357,6 +383,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('link', { name: 'Northstar CLM rollout' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Deployment actions' })).toBeVisible()
+  await expectAccessible(page, ['.history-environment-actions'], ['aria-prohibited-attr'])
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })
 
@@ -372,6 +400,17 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   await page.getByRole('button', { name: 'New deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
+  const lifecycleScroll = page.getByRole('region', { name: 'Deployment lifecycle stages' })
+  await lifecycleScroll.focus()
+  await expect(lifecycleScroll).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => lifecycleScroll.evaluate((region) => region.scrollLeft)).toBeGreaterThan(0)
+  expect(await lifecycleScroll.evaluate((region) => ({
+    outlineStyle: getComputedStyle(region).outlineStyle,
+    outlineWidth: getComputedStyle(region).outlineWidth,
+  }))).toEqual({ outlineStyle: 'solid', outlineWidth: '2px' })
+  await lifecycleScroll.evaluate((region) => { region.scrollLeft = 0 })
+  await expectAccessible(page, ['.workflow-path-scroll'], ['scrollable-region-focusable'])
   const mobileProviderAlignment = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('[data-system-provider]')].map((provider) => {
     const logo = provider.querySelector<HTMLElement>('.provider-logo')!.getBoundingClientRect()
     const copy = provider.querySelector<HTMLElement>('.system-provider-copy')!.getBoundingClientRect()

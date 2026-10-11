@@ -75,6 +75,7 @@ describe('HistoryPage', () => {
     const { container } = render(<HistoryPage deployments={[deployment(1)]} selectedDeploymentID="deployment-1" onCloseDeployment={onCloseDeployment} onOpenDestination={onOpenDestination} onViewChanges={onViewChanges}/>)
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Deployment 1' })).toBeTruthy())
+    expect(screen.getByRole('group', { name: 'Deployment actions' }).querySelector('box-button[label="Review changes"]')).toBeTruthy()
     expect(container.querySelector('box-section[heading="Provider summary"]')).toBeTruthy()
     const facts = [...container.querySelectorAll('box-fact-list')].find((element) => (element as HTMLElement & { rows: Array<{ label: string; value: string }> }).rows?.some((row) => row.label === 'Run ID')) as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Run ID', value: 'web-run-1' })

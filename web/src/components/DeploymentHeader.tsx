@@ -40,5 +40,5 @@ function WorkflowPath({ activePhase, run }: { activePhase: Phase; run: DispatchR
     if (pathRef.current) pathRef.current.stages = stages
   }, [])
 
-  return <box-path ref={pathRef} className="workflow-path" label="Deployment lifecycle" current={currentPhase} hasError={hasError}></box-path>
+  return <div className="workflow-path-scroll" role="region" aria-label="Deployment lifecycle stages" tabIndex={0}><box-path ref={pathRef} className="workflow-path" label="Deployment lifecycle" current={currentPhase} hasError={hasError}></box-path></div>
 }

@@ -4,8 +4,8 @@
 
 - **Date:** 2026-10-11
 - **Repo:** `unofficialbox/box-dispatch`; cloud checkout `/workspace/box-dispatch-cloud-verified`
-- **Branch:** `codex/box-open-elements-0.37.0`
-- **Base main:** `c1663ac0b992749245b5b6472a6736d9c581a772` (PR #40)
+- **Branch:** `codex/dispatch-accessibility-cleanup`
+- **Base main:** `27936b11a21b34685e1c49f097b75dbd551d140e` (PR #41)
 - **Module:** `github.com/unofficialbox/box-dispatch`, Go 1.26
 - **Web packages:** `@unofficialbox/box-open-elements` and
   `@unofficialbox/box-open-elements-react` 0.37.0
@@ -84,13 +84,55 @@ It delivered and verified:
 Main includes the charcoal/dark-mint and white/light-green themes. The 0.37 update
 preserves `web/src/theme.ts`, all application CSS, and existing theme assertions.
 
-### Current branch — Box Open Elements 0.37.0
+### PR #41 — Box Open Elements 0.37.0 (merged)
 
 Both packages upgrade from 0.33.0 to 0.37.0 with no other lockfile resolution
 changes. Published APIs and generated declarations remain compatible. The optional
 new component features do not require Dispatch application changes. Embedded assets
-and the adoption notes are refreshed. This branch is prepared for review; merge and
-deployment require separate approval.
+and the adoption notes are refreshed. PR #41 was squash-merged as
+`27936b11a21b34685e1c49f097b75dbd551d140e` with specific user approval.
+
+### Current branch — independent Dispatch accessibility cleanup
+
+The fixed 90-minute active-work allocation began October 11 at **02:34:00 UTC**.
+The branch keeps core/React on published 0.37.0 while BOE's table fixes are reviewed.
+It fixes Dispatch-owned accessibility through existing DOM and theme contracts:
+
+- the brand name includes its visible B/ glyph, Dispatch and Solution delivery copy,
+  with explicit text-node separators; the optional sidebar toggle control IDREF is
+  omitted because its shadow button cannot resolve the light-DOM target;
+- lifecycle overflow belongs to a named keyboard-focusable region with visible focus,
+  preserving the read-only Path component and existing stages;
+- historical deployment actions have a named group role;
+- affected muted text and the live activity feed use existing theme tokens instead
+  of hardcoded light colors; charcoal/mint fills and registered themes are unchanged;
+- focused unit tests and scoped axe/keyboard checks are added to the existing E2E
+  workflows. `axe-core` 4.14.0 is a test-only dependency.
+
+Fact-list styles remain unchanged: their earlier contrast findings disappeared once
+entrance animations settled. No BOE source, native control names or status color-mix
+internals are patched. Full-page automated accessibility remains affected by shared
+Badge/Path/Run Trace/Table/Timeline contrast and Resource Row/Diff Viewer names.
+Those reproductions have been handed to the separate upstream owner. Scoped passing
+checks do not imply the full app conforms to WCAG.
+
+The independent cleanup passes 79 unit tests, all five updated mock E2E workflows,
+frontend lint/build, frozen installation, and the full Go gate. A further six-test
+instrumented run retains 41 full-page axe/screenshot states across desktop/mobile
+and both themes, with no page overflow. The original sidebar IDREF, brand name,
+history ARIA, mobile scroll-focus and affected body-copy findings are cleared on
+the audited normal surfaces. The full-page audit still reports shared contrast/name
+failures. A light
+native Drawer scan additionally computes scrim gray behind transparent slotted
+headers/copy even though the screenshot renders them on the white inner panel;
+that evidence is retained for review, without recoloring the visible surface or
+claiming formal conformance.
+
+The upstream table change is PR #512, with planned 0.37.1 release metadata in #513.
+Do not pin an unpublished version. Final combined verification must adopt a reviewed,
+verified publication in lockstep and exercise repeated keyboard sorting without
+explicit refocus, along with the corrected table semantics. This cleanup requires
+its own review; PR #41 approval does not authorize another merge or deployment.
 
 ## Box Open Elements boundary
 
@@ -222,10 +264,10 @@ Any path printed by `gofmt -l .` is a failure.
 
 ## Continuation point
 
-- **Current Status:** The 0.37.0 core/React upgrade is implemented and verified on
-  `codex/box-open-elements-0.37.0`, based on merged PR #40. Official native types and
-  Run Trace tokens remain adopted; application source and themes are unchanged.
-- **Recommended Next Step:** Review the upgrade diff and its draft pull request.
-- **Expected Outcome:** Dispatch consumes both 0.37.0 packages in lockstep.
-- **Blockers:** No upgrade blocker found. Existing automated accessibility findings
-  and bundle-size warning remain follow-up work. Merge/deploy await approval.
+- **Current Status:** Independent Dispatch accessibility repairs are implemented on
+  `codex/dispatch-accessibility-cleanup`, based on merged PR #41. Package versions
+  remain published 0.37.0; shared component fixes stay with the BOE owner.
+- **Recommended Next Step:** Review the cleanup draft and retest the combined app
+  after the reviewed upstream fixes are published.
+- **Blockers:** Shared contrast/naming findings and table focus/semantics need upstream
+  contracts. Existing bundle warning remains. Merge/deploy require separate approval.

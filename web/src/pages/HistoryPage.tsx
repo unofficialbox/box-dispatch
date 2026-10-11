@@ -43,7 +43,7 @@ function HistoricalDeploymentDetail({ detail, onBack, onOpenDestination, onViewC
     <header className="record-page-heading history-detail-heading"><div><p className="overview-eyebrow">Historical deployment</p><h1 id="history-detail-title">{detail.name || detail.id}</h1><p>Read-only results captured when this deployment finished.</p></div><box-badge label={outcome.label} tone={outcome.tone}></box-badge></header>
     <div className="history-detail-layout">
       <box-section className="history-provider-summary" heading="Provider summary" description="Recorded configuration results for each deployed system.">
-        <div slot="actions" className="history-environment-actions" aria-label="Deployment actions">{detail.changesRecorded ? <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(detail.id)}></box-button> : <span className="history-change-unavailable">Change preview not recorded</span>}</div>
+        <div slot="actions" className="history-environment-actions" role="group" aria-label="Deployment actions">{detail.changesRecorded ? <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(detail.id)}></box-button> : <span className="history-change-unavailable">Change preview not recorded</span>}</div>
         <div className="history-provider-cards">{detail.providers.map((provider) => {
           const providerOutcome = deploymentOutcome({ ...detail, providers: [provider] })
           const providerName = displayProvider(provider.name)
