@@ -197,28 +197,46 @@ const oauthCallbackPage = `<!doctype html>
 <style>
   :root { color: #172845; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8fbff; }
-  main { width: min(420px, calc(100vw - 32px)); padding: 32px 28px; border: 1px solid #d7e2ee; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(20, 46, 82, .06); }
-  .brand { display: flex; align-items: center; gap: 12px; margin: 0 0 22px; color: #10264e; font-size: 18px; font-weight: 650; letter-spacing: -.4px; }
-  .brand-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 10px; background: #0061d3; color: #fff; font-size: 18px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
-  h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.4px; }
-  p { margin: 0; color: #536a89; line-height: 1.5; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0d0c; }
+  main { width: min(420px, calc(100vw - 32px)); padding: 32px 28px; border: 1px solid #1e2421; border-radius: 16px; background: #151917; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); }
+  .brand { display: flex; align-items: center; gap: 12px; margin: 0 0 22px; color: #fff; font-size: 18px; font-weight: 650; letter-spacing: -.4px; }
+  .brand-icon { display: grid; width: 40px; height: 40px; place-items: center; }
+  .brand-icon svg { width: 36px; height: 36px; }
+  h1 { margin: 0 0 8px; color: #fff; font-size: 22px; letter-spacing: -.4px; }
+  p { margin: 0; color: #9aa59f; line-height: 1.5; }
   p + p { margin-top: 10px; }
-  .ok h1 { color: #14854f; }
-  .failed h1 { color: #c33a2c; }
+  .ok h1 { color: #00e581; }
+  .failed h1 { color: #ff5449; }
+  .details { margin: 16px 0 0; padding: 16px; border-radius: 8px; background: rgba(255, 255, 255, .05); }
+  .details dt { color: #738680; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+  .details dd { margin: 0 0 12px; color: #e4e9e6; font-size: 14px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; }
+  .details dd:last-child { margin-bottom: 0; }
 </style>
 </head>
 <body>
 <main class="%s">
-  <p class="brand"><span class="brand-icon" aria-hidden="true">B/</span>Box Dispatch</p>
+  <p class="brand">
+    <span class="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 2l9 5v10l-9 5-9-5V7l9-5z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 12l9-5M12 12v10M12 12L3 7"/>
+      </svg>
+    </span>
+    Box Dispatch
+  </p>
   <h1>%s</h1>
   <p>%s</p>
+  %s
   <p>You can close this tab and return to Dispatch.</p>
 </main>
 </body>
 </html>`
 
 func writeOAuthCallbackPage(w http.ResponseWriter, title, message string, ok bool) {
+	writeOAuthCallbackPageWithDetails(w, title, message, ok, "", "", "")
+}
+
+func writeOAuthCallbackPageWithDetails(w http.ResponseWriter, title, message string, ok bool, identity, account, enterprise string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
@@ -228,7 +246,21 @@ func writeOAuthCallbackPage(w http.ResponseWriter, title, message string, ok boo
 		status = strings.TrimSuffix(title, " login") + " connected"
 		tone = "ok"
 	}
-	_, _ = fmt.Fprintf(w, oauthCallbackPage, html.EscapeString(title), tone, html.EscapeString(status), html.EscapeString(message))
+	details := ""
+	if ok && identity != "" {
+		details = "<dl class=\"details\">"
+		if identity != "" {
+			details += "<dt>User</dt><dd>" + html.EscapeString(identity) + "</dd>"
+		}
+		if account != "" {
+			details += "<dt>ID</dt><dd>" + html.EscapeString(account) + "</dd>"
+		}
+		if enterprise != "" {
+			details += "<dt>Enterprise ID</dt><dd>" + html.EscapeString(enterprise) + "</dd>"
+		}
+		details += "</dl>"
+	}
+	_, _ = fmt.Fprintf(w, oauthCallbackPage, html.EscapeString(title), tone, html.EscapeString(status), html.EscapeString(message), details)
 }
 
 func firstNonEmpty(values ...string) string {

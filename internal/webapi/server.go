@@ -826,7 +826,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		boxOAuthJobs.finish(job, "active", "Box connected and verified.", settings.BoxCCGAlias, verification.Identity, verification.Account)
-		writeOAuthCallbackPage(w, "Box login", "Box connected and verified.", true)
+		writeOAuthCallbackPageWithDetails(w, "Box login", "Box connected and verified.", true, verification.Identity, verification.Account, verification.Enterprise)
 	}
 	mux.HandleFunc("GET /oauth/callback", handleBoxOAuthCallback)
 	mux.HandleFunc("GET /api/connections/box/oauth/callback", handleBoxOAuthCallback)

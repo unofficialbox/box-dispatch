@@ -1,8 +1,12 @@
+import { useEffect, useRef } from 'react'
 import type { RunStep, RunStepStatus } from '@unofficialbox/box-open-elements'
+import '@unofficialbox/box-open-elements/run-summary'
 import type { ComponentProgress, ProviderProgress } from './runTimelineModel'
-import { LiveActivityFeed } from './LiveActivityFeed'
+import type { RunTurn, AgentTodo } from '@unofficialbox/box-open-elements/patterns/run/progress'
 
 export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
+  const summaryRef = useRef<HTMLElementTagNameMap['box-run-summary']>(null)
+
   const steps: RunStep[] = providers.map((provider) => {
     const latest = provider.updates.at(-1)
     const first = provider.updates.at(0)
@@ -23,7 +27,41 @@ export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
     }
   })
 
-  return <><box-run-trace className="dispatch-run-trace" heading="Provider progress" steps={steps}></box-run-trace><LiveActivityFeed providers={providers}/></>
+  // Create agent-like todos from provider activities
+  const todos: AgentTodo[] = providers.flatMap((provider) =>
+    provider.components.map((component) => ({
+      id: `${provider.id}-${component.id}`,
+      content: formatComponentName(component),
+      status: componentToTodoStatus(component.state),
+    }))
+  )
+
+  const firstUpdate = providers[0]?.updates[0]
+  const lastUpdate = providers.flatMap(p => p.updates).sort((a, b) =>
+    new Date(b.at).getTime() - new Date(a.at).getTime()
+  )[0]
+
+  const hasAnyTerminal = providers.some(p => p.state === 'complete' || p.state === 'failed')
+
+  const turn: RunTurn = {
+    steps,
+    todos,
+    startedAt: firstUpdate ? new Date(firstUpdate.at).getTime() : Date.now(),
+    endedAt: hasAnyTerminal && lastUpdate ? new Date(lastUpdate.at).getTime() : undefined,
+    incomplete: !hasAnyTerminal,
+  }
+
+  useEffect(() => {
+    if (summaryRef.current) {
+      summaryRef.current.turn = turn
+      summaryRef.current.open = true
+    }
+  }, [turn])
+
+  return <>
+    <box-run-trace className="dispatch-run-trace" heading="Provider progress" steps={steps}></box-run-trace>
+    <box-run-summary ref={summaryRef} className="dispatch-run-summary" open></box-run-summary>
+  </>
 }
 
 function providerStatus(state: ProviderProgress['state']): RunStepStatus {
@@ -37,6 +75,13 @@ function componentStatus(state: ComponentProgress['state']): RunStepStatus {
   if (state === 'completed') return 'succeeded'
   if (state === 'failed') return 'failed'
   if (state === 'running') return 'running'
+  return 'pending'
+}
+
+function componentToTodoStatus(state: ComponentProgress['state']): AgentTodo['status'] {
+  if (state === 'completed') return 'completed'
+  if (state === 'failed') return 'skipped'
+  if (state === 'running') return 'in_progress'
   return 'pending'
 }
 

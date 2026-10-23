@@ -57,7 +57,8 @@ func TestProviderRecordsCaptureValidatedFileChanges(t *testing.T) {
 		t.Fatalf("provider records = %#v", records)
 	}
 	record := DeploymentRecord{Providers: records}
-	if changes := record.FileChanges(); len(changes) != 1 || changes[0] != validated {
+	expectedChange := FileChange{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
+	if changes := record.FileChanges(); len(changes) != 1 || changes[0] != expectedChange {
 		t.Fatalf("file changes = %#v", changes)
 	}
 }

@@ -6,6 +6,7 @@ import '@unofficialbox/box-open-elements/fact-list'
 import '@unofficialbox/box-open-elements/link-button'
 import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/section'
+import '@unofficialbox/box-open-elements/skeleton'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import { BoeTable } from '../components/BoeTable'
 import { DeploymentHistoryTable } from '../components/DeploymentHistoryTable'
@@ -95,7 +96,7 @@ export function HistoryPage({ deployments, selectedDeploymentID = null, onCloseD
   if (selectedDeploymentID) {
     if (detail?.id === selectedDeploymentID) return <HistoricalDeploymentDetail detail={detail} onBack={onCloseDeployment} onOpenDestination={onOpenDestination} onViewChanges={onViewChanges}/>
     const selectedError = detailError?.deploymentID === selectedDeploymentID ? detailError.message : ''
-    return <section className="record-page history-detail-page" aria-labelledby="history-detail-state"><box-link-button className="history-back-link" href="#history" label="Back to deployment history" onClick={onCloseDeployment}></box-link-button><div className="history-detail-state"><h1 id="history-detail-state">{selectedError ? 'Deployment summary unavailable' : 'Loading deployment summary'}</h1>{selectedError ? <Alert heading="Deployment summary unavailable" message={selectedError} tone="error" open/> : <><box-spinner label="Loading deployment summary" size="large"></box-spinner><p role="status">Reading the historical audit record…</p></>}</div></section>
+    return <section className="record-page history-detail-page" aria-labelledby="history-detail-state"><box-link-button className="history-back-link" href="#history" label="Back to deployment history" onClick={onCloseDeployment}></box-link-button><div className="history-detail-state">{selectedError ? <><h1 id="history-detail-state">Deployment summary unavailable</h1><Alert heading="Deployment summary unavailable" message={selectedError} tone="error" open/></> : <div role="status" aria-label="Loading deployment summary" style={{ padding: '24px 0' }}><box-skeleton variant="line" lines={2} style={{ marginBottom: '32px', maxWidth: '400px' }}></box-skeleton><box-skeleton variant="line" lines={6} style={{ marginBottom: '24px' }}></box-skeleton><box-skeleton variant="line" lines={5}></box-skeleton></div>}</div></section>
   }
 
   const clearFilters = () => {

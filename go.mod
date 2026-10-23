@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/spf13/cobra v1.8.1
-	github.com/unofficialbox/box-open-go-sdk v0.4.3
+	github.com/unofficialbox/box-open-go-sdk v0.4.4
 )
 
 require (

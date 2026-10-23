@@ -14,7 +14,6 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
-	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
@@ -88,7 +87,7 @@ type persistedRun struct {
 }
 
 type runChangesResponse struct {
-	Files []salesforceapi.MetadataFileDiff `json:"files"`
+	Files []audit.FileChange `json:"files"`
 }
 
 type runExecutor func(context.Context, config.SolutionPlan, []lifecycle.Item, func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error)
@@ -379,11 +378,42 @@ func (m *runManager) changes(id string) (runChangesResponse, bool) {
 	if run == nil {
 		return runChangesResponse{}, false
 	}
-	files := []salesforceapi.MetadataFileDiff{}
+	var changes []audit.FileChange
 	for _, item := range run.items {
-		files = append(files, item.Changes...)
+		// Add Salesforce metadata file changes
+		for _, sfChange := range item.Changes {
+			changes = append(changes, audit.FileChange{
+				Component:   sfChange.Component,
+				Path:        sfChange.Path,
+				Kind:        sfChange.Kind,
+				Before:      sfChange.Before,
+				After:       sfChange.After,
+				Previewable: sfChange.Previewable,
+			})
+		}
+		// Add Box resource changes as file entries
+		for _, resource := range item.Resources {
+			if resource.Provider == "box" {
+				kind := "add"
+				if run.action == runActionDeploy {
+					kind = "add" // Box resources are always additions for now
+				}
+				path := resource.Name
+				if resource.Component != "" {
+					path = resource.Component + "/" + resource.Name
+				}
+				changes = append(changes, audit.FileChange{
+					Component:   "Box:" + resource.Kind,
+					Path:        path,
+					Kind:        kind,
+					Before:      "",
+					After:       resource.URL,
+					Previewable: false,
+				})
+			}
+		}
 	}
-	return runChangesResponse{Files: files}, true
+	return runChangesResponse{Files: changes}, true
 }
 
 func (m *runManager) history() []runResponse {

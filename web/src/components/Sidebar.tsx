@@ -24,7 +24,18 @@ export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, on
 
   const route = (callback: () => void) => (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); callback() }
   return <box-nav-sidebar id="dispatch-navigation" className="sidebar" slot="nav" label="Box Dispatch navigation" collapsed={collapsed}>
-    <a className="brand" slot="header" href="#" onClick={route(onOverview)} aria-label="B/ Dispatch Solution delivery overview"><span className="brand-icon" aria-hidden="true">B/</span>{' '}<span className="brand-copy" data-nav-label><span className="brand-name">Dispatch</span>{' '}<small>Solution delivery</small></span></a>
+    <a className="brand" slot="header" href="#" onClick={route(onOverview)} aria-label="Dispatch Solution delivery overview">
+      <span className="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="36" height="36">
+          <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+            d="M12 2l9 5v10l-9 5-9-5V7l9-5z"/>
+          <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+            d="M12 12l9-5M12 12v10M12 12L3 7"/>
+        </svg>
+      </span>
+      {' '}
+      <span className="brand-copy" data-nav-label><span className="brand-name">Dispatch</span>{' '}<small>Solution delivery</small></span>
+    </a>
     <span className="nav-group-label" data-nav-group data-nav-label>Workspace</span>
     <a className={`nav-link nav-route ${activeView === 'overview' ? 'active' : ''}`} href="#" onClick={route(onOverview)} aria-current={activeView === 'overview' ? 'page' : undefined} aria-label="Overview"><span data-nav-icon><RailIcon name="grid" /></span><span data-nav-label>Overview</span></a>
     <a className={`nav-link nav-route ${activeView === 'workflow' ? 'active' : ''}`} href="#workspace" onClick={route(onNewDeployment)} aria-current={activeView === 'workflow' ? 'page' : undefined} aria-label="Deployments"><span data-nav-icon><RailIcon name="rocket" /></span><span data-nav-label>Deployments</span></a>

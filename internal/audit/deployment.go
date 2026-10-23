@@ -169,10 +169,46 @@ func (r DeploymentRecord) DeployedResources() []lifecycle.ResourceReference {
 
 // FileChanges returns the bounded, preview-safe before/after snapshot captured
 // during validation and persisted with the deployment audit record.
-func (r DeploymentRecord) FileChanges() []salesforceapi.MetadataFileDiff {
-	changes := []salesforceapi.MetadataFileDiff{}
+type FileChange struct {
+	Component   string `json:"component"`
+	Path        string `json:"path"`
+	Kind        string `json:"kind"`
+	Before      string `json:"before,omitempty"`
+	After       string `json:"after,omitempty"`
+	Previewable bool   `json:"previewable"`
+}
+
+func (r DeploymentRecord) FileChanges() []FileChange {
+	var changes []FileChange
 	for _, provider := range r.Providers {
-		changes = append(changes, provider.Changes...)
+		// Add Salesforce metadata file changes
+		for _, sfChange := range provider.Changes {
+			changes = append(changes, FileChange{
+				Component:   sfChange.Component,
+				Path:        sfChange.Path,
+				Kind:        sfChange.Kind,
+				Before:      sfChange.Before,
+				After:       sfChange.After,
+				Previewable: sfChange.Previewable,
+			})
+		}
+		// Add Box resource changes
+		for _, resource := range provider.Resources {
+			if resource.Provider == "box" {
+				path := resource.Name
+				if resource.Component != "" {
+					path = resource.Component + "/" + resource.Name
+				}
+				changes = append(changes, FileChange{
+					Component:   "Box:" + resource.Kind,
+					Path:        path,
+					Kind:        "add",
+					Before:      "",
+					After:       resource.URL,
+					Previewable: false,
+				})
+			}
+		}
 	}
 	return changes
 }

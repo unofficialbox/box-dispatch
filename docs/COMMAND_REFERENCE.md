@@ -6,37 +6,33 @@ text by default, and use JSON when `--json` is supplied.
 
 ## Common commands
 
-```bash
-box-dispatch check --offline
-box-dispatch check --platform box --json
-box-dispatch status --scenario clm
-box-dispatch deploy --scenario clm --yes
-box-dispatch validate --scenario clm --skip-artifacts
-box-dispatch serve --no-open --port 8787
-```
+| Command | Description | Example Usage |
+|---------|-------------|---------------|
+| `check` | Validate tool, config, and connectivity prerequisites | `box-dispatch check --offline`<br>`box-dispatch check --platform box --json` |
+| `deploy` | Deploy resolved artifacts and provider configuration | `box-dispatch deploy --scenario clm --yes` |
+| `status` | Show status and unresolved tokens for the selected scenario | `box-dispatch status --scenario clm` |
+| `serve` | Serve the Dispatch web application | `box-dispatch serve --no-open --port 8787` |
+| `validate` | Validate bootstrap artifacts and deployment state | `box-dispatch validate --scenario clm --skip-artifacts` |
 
-- `check` validates configuration and connectivity.
-- `deploy` applies resolved artifacts and provider configuration; `bootstrap` remains an alias.
-- `status` reports scenario state and unresolved values.
-- `serve` starts the embedded browser workspace and loopback API.
+## Advanced commands
 
-## Authoring and diagnostics
+| Command | Description |
+|---------|-------------|
+| `completion` | Generate the autocompletion script for the specified shell |
+| `env` | Render required environment token state for a scenario |
+| `help` | Help about any command |
+| `import` | Import deployment manifest into the active profile |
+| `init` | Initialize local Box Dispatch runtime from a scenario source repository |
+| `mock` | Serve the browser workspace with an in-memory mock API |
+| `present` | Generate a presenter handoff note for the active scenario |
+| `publish-check` | Verify deploy blockers before publish handoff |
+| `resolve` | Resolve provider configuration and materialize scenario artifacts |
+| `scenarios` | List configured scenarios from runtime config |
+| `setup` | Bootstrap runtime config from example template |
+| `smoke` | Run smoke checks for the selected scenario |
+| `source` | Show metadata about the currently configured scenario source |
 
-Additional commands remain available for scripts and repository maintenance:
-
-- `init`
-- `setup`
-- `resolve`
-- `source`
-- `scenarios`
-- `env`
-- `import`
-- `validate`
-- `present`
-- `smoke`
-- `publish-check`
-
-Use `<command> --help` for its flags and examples.
+Use `box-dispatch <command> --help` for detailed flags and examples.
 
 ## Runtime profiles
 

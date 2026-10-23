@@ -821,9 +821,10 @@ func TestDeploymentEnvironmentDoesNotBorrowCurrentIdentity(t *testing.T) {
 }
 
 func TestDeploymentChangesReturnsPersistedValidationSnapshot(t *testing.T) {
-	want := salesforceapi.MetadataFileDiff{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
+	sfChange := salesforceapi.MetadataFileDiff{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
+	want := audit.FileChange{Component: "Settings:Communities", Path: "settings/Communities.settings-meta.xml", Kind: "update", Before: "false", After: "true", Previewable: true}
 	handler := NewHandlerWithOptions(ServerOptions{DeploymentStore: func() ([]audit.DeploymentRecord, error) {
-		return []audit.DeploymentRecord{{DeploymentID: "run-42", ChangesRecorded: true, Providers: []audit.ProviderRecord{{Provider: "salesforce", Changes: []salesforceapi.MetadataFileDiff{want}}}}}, nil
+		return []audit.DeploymentRecord{{DeploymentID: "run-42", ChangesRecorded: true, Providers: []audit.ProviderRecord{{Provider: "salesforce", Changes: []salesforceapi.MetadataFileDiff{sfChange}}}}}, nil
 	}})
 
 	response := httptest.NewRecorder()
@@ -893,7 +894,7 @@ func TestBoxOAuthCallbackPageUsesBoxCopy(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/oauth/callback?state=missing", nil))
 	body := response.Body.String()
-	if !strings.Contains(body, "Box login did not finish") || !strings.Contains(body, "Box login session was not found") || !strings.Contains(body, "Box Dispatch") || !strings.Contains(body, "B/") || !strings.Contains(body, "border-radius: 10px") || strings.Contains(body, "Salesforce login") {
+	if !strings.Contains(body, "Box login did not finish") || !strings.Contains(body, "Box login session was not found") || !strings.Contains(body, "Box Dispatch") || !strings.Contains(body, "<svg viewBox") || !strings.Contains(body, "stroke-linecap") || strings.Contains(body, "Salesforce login") {
 		t.Fatalf("callback page = %s", body)
 	}
 }
@@ -952,7 +953,7 @@ func TestBoxOAuthWebLoginSavesTokensWithoutReturningSecrets(t *testing.T) {
 
 	callback := httptest.NewRecorder()
 	handler.ServeHTTP(callback, httptest.NewRequest(http.MethodGet, "/oauth/callback?code=auth-code&state="+query.Get("state"), nil))
-	if callback.Code != http.StatusOK || !strings.Contains(callback.Body.String(), "Box connected") || !strings.Contains(callback.Body.String(), "Box Dispatch") || !strings.Contains(callback.Body.String(), "B/") || strings.Contains(callback.Body.String(), "Salesforce login") || strings.Contains(callback.Body.String(), "box-access") || strings.Contains(callback.Body.String(), "box-refresh") {
+	if callback.Code != http.StatusOK || !strings.Contains(callback.Body.String(), "Box connected") || !strings.Contains(callback.Body.String(), "Box Dispatch") || !strings.Contains(callback.Body.String(), "<svg viewBox") || strings.Contains(callback.Body.String(), "Salesforce login") || strings.Contains(callback.Body.String(), "box-access") || strings.Contains(callback.Body.String(), "box-refresh") {
 		t.Fatalf("callback = %d %s", callback.Code, callback.Body.String())
 	}
 	if exchanged.Code != "auth-code" || exchanged.ClientID != "box-client" || exchanged.RedirectURL != boxconn.LoginCallbackURL || exchanged.CodeVerifier == "" {

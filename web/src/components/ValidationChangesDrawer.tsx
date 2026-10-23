@@ -10,12 +10,12 @@ type ChangeReviewStage = 'validation' | 'deployment'
 const reviewCopy = {
   validation: {
     heading: 'Review validation changes',
-    description: 'Compare the current Salesforce org with the validated package before deployment.',
-    beforeLabel: 'Current org',
+    description: 'Compare the current state with the validated package before deployment.',
+    beforeLabel: 'Current state',
     afterLabel: 'Validated package',
     direction: 'Current → Validated',
-    emptyTitle: 'No Salesforce file changes',
-    emptyDescription: 'The selected org already matches the validated Salesforce package.',
+    emptyTitle: 'No file changes',
+    emptyDescription: 'The selected environment already matches the validated package.',
   },
   deployment: {
     heading: 'Review deployed changes',
@@ -24,7 +24,7 @@ const reviewCopy = {
     afterLabel: 'After deployment',
     direction: 'Before → After',
     emptyTitle: 'No file changes',
-    emptyDescription: 'This deployment did not record any Salesforce file additions or updates.',
+    emptyDescription: 'This deployment did not record any file additions or updates.',
   },
 } as const
 
