@@ -113,18 +113,22 @@ func appendBoxAIResourceChange(item *Item, agent boxAIResource, present bool) er
 	if present {
 		return nil
 	}
-	payload := struct {
-		Name          string         `json:"name"`
-		Mode          string         `json:"mode"`
-		AccessState   string         `json:"accessState"`
-		Description   string         `json:"description"`
-		Instructions  string         `json:"instructions,omitempty"`
-		Configuration map[string]any `json:"configuration"`
-	}{
-		Name: agent.Name, Mode: agent.Mode, AccessState: agent.AccessState,
+	payload, err := buildAIAgentCreateBody(boxAIAgentCreate{
+		Mode: agent.Mode, Name: agent.Name, AccessState: agent.AccessState,
 		Description: agent.Description, Instructions: agent.Instructions, Configuration: agent.Configuration,
+	})
+	if err != nil {
+		return fmt.Errorf("prepare %s change preview: %w", agent.Component, err)
 	}
-	after, err := json.MarshalIndent(payload, "", "  ")
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("prepare %s change preview: %w", agent.Component, err)
+	}
+	var semanticPayload any
+	if err := json.Unmarshal(raw, &semanticPayload); err != nil {
+		return fmt.Errorf("prepare %s change preview: %w", agent.Component, err)
+	}
+	after, err := json.MarshalIndent(expandEmbeddedJSON(semanticPayload), "", "  ")
 	if err != nil {
 		return fmt.Errorf("prepare %s change preview: %w", agent.Component, err)
 	}
@@ -133,6 +137,31 @@ func appendBoxAIResourceChange(item *Item, agent boxAIResource, present bool) er
 		After: string(after), Previewable: true,
 	})
 	return nil
+}
+
+func expandEmbeddedJSON(value any) any {
+	switch current := value.(type) {
+	case map[string]any:
+		for key, child := range current {
+			current[key] = expandEmbeddedJSON(child)
+		}
+		return current
+	case []any:
+		for index, child := range current {
+			current[index] = expandEmbeddedJSON(child)
+		}
+		return current
+	case string:
+		trimmed := strings.TrimSpace(current)
+		if len(trimmed) < 2 || (trimmed[0] != '{' && trimmed[0] != '[') {
+			return current
+		}
+		var nested any
+		if json.Unmarshal([]byte(trimmed), &nested) == nil {
+			return expandEmbeddedJSON(nested)
+		}
+	}
+	return value
 }
 
 func boxAIResourcePreviewPath(name string) string {

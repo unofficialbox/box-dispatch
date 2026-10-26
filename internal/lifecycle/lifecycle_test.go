@@ -636,10 +636,14 @@ func TestReadBoxAIResourcesPreservesPromotionConfiguration(t *testing.T) {
 
 func TestAppendBoxAIResourceChangeRecordsPreviewableAddition(t *testing.T) {
 	item := Item{Provider: "box"}
+	embeddedInstructions := "{\n  \"purpose\": \"Return exact values\",\n  \"fields\": [{\"name\": \"term\"}]\n}"
 	agent := boxAIResource{
 		Component: "AI Agent:Contract Extractor", Mode: "extract", Name: "Contract Extractor",
-		AccessState: "enabled", Description: "Extract contract terms", Instructions: "Return exact values",
-		Configuration: map[string]any{"extract": map[string]any{"model": "model-a"}},
+		AccessState: "enabled", Description: "Extract contract terms", Instructions: embeddedInstructions,
+		Configuration: map[string]any{"extract": map[string]any{
+			"type": "ai_agent_extract", "access_state": "enabled", "description": "Extract contract terms",
+			"custom_instructions": embeddedInstructions, "long_text": map[string]any{"model": "model-a"},
+		}},
 	}
 	if err := appendBoxAIResourceChange(&item, agent, false); err != nil {
 		t.Fatal(err)
@@ -651,9 +655,26 @@ func TestAppendBoxAIResourceChangeRecordsPreviewableAddition(t *testing.T) {
 	if change.Component != agent.Component || change.Path != "ai-agents/contract-extractor.json" || change.Kind != "add" || !change.Previewable || change.Before != "" {
 		t.Fatalf("change = %#v", change)
 	}
-	for _, expected := range []string{`"name": "Contract Extractor"`, `"mode": "extract"`, `"model": "model-a"`} {
+	if !json.Valid([]byte(change.After)) {
+		t.Fatalf("preview is not valid JSON: %s", change.After)
+	}
+	var preview map[string]any
+	if err := json.Unmarshal([]byte(change.After), &preview); err != nil {
+		t.Fatal(err)
+	}
+	extract, _ := preview["extract"].(map[string]any)
+	instructions, _ := extract["custom_instructions"].(map[string]any)
+	if instructions["purpose"] != "Return exact values" || strings.Contains(change.After, `\n`) {
+		t.Fatalf("embedded JSON was not expanded: %s", change.After)
+	}
+	for _, expected := range []string{`"type": "ai_agent"`, `"name": "Contract Extractor"`, `"extract": {`, `"model": "model-a"`} {
 		if !strings.Contains(change.After, expected) {
 			t.Fatalf("preview omitted %s: %s", expected, change.After)
+		}
+	}
+	for _, internalField := range []string{`"mode":`, `"configuration":`, `"instructions":`} {
+		if strings.Contains(change.After, internalField) {
+			t.Fatalf("preview exposed Dispatch-only field %s: %s", internalField, change.After)
 		}
 	}
 	if err := appendBoxAIResourceChange(&item, agent, true); err != nil {

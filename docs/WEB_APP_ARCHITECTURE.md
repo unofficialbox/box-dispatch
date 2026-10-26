@@ -184,8 +184,11 @@ comparison can reuse these canonical schemas, but it is not part of the live API
 contract.
 
 Box AI-agent validation records each source-only addition as a bounded, formatted
-JSON file preview under `ai-agents/`. The run changes endpoint returns those live
-validation snapshots through the same review drawer used by the deployment summary
+semantic JSON snapshot derived from the Box SDK request body, under `ai-agents/`.
+JSON-valued strings are expanded into nested arrays or objects for readable review
+without changing the request sent during deployment. The run changes endpoint
+returns those live validation snapshots through the same review drawer used by
+the deployment summary
 and audit history. Runs without previewable changes return an empty `files` array;
 the browser also treats legacy `null` records as empty so older local history remains
 reviewable.
