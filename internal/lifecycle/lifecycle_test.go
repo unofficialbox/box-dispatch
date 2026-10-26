@@ -580,3 +580,56 @@ func TestBoxComponentsIncludeManifestWorkspaceWithoutMarkerFile(t *testing.T) {
 		t.Fatalf("workspace component missing without marker file: got %#v, want %q", entries, want)
 	}
 }
+
+func TestAIOnlyPackageDoesNotRequireWorkspace(t *testing.T) {
+	enabled := true
+	manifest := solution.Manifest{Box: solution.BoxManifest{
+		Workspace:    solution.Workspace{ComponentType: "Folder Structure"},
+		Capabilities: []solution.Capability{{ID: "ai_agent", ComponentType: "AI Agent", EnabledByDefault: &enabled, API: "public", Handler: "box.ai-agent", Operations: []string{"validate", "deploy"}}},
+	}}
+	selection := solution.ComponentSelection{Mode: "all"}
+	if boxWorkspaceRequired(manifest, selection) {
+		t.Fatal("AI-only package unexpectedly requires a workspace")
+	}
+	manifest.Box.Capabilities = append(manifest.Box.Capabilities, solution.Capability{ID: "folder_structure", ComponentType: "Folder Structure", EnabledByDefault: &enabled, API: "public", Handler: "box.folder", Operations: []string{"validate", "deploy"}})
+	if !boxWorkspaceRequired(manifest, selection) {
+		t.Fatal("folder package must require a workspace")
+	}
+}
+
+func TestReadBoxAIResourcesPreservesPromotionConfiguration(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config", "box")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configuration := `{"agents":[{"name":"Contract Extractor","mode":"extract","accessState":"enabled","configuration":{"extract":{"type":"ai_agent_extract","description":"Extract contract terms","custom_instructions":"Return exact values","long_text":{"model":"model-a","prompt_template":"Return the clause"}}}}]}`
+	if err := os.WriteFile(filepath.Join(configDir, "ai-agent-specs.json"), []byte(configuration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	manifest := solution.Manifest{Box: solution.BoxManifest{Capabilities: []solution.Capability{{
+		ID: "ai_agent", ComponentType: "AI Agent", EnabledByDefault: &enabled,
+		API: "public", Handler: "box.ai-agent", Operations: []string{"validate", "deploy"},
+	}}}}
+	resources, err := readBoxAIResources(root, manifest, solution.ComponentSelection{Mode: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("resources = %#v", resources)
+	}
+	resource := resources[0]
+	if resource.Mode != "extract" || resource.Name != "Contract Extractor" || resource.Description != "Extract contract terms" || resource.Instructions != "Return exact values" {
+		t.Fatalf("resource = %#v", resource)
+	}
+	encoded, err := json.Marshal(resource.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"long_text", "model-a", "prompt_template", "Return the clause"} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("configuration %s does not include %q", encoded, want)
+		}
+	}
+}

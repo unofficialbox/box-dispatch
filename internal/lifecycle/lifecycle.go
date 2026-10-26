@@ -396,17 +396,22 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 	}
 	workspace := manifest.Box.Workspace
 	workspaceComponent := workspace.ComponentType + ":" + workspace.DisplayName
-	target, err := loadBoxTarget(root, workspace.Name)
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item, nil
+	folderEnabled := manifest.CapabilityEnabled(workspace.ComponentType, settings.Box.Components)
+	workspaceRequired := boxWorkspaceRequired(manifest, settings.Box.Components)
+	target := boxTarget{}
+	if workspaceRequired {
+		target, err = loadBoxTarget(root, workspace.Name)
+		if err != nil {
+			item.Status, item.Detail = StatusFailed, err.Error()
+			return item, nil
+		}
+		resolvedWorkspaceName, resolveErr := solution.ResolveDeploymentName(target.WorkspaceName, settings.Box)
+		if resolveErr != nil {
+			item.Status, item.Detail = StatusFailed, resolveErr.Error()
+			return item, nil
+		}
+		target.WorkspaceName = resolvedWorkspaceName
 	}
-	resolvedWorkspaceName, err := solution.ResolveDeploymentName(target.WorkspaceName, settings.Box)
-	if err != nil {
-		item.Status, item.Detail = StatusFailed, err.Error()
-		return item, nil
-	}
-	target.WorkspaceName = resolvedWorkspaceName
 	api, err := newBoxAPI()
 	if err != nil {
 		item.Status, item.Detail = StatusFailed, err.Error()
@@ -414,14 +419,15 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 	}
 	ctx := context.Background()
 	folderTargetConfigured := target.ParentFolderID != ""
-	folderEnabled := manifest.CapabilityEnabled(workspace.ComponentType, selection)
 	lookupParentID := target.ParentFolderID
 	if lookupParentID == "" {
 		lookupParentID = "0"
 	}
 	workspaceID := ""
-	report.component(workspaceComponent, ProgressRunning, "Inspecting the Box workspace", componentIndex(components, workspaceComponent), len(components))
-	if folderTargetConfigured {
+	if folderEnabled {
+		report.component(workspaceComponent, ProgressRunning, "Inspecting the Box workspace", componentIndex(components, workspaceComponent), len(components))
+	}
+	if folderEnabled && folderTargetConfigured {
 		present, inspectErr := boxFolderStructureExists(ctx, api, target, workspace.Children)
 		if inspectErr != nil {
 			item.Status, item.Detail = StatusFailed, "Unable to inspect the Box folder hierarchy: "+inspectErr.Error()
@@ -431,7 +437,7 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			classifyBoxComponent(&item, workspaceComponent, present, !present)
 			report.component(workspaceComponent, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, workspaceComponent)+1, len(components))
 		}
-	} else {
+	} else if folderEnabled {
 		readOnlyRootTarget := target
 		readOnlyRootTarget.ParentFolderID = "0"
 		present, inspectErr := boxFolderStructureExists(ctx, api, readOnlyRootTarget, workspace.Children)
@@ -448,11 +454,13 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			report.component(workspaceComponent, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, workspaceComponent)+1, len(components))
 		}
 	}
-	if id, found, inspectErr := api.findFolder(ctx, lookupParentID, target.WorkspaceName); inspectErr != nil {
-		item.Status, item.Detail = StatusFailed, "Unable to locate the Box workspace: "+inspectErr.Error()
-		return item, nil
-	} else if found {
-		workspaceID = id
+	if workspaceRequired {
+		if id, found, inspectErr := api.findFolder(ctx, lookupParentID, target.WorkspaceName); inspectErr != nil {
+			item.Status, item.Detail = StatusFailed, "Unable to locate the Box workspace: "+inspectErr.Error()
+			return item, nil
+		} else if found {
+			workspaceID = id
+		}
 	}
 	if manifest.CapabilityEnabled("Metadata Template", selection) {
 		templates, templateErr := readBoxMetadataTemplates(root)
@@ -849,6 +857,7 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 	manifest, selection := box.manifest, box.selection
 	target, api, ctx := box.target, box.api, box.ctx
 	workspace := manifest.Box.Workspace
+	workspaceRequired := boxWorkspaceRequired(manifest, selection)
 	deployed := []string{}
 	folderComponent := workspace.ComponentType + ":" + workspace.DisplayName
 	workspaceID := ""
@@ -871,7 +880,7 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 		}
 		deployed = append(deployed, folderComponent)
 	}
-	if workspaceID == "" {
+	if workspaceRequired && workspaceID == "" {
 		var found bool
 		workspaceID, found, err = api.findFolder(ctx, target.ParentFolderID, target.WorkspaceName)
 		if err != nil || !found {
@@ -882,15 +891,17 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 			return item
 		}
 	}
-	addResource(&item, folderComponent, "folder", target.WorkspaceName, workspaceID, "https://app.box.com/folder/"+workspaceID)
-	for _, folder := range workspace.Children {
-		folderID, found, inspectErr := api.findFolder(ctx, workspaceID, folder)
-		if inspectErr != nil {
-			item.Status, item.Detail = StatusFailed, "Inventory Box workspace folder "+folder+": "+inspectErr.Error()
-			return item
-		}
-		if found {
-			addResource(&item, folderComponent, "folder", folder, folderID, "https://app.box.com/folder/"+folderID)
+	if workspaceRequired {
+		addResource(&item, folderComponent, "folder", target.WorkspaceName, workspaceID, "https://app.box.com/folder/"+workspaceID)
+		for _, folder := range workspace.Children {
+			folderID, found, inspectErr := api.findFolder(ctx, workspaceID, folder)
+			if inspectErr != nil {
+				item.Status, item.Detail = StatusFailed, "Inventory Box workspace folder "+folder+": "+inspectErr.Error()
+				return item
+			}
+			if found {
+				addResource(&item, folderComponent, "folder", folder, folderID, "https://app.box.com/folder/"+folderID)
+			}
 		}
 	}
 	if manifest.CapabilityEnabled("Metadata Template", selection) {
@@ -994,6 +1005,13 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 		item.Status, item.Detail = StatusManual, fmt.Sprintf("Deployed %d Box foundation components; %d later-stage components remain for manual review.", len(deployed), len(item.Missing))
 	}
 	return item
+}
+
+func boxWorkspaceRequired(manifest solution.Manifest, selection solution.ComponentSelection) bool {
+	return manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) ||
+		manifest.CapabilityEnabled("Sample Content", selection) ||
+		manifest.CapabilityEnabled("Doc Gen Template", selection) ||
+		manifest.CapabilityEnabled("Automate Workflow", selection)
 }
 
 type salesforcePackage struct {

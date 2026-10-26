@@ -769,6 +769,17 @@ function App() {
     setActivePhase('Choose')
     setNotice('Name the deployment, then confirm the solution and systems.')
   }
+  const continuePreparedPromotion = (preparedPlan: DeploymentPlan) => {
+    workflowDraftGeneration.current += 1
+    validationReviewRequired.current = false
+    setRun(null)
+    setRunEvents([])
+    setPlan(preparedPlan)
+    setDeploymentName(preparedPlan.name)
+    setActivePhase('Connect')
+    setNotice('AI agent promotion package prepared. Verify the destination connection, then review the deployment.')
+    navigateTo('workflow')
+  }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])
   const assemblePackage = () => {
     if (keepPendingDeploymentWorkflow()) return
@@ -881,7 +892,7 @@ function App() {
     : screen === 'history'
       ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onCloseDeployment={() => navigateTo('history')} onOpenDestination={openDestination} onViewChanges={openDeploymentChanges}/>
       : screen === 'compare'
-        ? <ComparePage connections={connections}/>
+        ? <ComparePage connections={connections} onPromotionPrepared={continuePreparedPromotion}/>
       : screen === 'settings'
         ? <SettingsPage defaults={deploymentDefaults} connections={connections} connectionsRefreshing={connectionsRefreshing} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
         : screen === 'help' ? <HelpPage/> : workflow

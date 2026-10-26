@@ -1091,6 +1091,11 @@ html[data-theme='dark'] .overview-connection-copy {
 .compare-control-grid box-button { margin-bottom: 1px; }
 .compare-scope-note { max-width: 980px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 12px; line-height: 1.55; }
 .compare-error { display: block; margin-top: 16px; }
+.compare-promotion-plan { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(260px, .8fr) auto; align-items: end; gap: 18px; margin-bottom: 18px; padding: 18px; border: 1px solid var(--dispatch-rule); border-radius: 10px; background: var(--dispatch-surface-secondary); }
+.compare-promotion-plan h3 { margin: 2px 0 0; color: var(--dispatch-ink); font-size: 18px; }
+.compare-promotion-plan > div > p:last-child { margin: 6px 0 0; color: var(--dispatch-muted); font-size: 12px; }
+.compare-promotion-plan box-text-field { min-width: 0; }
+.compare-promotion-plan box-button { margin-bottom: 1px; }
 .compare-environments { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 22px; padding: 24px 0; border-bottom: 1px solid var(--dispatch-rule); }
 .compare-environments article { min-width: 0; padding: 0 4px; }
 .compare-environments article > span, .compare-detail-heading span { display: block; margin-bottom: 4px; color: var(--dispatch-secondary-ink); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -1115,13 +1120,15 @@ html[data-theme='dark'] .overview-connection-copy {
 
 @media (max-width: 1000px) {
   .compare-control-grid { grid-template-columns: 1fr 1fr; }
+  .compare-promotion-plan { grid-template-columns: 1fr 1fr; }
+  .compare-promotion-plan > div { grid-column: 1 / -1; }
   .compare-browser { grid-template-columns: 1fr; }
   .compare-template-list { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--dispatch-rule); }
 }
 
 @media (max-width: 760px) {
-  .compare-control-grid, .compare-environments { grid-template-columns: 1fr; }
-  .compare-control-grid box-button { width: 100%; }
+  .compare-control-grid, .compare-environments, .compare-promotion-plan { grid-template-columns: 1fr; }
+  .compare-control-grid box-button, .compare-promotion-plan box-button { width: 100%; }
   .compare-direction { transform: rotate(90deg); justify-self: center; }
   .compare-template-detail { padding: 14px; }
 }

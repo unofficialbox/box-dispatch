@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComparePage } from './ComparePage'
-import type { BoxAIAgentComparison, BoxComparison, BoxFolderComparison, ConnectionSummary } from '../types'
+import type { BoxAIAgentComparison, BoxComparison, BoxFolderComparison, ConnectionSummary, DeploymentPlan } from '../types'
 
 const connections: ConnectionSummary[] = [{
   name: 'Box', configured: true, verified: true,
@@ -48,6 +48,27 @@ const aiAgentComparison: BoxAIAgentComparison = {
     left: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-a' } } } },
     right: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-b' } } } },
   }],
+}
+
+const promotableAIAgentComparison: BoxAIAgentComparison = {
+  ...aiAgentComparison,
+  summary: { equal: 0, changed: 0, leftOnly: 2, rightOnly: 0 },
+  agents: [
+    {
+      key: 'legal assistant', name: 'Legal Assistant', kind: 'Ask', status: 'left_only', changes: [],
+      left: { key: 'legal assistant', name: 'Legal Assistant', kind: 'Ask', accessState: 'enabled', configuration: { ask: { description: 'Answer legal questions' } } },
+    },
+    {
+      key: 'summary writer', name: 'Summary Writer', kind: 'Text generation', status: 'left_only', changes: [],
+      left: { key: 'summary writer', name: 'Summary Writer', kind: 'Text generation', accessState: 'enabled', configuration: { textGen: { description: 'Write summaries' } } },
+    },
+  ],
+}
+
+const preparedPlan: DeploymentPlan = {
+  exists: true, name: 'AI agents to Sandbox', templateId: 'ai-agent-promotion', template: 'AI agent promotion',
+  repository: 'box://enterprise/EID-prod/ai-agents', strategy: 'reuse',
+  components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }],
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -108,5 +129,26 @@ describe('ComparePage', () => {
     expect(screen.getByRole('heading', { name: 'AI agents and extraction configurations' })).toBeTruthy()
     expect(screen.getByText('configuration.extract.long_text.model')).toBeTruthy()
     expect(screen.getByText('Extraction configuration')).toBeTruthy()
+  })
+
+  it('prepares a deployment from supported source-only AI agents', async () => {
+    const onPromotionPrepared = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(promotableAIAgentComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(preparedPlan), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    const { container } = render(<ComparePage connections={connections} onPromotionPrepared={onPromotionPrepared}/>)
+    fireEvent(container.querySelector('box-select[label="Box object type"]')!, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'ai_agents' } }))
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+
+    await waitFor(() => expect(container.querySelector('box-button[label="Prepare deployment"]')).toBeTruthy())
+    expect(screen.getByText('1 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
+    fireEvent.click(container.querySelector('box-button[label="Prepare deployment"]')!)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/box/promotions/ai-agents')
+    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({
+      name: 'AI agents to Sandbox', leftConnectionId: 'box-prod', rightConnectionId: 'box-test', agentKeys: ['legal assistant'],
+    })
+    await waitFor(() => expect(onPromotionPrepared).toHaveBeenCalledWith(preparedPlan))
   })
 })

@@ -13,6 +13,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 // NewMockHandler returns the browser API backed entirely by deterministic
@@ -229,6 +230,16 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				},
 			}
 			return boxdiff.CompareAIAgentSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
+		},
+		AIAgentPromotionAssembler: func(name string, comparison boxdiff.AIAgentComparison, agents []boxdiff.AIAgent, _ time.Time) (config.SolutionPlan, error) {
+			if len(agents) == 0 {
+				return config.SolutionPlan{}, errors.New("select at least one AI agent")
+			}
+			return config.SolutionPlan{
+				Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion",
+				Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/ai-agents",
+				Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/mock/ai-agent-promotion",
+			}, nil
 		},
 		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {
 			if options.ConnectionFailureProvider == "salesforce" {

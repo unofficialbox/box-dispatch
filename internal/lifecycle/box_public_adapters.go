@@ -14,11 +14,13 @@ import (
 )
 
 type boxAIResource struct {
-	Component    string
-	Mode         string
-	Name         string
-	Description  string
-	Instructions string
+	Component     string
+	Mode          string
+	Name          string
+	AccessState   string
+	Description   string
+	Instructions  string
+	Configuration map[string]any
 }
 
 func validateBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, item *Item, report Reporter, components []string) error {
@@ -133,7 +135,10 @@ func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution
 			continue
 		}
 		report.step("Creating AI agent " + agent.Name)
-		agentID, err := api.createAIAgent(ctx, agent.Mode, agent.Name, agent.Description, agent.Instructions)
+		agentID, err := api.createAIAgent(ctx, boxAIAgentCreate{
+			Mode: agent.Mode, Name: agent.Name, AccessState: agent.AccessState,
+			Description: agent.Description, Instructions: agent.Instructions, Configuration: agent.Configuration,
+		})
 		if err != nil {
 			return deployed, resources, fmt.Errorf("create %s: %w", agent.Component, err)
 		}
@@ -177,8 +182,12 @@ func readBoxAIResources(root string, manifest solution.Manifest, selection solut
 			return nil, err
 		}
 		var agents []struct {
-			Name         string `json:"name"`
-			Instructions string `json:"instructions"`
+			Name          string         `json:"name"`
+			Mode          string         `json:"mode"`
+			AccessState   string         `json:"accessState"`
+			Description   string         `json:"description"`
+			Instructions  string         `json:"instructions"`
+			Configuration map[string]any `json:"configuration"`
 		}
 		if raw := object["agents"]; len(raw) > 0 {
 			if err := json.Unmarshal(raw, &agents); err != nil {
@@ -186,7 +195,24 @@ func readBoxAIResources(root string, manifest solution.Manifest, selection solut
 			}
 		}
 		for _, agent := range agents {
-			resources = append(resources, boxAIResource{Component: "AI Agent:" + agent.Name, Mode: "ask", Name: agent.Name, Description: agent.Name, Instructions: agent.Instructions})
+			mode := strings.ToLower(strings.TrimSpace(agent.Mode))
+			if mode == "" {
+				mode = "ask"
+			}
+			description, instructions := agent.Description, agent.Instructions
+			if configuration, ok := agent.Configuration[mode].(map[string]any); ok {
+				if description == "" {
+					description, _ = configuration["description"].(string)
+				}
+				if instructions == "" {
+					instructions, _ = configuration["custom_instructions"].(string)
+				}
+			}
+			resources = append(resources, boxAIResource{
+				Component: "AI Agent:" + agent.Name, Mode: mode, Name: agent.Name,
+				AccessState: agent.AccessState, Description: firstNonEmpty(description, agent.Name),
+				Instructions: instructions, Configuration: agent.Configuration,
+			})
 		}
 	}
 	if manifest.CapabilityEnabled("Extract Configuration", selection) {

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert } from '@unofficialbox/box-open-elements-react/alert'
 import { Select } from '@unofficialbox/box-open-elements-react/select'
+import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
 import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/section'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import { BoeTable } from '../components/BoeTable'
-import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolder, BoxFolderComparison, BoxFolderDiff, BoxMetadataChange, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary } from '../types'
+import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolder, BoxFolderComparison, BoxFolderDiff, BoxMetadataChange, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary, DeploymentPlan } from '../types'
 
 type ComparisonType = 'metadata_templates' | 'folders' | 'ai_agents'
 type ComparisonResult = { type: 'metadata_templates'; value: BoxComparison } | { type: 'folders'; value: BoxFolderComparison } | { type: 'ai_agents'; value: BoxAIAgentComparison }
@@ -48,7 +49,7 @@ async function responseMessage(response: Response) {
   return payload?.error?.trim() || 'The live Box comparison could not be completed.'
 }
 
-export function ComparePage({ connections }: { connections: ConnectionSummary[] }) {
+export function ComparePage({ connections, onPromotionPrepared }: { connections: ConnectionSummary[]; onPromotionPrepared?: (plan: DeploymentPlan) => void }) {
   const boxConnections = useMemo(() => selectableConnections(connections), [connections])
   const [comparisonType, setComparisonType] = useState<ComparisonType>('metadata_templates')
   const [leftConnectionID, setLeftConnectionID] = useState('')
@@ -56,6 +57,16 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
+
+  const prepareAIAgentPromotion = async (comparison: BoxAIAgentComparison, name: string, agentKeys: string[]) => {
+    const response = await fetch('/api/box/promotions/ai-agents', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, leftConnectionId: comparison.left.connectionId, rightConnectionId: comparison.right.connectionId, agentKeys }),
+    })
+    if (!response.ok) throw new Error(await responseMessage(response))
+    const prepared = await response.json() as DeploymentPlan
+    onPromotionPrepared?.(prepared)
+  }
 
   useEffect(() => {
     void import('@unofficialbox/box-open-elements/diff-viewer')
@@ -140,7 +151,7 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
         <EnvironmentSummary label="Destination" environment={comparison.right}/>
       </section>
       <SummaryMetrics summary={comparison.summary}/>
-      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value}/> : <MetadataResults key={result.value.completedAt} comparison={result.value}/>}
+      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareAIAgentPromotion}/> : <MetadataResults key={result.value.completedAt} comparison={result.value}/>}
     </> : <section className="compare-empty-state"><h2>Ready for a live comparison</h2><p>{comparisonType === 'folders' ? 'Dispatch will read the connected users’ current folder hierarchies from Box. Folder IDs and timestamps are excluded; relative paths provide the cross-enterprise comparison key.' : comparisonType === 'ai_agents' ? 'Dispatch will authenticate both saved connections in parallel and read their current custom AI Studio definitions, including extract-mode configurations. Results are not loaded from a cached configuration.' : 'Dispatch will authenticate both saved connections in parallel and read the current enterprise metadata-template schemas. Results are not loaded from the saved readiness snapshot.'}</p></section>}
   </section>
 }
@@ -191,20 +202,55 @@ function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
   </section>
 }
 
-function AIAgentResults({ comparison }: { comparison: BoxAIAgentComparison }) {
+function AIAgentResults({ comparison, onPrepare }: { comparison: BoxAIAgentComparison; onPrepare: (comparison: BoxAIAgentComparison, name: string, agentKeys: string[]) => Promise<void> }) {
   const [selectedKey, setSelectedKey] = useState(comparison.agents.find((agent) => agent.status !== 'equal')?.key ?? comparison.agents[0]?.key ?? '')
+  const deployableKeys = useMemo(() => comparison.agents.filter(isDeployableAIAgent).map((agent) => agent.key), [comparison.agents])
+  const [plannedKeys, setPlannedKeys] = useState(deployableKeys)
+  const [deploymentName, setDeploymentName] = useState(`AI agents to ${comparison.right.alias}`)
+  const [preparing, setPreparing] = useState(false)
+  const [promotionError, setPromotionError] = useState('')
   const selected = comparison.agents.find((agent) => agent.key === selectedKey) ?? comparison.agents[0]
   const rows = useMemo<TableRow[]>(() => comparison.agents.map((agent) => {
     const presentation = statusPresentation[agent.status]
-    return { id: agent.key, cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone } }, detail: agent.status === 'changed' ? `${agent.changes.length} semantic changes` : presentation.label }
-  }), [comparison.agents])
+    const deployable = isDeployableAIAgent(agent)
+    const planned = plannedKeys.includes(agent.key)
+    return {
+      id: agent.key,
+      cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone } },
+      detail: agent.status === 'changed' ? `${agent.changes.length} semantic changes` : presentation.label,
+      actions: [{ key: 'toggle-plan', label: deployable ? planned ? 'Remove from plan' : 'Add to plan' : 'Not deployable', disabled: !deployable, ariaLabel: `${deployable ? planned ? 'Remove' : 'Add' : 'Cannot add'} ${agent.name || agent.key} ${deployable ? planned ? 'from' : 'to' : 'to'} deployment plan` }],
+    }
+  }), [comparison.agents, plannedKeys])
+
+  const togglePlannedAgent = (key: string) => {
+    setPlannedKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key])
+    setPromotionError('')
+  }
+  const prepare = async () => {
+    if (!deploymentName.trim() || plannedKeys.length === 0 || preparing) return
+    setPreparing(true)
+    setPromotionError('')
+    try {
+      await onPrepare(comparison, deploymentName.trim(), plannedKeys)
+    } catch (caught) {
+      setPromotionError(caught instanceof Error ? caught.message : 'The AI agent promotion plan could not be prepared.')
+    } finally {
+      setPreparing(false)
+    }
+  }
 
   return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><div><h2 id="comparison-results-title">AI agents and extraction configurations</h2><p>Matched by case-insensitive agent name. Extract-mode agents are shown as extraction configurations; provider-generated response fields are excluded.</p></div><span>{comparison.agents.length} inspected</span></header>
+    {deployableKeys.length > 0 ? <section className="compare-promotion-plan" aria-labelledby="promotion-plan-title"><div><p className="overview-eyebrow">Deployment plan</p><h3 id="promotion-plan-title">Promote source-only agents</h3><p>{plannedKeys.length} of {deployableKeys.length} deployable agents selected for {comparison.right.alias}.</p></div><TextField label="Deployment name" value={deploymentName} required invalid={deploymentName.length > 80} errorMessage={deploymentName.length > 80 ? 'Use 80 characters or fewer.' : undefined} onValueChanged={(event) => setDeploymentName(event.detail.value)}/><box-button label={preparing ? 'Preparing deployment…' : 'Prepare deployment'} tone="primary" disabled={preparing || plannedKeys.length === 0 || !deploymentName.trim() || deploymentName.length > 80} onClick={() => void prepare()}></box-button></section> : <Alert className="compare-scope-alert" heading="No eligible source-only agents" message="Promotion currently supports unrestricted Ask and Extract agents. Changed agents require an update workflow, destination-only agents already exist, and restricted agents retain provider-specific audience principals that cannot be copied safely." tone="info" open/>}
+    {promotionError ? <Alert className="compare-error" heading="Deployment plan could not be prepared" message={promotionError} tone="error" open/> : null}
     <div className="compare-browser">
-      <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')}/></section>
+      <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')} onRowAction={(detail) => { if (detail.action === 'toggle-plan') togglePlannedAgent(detail.rowId) }}/></section>
       <section className="compare-template-detail" aria-live="polite">{selected ? <AIAgentDiffView agent={selected} comparison={comparison}/> : <ComparisonEmpty title="No AI agents returned" message="Neither live enterprise returned a custom AI Studio agent."/>}</section>
     </div>
   </section>
+}
+
+function isDeployableAIAgent(agent: BoxAIAgentDiff) {
+  return agent.status === 'left_only' && Boolean(agent.left) && (agent.kind === 'Ask' || agent.kind === 'Extract') && (agent.left?.allowedEntityTypes?.length ?? 0) === 0
 }
 
 function MetadataDiff({ template, comparison }: { template: BoxMetadataTemplateDiff; comparison: BoxComparison }) {
