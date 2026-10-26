@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import '@unofficialbox/box-open-elements/run-trace'
 import { RunTimeline } from './RunTimeline'
 import { presentProviderProgress } from './runTimelineModel'
 import { latestActivityEvents } from './liveActivityModel'
-import type { TimelineEvent } from '@unofficialbox/box-open-elements/patterns/timeline'
+import type { RunTurn } from '@unofficialbox/box-open-elements/patterns/run/progress'
 
 describe('presentProviderProgress', () => {
   it('keeps Salesforce active while a managed package is still installing', () => {
@@ -33,7 +33,7 @@ describe('presentProviderProgress', () => {
     expect(providers[0].components[0]).toMatchObject({ state: 'failed', message: 'Validation stopped before this check completed' })
   })
 
-  it('renders each recent provider update in the live activity feed', () => {
+  it('maps the latest provider update into the run summary', () => {
     const { container } = render(<RunTimeline providers={[{
       id: 'box', name: 'Box', state: 'active', components: [], updates: [
         { sequence: 1, at: '2026-08-24T00:00:00Z', type: 'activity', provider: 'box', message: 'Inspecting the Box workspace', status: 'running', progressState: 'activity' },
@@ -41,13 +41,10 @@ describe('presentProviderProgress', () => {
       ],
     }]} />)
 
-    expect(screen.getByRole('region', { name: 'Recent validation activity' })).toBeTruthy()
-    const timeline = container.querySelector('box-timeline') as HTMLElement & { events: TimelineEvent[] }
-    expect(timeline.tabIndex).toBe(0)
-    expect(timeline.getAttribute('aria-label')).toBe('Live validation log')
-    expect(timeline.events).toEqual([
-      expect.objectContaining({ action: 'Box', summary: 'Inspecting the Box workspace', badge: 'Update', tone: 'neutral' }),
-      expect.objectContaining({ action: 'Metadata Template:Contract', summary: 'Checking metadata templates', badge: 'Working', tone: 'brand' }),
+    const summary = container.querySelector('box-run-summary') as HTMLElement & { turn: RunTurn; open: boolean }
+    expect(summary.open).toBe(true)
+    expect(summary.turn.steps).toEqual([
+      expect.objectContaining({ id: 'box', title: 'Box', description: 'Checking metadata templates', status: 'running' }),
     ])
   })
 
@@ -62,22 +59,20 @@ describe('presentProviderProgress', () => {
     expect(trace.steps).toEqual([expect.objectContaining({ id: 'salesforce', status: 'running' })])
   })
 
-  it('tails the newest live activity update', () => {
+  it('updates the run summary when a newer activity arrives', () => {
     const initialProviders = [{
       id: 'box', name: 'Box', state: 'active' as const, components: [], updates: [
         { sequence: 1, at: '2026-08-24T00:00:00Z', type: 'activity' as const, provider: 'box', message: 'Inspecting the Box workspace', status: 'running' as const, progressState: 'activity' as const },
       ],
     }]
     const { rerender, container } = render(<RunTimeline providers={initialProviders} />)
-    const log = container.querySelector('.live-activity-log') as HTMLDivElement
-    Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 480 })
-    Object.defineProperty(log, 'scrollTop', { configurable: true, writable: true, value: 0 })
+    const summary = container.querySelector('box-run-summary') as HTMLElement & { turn: RunTurn }
 
     rerender(<RunTimeline providers={[{
       ...initialProviders[0], updates: [...initialProviders[0].updates, { sequence: 2, at: '2026-08-24T00:00:01Z', type: 'activity', provider: 'box', message: 'Checking metadata templates', status: 'running', progressState: 'running' }],
     }]} />)
 
-    expect(log.scrollTop).toBe(480)
+    expect(summary.turn.steps[0]).toMatchObject({ description: 'Checking metadata templates', status: 'running' })
   })
 
   it('replaces an in-progress activity with its terminal update', () => {

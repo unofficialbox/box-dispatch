@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { RunStep, RunStepStatus } from '@unofficialbox/box-open-elements'
 import '@unofficialbox/box-open-elements/run-summary'
 import type { ComponentProgress, ProviderProgress } from './runTimelineModel'
@@ -7,49 +7,48 @@ import type { RunTurn, AgentTodo } from '@unofficialbox/box-open-elements/patter
 export function RunTimeline({ providers }: { providers: ProviderProgress[] }) {
   const summaryRef = useRef<HTMLElementTagNameMap['box-run-summary']>(null)
 
-  const steps: RunStep[] = providers.map((provider) => {
-    const latest = provider.updates.at(-1)
-    const first = provider.updates.at(0)
-    const terminal = provider.state === 'complete' || provider.state === 'failed'
+  const turn = useMemo<RunTurn>(() => {
+    const steps: RunStep[] = providers.map((provider) => {
+      const latest = provider.updates.at(-1)
+      const first = provider.updates.at(0)
+      const terminal = provider.state === 'complete' || provider.state === 'failed'
+      return {
+        id: provider.id,
+        title: provider.name,
+        description: latest?.message ?? `Waiting to begin ${provider.name} work`,
+        status: providerStatus(provider.state),
+        startedAt: first?.at,
+        finishedAt: terminal ? latest?.at : undefined,
+        children: provider.components.map((component) => ({
+          id: component.id,
+          label: formatComponentName(component),
+          progress: component.state === 'completed' ? 100 : undefined,
+          status: componentStatus(component.state),
+        })),
+      }
+    })
+    const todos: AgentTodo[] = providers.flatMap((provider) =>
+      provider.components.map((component) => ({
+        id: `${provider.id}-${component.id}`,
+        content: formatComponentName(component),
+        status: componentToTodoStatus(component.state),
+      }))
+    )
+    const firstUpdate = providers[0]?.updates[0]
+    const lastUpdate = providers.flatMap(p => p.updates).sort((a, b) =>
+      new Date(b.at).getTime() - new Date(a.at).getTime()
+    )[0]
+    const hasAnyTerminal = providers.some(p => p.state === 'complete' || p.state === 'failed')
     return {
-      id: provider.id,
-      title: provider.name,
-      description: latest?.message ?? `Waiting to begin ${provider.name} work`,
-      status: providerStatus(provider.state),
-      startedAt: first?.at,
-      finishedAt: terminal ? latest?.at : undefined,
-      children: provider.components.map((component) => ({
-        id: component.id,
-        label: formatComponentName(component),
-        progress: component.state === 'completed' ? 100 : undefined,
-        status: componentStatus(component.state),
-      })),
+      steps,
+      todos,
+      startedAt: firstUpdate ? new Date(firstUpdate.at).getTime() : 0,
+      endedAt: hasAnyTerminal && lastUpdate ? new Date(lastUpdate.at).getTime() : undefined,
+      incomplete: !hasAnyTerminal,
     }
-  })
+  }, [providers])
 
-  // Create agent-like todos from provider activities
-  const todos: AgentTodo[] = providers.flatMap((provider) =>
-    provider.components.map((component) => ({
-      id: `${provider.id}-${component.id}`,
-      content: formatComponentName(component),
-      status: componentToTodoStatus(component.state),
-    }))
-  )
-
-  const firstUpdate = providers[0]?.updates[0]
-  const lastUpdate = providers.flatMap(p => p.updates).sort((a, b) =>
-    new Date(b.at).getTime() - new Date(a.at).getTime()
-  )[0]
-
-  const hasAnyTerminal = providers.some(p => p.state === 'complete' || p.state === 'failed')
-
-  const turn: RunTurn = {
-    steps,
-    todos,
-    startedAt: firstUpdate ? new Date(firstUpdate.at).getTime() : Date.now(),
-    endedAt: hasAnyTerminal && lastUpdate ? new Date(lastUpdate.at).getTime() : undefined,
-    incomplete: !hasAnyTerminal,
-  }
+  const steps = turn.steps
 
   useEffect(() => {
     if (summaryRef.current) {

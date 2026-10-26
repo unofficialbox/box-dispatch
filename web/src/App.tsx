@@ -11,6 +11,7 @@ import { ValidationChangesDrawer } from './components/ValidationChangesDrawer'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { ChoosePage } from './pages/ChoosePage'
 import { ConnectPage } from './pages/ConnectPage'
+import { ComparePage } from './pages/ComparePage'
 import { ConfigurePage } from './pages/ConfigurePage'
 import { DeployPage } from './pages/DeployPage'
 import { OverviewPage } from './pages/OverviewPage'
@@ -38,6 +39,7 @@ const fallbackTemplates: SolutionTemplate[] = [
 const viewFromHash = (): AppView => {
   const hash = window.location.hash.toLowerCase()
   if (hash === '#history' || hash.startsWith('#history/')) return 'history'
+  if (hash === '#compare') return 'compare'
   if (hash === '#help') return 'help'
   if (hash === '#settings') return 'settings'
   if (hash === '#workspace') return 'workflow'
@@ -201,7 +203,7 @@ function App() {
     return () => controller.abort()
   }, [dataRetry])
 
-  const connectionSurface = screen === 'overview' || screen === 'settings'
+  const connectionSurface = screen === 'overview' || screen === 'settings' || screen === 'compare'
     ? screen
     : screen === 'workflow' && ['Connect', 'Configure', 'Summary'].includes(activePhase)
       ? `${screen}:${activePhase}`
@@ -878,6 +880,8 @@ function App() {
     ? <OverviewPage plan={plan} connections={connections} connectionsRefreshing={connectionsRefreshing} deployments={deployments} run={run} onNewDeployment={beginNewDeployment} onContinue={continueSavedDeployment} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onOpenProvider={openProvider} onViewHistory={() => navigateTo('history')}/>
     : screen === 'history'
       ? <HistoryPage deployments={deployments} selectedDeploymentID={historyDeploymentID} onCloseDeployment={() => navigateTo('history')} onOpenDestination={openDestination} onViewChanges={openDeploymentChanges}/>
+      : screen === 'compare'
+        ? <ComparePage connections={connections}/>
       : screen === 'settings'
         ? <SettingsPage defaults={deploymentDefaults} connections={connections} connectionsRefreshing={connectionsRefreshing} onSaveDefaults={saveDeploymentDefaults} onBoxConnection={openBoxConnection} onSalesforceConnection={openSalesforceConnection} onRemoveBoxConnection={removeBoxConnection} onRemoveSalesforceConnection={removeSalesforceOrg} boxConnectionsBusy={boxConnectionLoading} salesforceConnectionsBusy={connectionsLoading}/>
         : screen === 'help' ? <HelpPage/> : workflow
@@ -886,7 +890,7 @@ function App() {
     : screen === 'settings' ? ['defaults']
     : screen === 'workflow' ? ['plan', 'runs', 'templates', 'defaults']
     : screen === 'overview' ? ['plan', 'runs', 'deployments'] : []
-  const needsConnections = screen === 'overview' || screen === 'settings' || (screen === 'workflow' && ['Connect', 'Configure', 'Summary'].includes(activePhase))
+  const needsConnections = screen === 'overview' || screen === 'settings' || screen === 'compare' || (screen === 'workflow' && ['Connect', 'Configure', 'Summary'].includes(activePhase))
   const loadErrors = requiredData.map((key) => dataErrors[key]).filter(Boolean)
   if (needsConnections && connectionError) loadErrors.push(connectionError)
   const waitingForData = screen !== 'help' && (!initialDataLoaded || (needsConnections && !connectionsKnown))
@@ -894,7 +898,7 @@ function App() {
     ? <section className="task-surface" aria-label="Workspace data unavailable"><Alert heading="Workspace data unavailable" message={`${loadErrors.join(' ')} Existing records may still be present. Check that Dispatch is running, then retry.`} tone="error" open/><box-button label="Retry loading" tone="primary" onClick={() => { if (requiredData.some((key) => dataErrors[key])) setDataRetry((current) => current + 1); if (needsConnections && connectionError) setConnectionRetry((current) => current + 1) }}></box-button></section>
     : waitingForData ? <section className="task-surface overview-skeleton" role="status" aria-label="Loading workspace data" style={{ padding: '34px 44px' }}><box-skeleton variant="line" lines={2} style={{ marginBottom: '32px', maxWidth: '600px' }}></box-skeleton><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '32px' }}><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '32px' }}><div style={{ display: 'grid', gap: '24px' }}><box-skeleton variant="line" lines={5} style={{ minHeight: '180px' }}></box-skeleton><box-skeleton variant="line" lines={6} style={{ minHeight: '200px' }}></box-skeleton></div><box-skeleton variant="line" lines={8} style={{ minHeight: '400px' }}></box-skeleton></div></section> : content
 
-  return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{streamNotice && <p className="notice" role="status">{streamNotice}</p>}{visibleContent}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} loading={diagnosticLoading} error={diagnosticError} onRetry={() => setDiagnosticRetry((current) => current + 1)} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
+  return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onCompare={() => navigateTo('compare')} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{streamNotice && <p className="notice" role="status">{streamNotice}</p>}{visibleContent}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} loading={diagnosticLoading} error={diagnosticError} onRetry={() => setDiagnosticRetry((current) => current + 1)} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
 }
 
 async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {

@@ -130,7 +130,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.locator('box-metric-card[heading="Connections"]')).not.toHaveAttribute('value', 'Checking')
   await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('link', { name: 'B/ Dispatch Solution delivery overview', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Dispatch Solution delivery overview', exact: true })).toBeVisible()
   await expect(page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Collapse navigation' })).not.toHaveAttribute('aria-controls')
   await expectAccessible(page, ['.brand', 'box-sidebar-toggle-button'], ['label-content-name-mismatch', 'aria-valid-attr-value'])
   await expect(page.locator('box-app-shell')).toHaveAttribute('heading', 'Box Dispatch')
@@ -294,9 +294,9 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
 
   await expect(page.getByRole('heading', { name: 'Review and validate' })).toBeVisible()
   await page.getByRole('button', { name: 'Validate deployment' }).click()
-  await expect(page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"]')).toHaveAttribute('data-status', 'running')
-  await expect(page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="status"]')).toHaveText('Running')
-  expect(await page.locator('box-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="marker"]').evaluate((marker) => ({
+  await expect(page.locator('box-run-trace.dispatch-run-trace').locator('[part="step"][data-step-id="salesforce"]')).toHaveAttribute('data-status', 'running')
+  await expect(page.locator('box-run-trace.dispatch-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="status"]')).toHaveText('Running')
+  expect(await page.locator('box-run-trace.dispatch-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="marker"]').evaluate((marker) => ({
     background: getComputedStyle(marker).backgroundColor,
     injectedStyle: Boolean((marker.getRootNode() as ShadowRoot).querySelector('[data-dispatch-running-pulse]')),
   }))).toEqual({ background: 'rgb(0, 229, 129)', injectedStyle: false })
@@ -314,15 +314,12 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('box-path')).toHaveAttribute('current', 'Review')
   await expect(page.getByRole('button', { name: 'Continue to deployment' })).toBeVisible()
   await expect(page.getByText('Validation results restored. Review changes or continue to deployment.')).toBeVisible()
-  const liveActivity = page.locator('box-timeline[aria-label="Live validation log"]')
-  await expect(liveActivity).toBeVisible()
-  await expect(page.locator('.live-activity-feed')).toHaveCSS('background-color', 'rgb(18, 21, 19)')
-  await liveActivity.focus()
-  await page.keyboard.press('PageDown')
-  const liveActivityState = await liveActivity.evaluate((element) => ({ focused: document.activeElement === element, tabIndex: (element as HTMLElement).tabIndex, events: (element as HTMLElement & { events: unknown[] }).events.length }))
-  expect(liveActivityState).toMatchObject({ focused: true, tabIndex: 0 })
-  expect(liveActivityState.events).toBeGreaterThan(0)
-  await expectSharedAccessibilityInBothThemes(page, ['box-badge', ['box-path', '[part="stage-label"]'], ['box-run-trace', '[part="summary"]'], 'box-timeline'])
+  const runSummary = page.locator('box-run-summary.dispatch-run-summary')
+  await expect(runSummary).toBeVisible()
+  const runSummaryState = await runSummary.evaluate((element) => ({ open: (element as HTMLElement & { open: boolean }).open, steps: (element as HTMLElement & { turn: { steps: unknown[] } }).turn.steps.length }))
+  expect(runSummaryState.open).toBe(true)
+  expect(runSummaryState.steps).toBeGreaterThan(0)
+  await expectSharedAccessibilityInBothThemes(page, ['box-badge', ['box-path', '[part="stage-label"]'], ['box-run-trace.dispatch-run-trace', '[part="summary"]'], 'box-run-summary.dispatch-run-summary'])
 
   await page.getByRole('button', { name: 'Review changes' }).click()
   await expect(page.getByRole('heading', { name: 'Review validation changes' })).toBeVisible()
@@ -337,7 +334,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     mode: viewer.getAttribute('mode'),
     hasCurrent: viewer.getAttribute('before-text')?.includes('false'),
     hasPackaged: viewer.getAttribute('after-text')?.includes('true'),
-  }))).toEqual({ before: 'Current org', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
+  }))).toEqual({ before: 'Current state', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="1"]').click()
   await expect(page.locator('box-table.validation-change-table').getByRole('grid')).toBeVisible()
   await expect(page.locator('box-table.validation-change-table').getByRole('row', { selected: true })).toHaveCount(1)
@@ -347,7 +344,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Close drawer' }).click()
 
   for (const details of await page.getByRole('button', { name: 'Details' }).all()) await details.click()
-  const childAlignment = await page.locator('box-run-trace').evaluate((trace) => {
+  const childAlignment = await page.locator('box-run-trace.dispatch-run-trace').evaluate((trace) => {
     const rows = [...trace.shadowRoot!.querySelectorAll<HTMLElement>('[part="child"]')]
     const bars = rows.map((row) => row.querySelector<HTMLElement>('box-progress-bar')?.getBoundingClientRect()).filter((rect): rect is DOMRect => Boolean(rect))
     return {
@@ -360,7 +357,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(childAlignment.widthDelta).toBeLessThan(0.01)
   expect(childAlignment.rightEdgeDelta).toBeLessThan(0.01)
 
-  const traceAlignment = await page.locator('box-run-trace').evaluate((trace) => {
+  const traceAlignment = await page.locator('box-run-trace.dispatch-run-trace').evaluate((trace) => {
     const hostStyle = getComputedStyle(trace)
     const steps = [...trace.shadowRoot!.querySelectorAll<HTMLElement>('[part="step"]')]
     const markers = steps.map((step) => step.querySelector<HTMLElement>('[part="marker"]')!.getBoundingClientRect())
@@ -499,9 +496,10 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-  expect(await page.locator('box-nav-sidebar.sidebar .nav-route [data-nav-label]').evaluateAll((labels) => labels.map((label) => getComputedStyle(label).display))).toEqual(['none', 'none', 'none', 'none'])
+  expect(await page.locator('box-nav-sidebar.sidebar .nav-route [data-nav-label]').evaluateAll((labels) => labels.map((label) => getComputedStyle(label).display))).toEqual(['none', 'none', 'none', 'none', 'none'])
   await expect(page.getByRole('link', { name: 'Overview', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Deployments', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Compare Box environments', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Deployment history', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'New deployment' }).click()

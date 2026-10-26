@@ -166,3 +166,40 @@ func TestDelayedOAuthInvalidationOnlyClearsItsOriginalRecord(t *testing.T) {
 		t.Fatal("delayed failure invalidated a renewed token")
 	}
 }
+
+func TestResolveAuthForConnectionDoesNotChangeSelection(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{
+		ID: "box-a", ClientID: "client-a", ClientSecret: "secret-a", SubjectType: "enterprise", SubjectID: "eid-a",
+	}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{
+		ID: "box-b", ClientID: "client-b", ClientSecret: "secret-b", SubjectType: "enterprise", SubjectID: "eid-b",
+	}, false)
+	isolateConnectionSettings(t, settings)
+
+	resolved, err := ResolveAuthForConnection("box-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ClientID != "client-b" || resolved.SubjectID != "eid-b" {
+		t.Fatalf("resolved connection = %+v", resolved)
+	}
+	current, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.BoxSelectedConnectionID != "box-a" {
+		t.Fatalf("selected connection = %q, want box-a", current.BoxSelectedConnectionID)
+	}
+}
+
+func TestResolveAuthForConnectionRejectsUnknownAndIncompleteConnections(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "incomplete", Alias: "Needs login"}, true)
+	isolateConnectionSettings(t, settings)
+
+	if _, err := ResolveAuthForConnection("missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unknown connection error = %v", err)
+	}
+	if _, err := ResolveAuthForConnection("incomplete"); err == nil || !strings.Contains(err.Error(), "reconnected") {
+		t.Fatalf("incomplete connection error = %v", err)
+	}
+}

@@ -51,18 +51,8 @@ func ResolveAuth() (AuthConfig, error) {
 	if settingsErr == nil {
 		settings = settings.HydrateBoxConnections()
 		if app, ok := settings.SelectedBoxConnection(); ok {
-			if strings.TrimSpace(app.RefreshToken) != "" {
-				clientID, clientSecret := BoxOAuthApp()
-				return AuthConfig{
-					Method: AuthOAuth2, connectionID: app.ID, ClientID: firstNonEmpty(app.ClientID, clientID),
-					ClientSecret: firstNonEmpty(app.ClientSecret, clientSecret), RefreshToken: app.RefreshToken,
-				}, nil
-			}
-			if boxAppHasCCG(app) {
-				return AuthConfig{
-					Method: AuthCCG, ClientID: app.ClientID, ClientSecret: app.ClientSecret,
-					SubjectType: app.SubjectType, SubjectID: app.SubjectID,
-				}, nil
+			if resolved, ok := authForBoxApp(app); ok {
+				return resolved, nil
 			}
 		}
 		if settings.HasBoxCCG() {
@@ -86,6 +76,49 @@ func ResolveAuth() (AuthConfig, error) {
 		return AuthConfig{}, fmt.Errorf("Box CLI connection %q is no longer supported; log in with Box or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN", settings.BoxDefaultConnection)
 	}
 	return AuthConfig{}, fmt.Errorf("no Box authentication configured: log in with Box, or export BOX_CLIENT_ID, BOX_CLIENT_SECRET, and BOX_REFRESH_TOKEN")
+}
+
+// ResolveAuthForConnection resolves one saved Box connection without changing
+// the connection selected for deployment. It deliberately has no environment
+// fallback: live comparisons must query the two exact saved accounts requested
+// by the operator.
+func ResolveAuthForConnection(connectionID string) (AuthConfig, error) {
+	connectionID = strings.TrimSpace(connectionID)
+	if connectionID == "" {
+		return AuthConfig{}, fmt.Errorf("select a saved Box connection")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return AuthConfig{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	for _, app := range settings.BoxConnections {
+		if app.ID != connectionID {
+			continue
+		}
+		if resolved, ok := authForBoxApp(app); ok {
+			return resolved, nil
+		}
+		return AuthConfig{}, fmt.Errorf("Box connection %q needs to be reconnected", app.Alias)
+	}
+	return AuthConfig{}, fmt.Errorf("saved Box connection was not found")
+}
+
+func authForBoxApp(app config.BoxAppConnection) (AuthConfig, bool) {
+	if strings.TrimSpace(app.RefreshToken) != "" {
+		clientID, clientSecret := BoxOAuthApp()
+		return AuthConfig{
+			Method: AuthOAuth2, connectionID: app.ID, ClientID: firstNonEmpty(app.ClientID, clientID),
+			ClientSecret: firstNonEmpty(app.ClientSecret, clientSecret), RefreshToken: app.RefreshToken,
+		}, true
+	}
+	if boxAppHasCCG(app) {
+		return AuthConfig{
+			Method: AuthCCG, connectionID: app.ID, ClientID: app.ClientID, ClientSecret: app.ClientSecret,
+			SubjectType: app.SubjectType, SubjectID: app.SubjectID,
+		}, true
+	}
+	return AuthConfig{}, false
 }
 
 func persistRotatedBoxRefresh(original AuthConfig, refreshToken string) {

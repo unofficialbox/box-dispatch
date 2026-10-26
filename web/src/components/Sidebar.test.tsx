@@ -5,17 +5,17 @@ import { Sidebar } from './Sidebar'
 
 describe('Sidebar', () => {
   beforeEach(() => window.localStorage.clear())
+  const callbacks = { onOverview: vi.fn(), onNewDeployment: vi.fn(), onCompare: vi.fn(), onHistory: vi.fn(), onSettings: vi.fn() }
 
   it('names all visible brand copy without a cross-shadow control reference', () => {
-    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
-    expect(within(container).getByRole('link', { name: 'B/ Dispatch Solution delivery overview' }).textContent).toBe('B/ Dispatch Solution delivery')
+    const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
+    expect(within(container).getByRole('link', { name: 'Dispatch Solution delivery overview' }).textContent).toBe(' Dispatch Solution delivery')
     expect(container.querySelector('box-sidebar-toggle-button')?.hasAttribute('controls')).toBe(false)
   })
 
   it('exposes only the current route and updates it after navigation', () => {
-    const callbacks = { onOverview: vi.fn(), onNewDeployment: vi.fn(), onHistory: vi.fn(), onSettings: vi.fn() }
     const { container, rerender } = render(<Sidebar activeView="overview" {...callbacks}/>)
-    for (const [activeView, name] of [['overview', 'Overview'], ['workflow', 'Deployments'], ['history', 'Deployment history'], ['settings', 'Settings']] as const) {
+    for (const [activeView, name] of [['overview', 'Overview'], ['workflow', 'Deployments'], ['compare', 'Compare Box environments'], ['history', 'Deployment history'], ['settings', 'Settings']] as const) {
       rerender(<Sidebar activeView={activeView} {...callbacks}/>)
       expect(container.querySelectorAll('[aria-current]')).toHaveLength(1)
       expect(within(container).getByRole('link', { name }).getAttribute('aria-current')).toBe('page')
@@ -23,7 +23,7 @@ describe('Sidebar', () => {
   })
 
   it('uses the clock-2 icon for deployment history', () => {
-    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
+    const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
 
     const history = within(container).getByRole('link', { name: 'Deployment history' })
     expect(history.querySelector('.boe-rail-icon')?.innerHTML).toContain('M75 21V72.99L97.22 94.72')
@@ -31,15 +31,15 @@ describe('Sidebar', () => {
   })
 
   it('keeps explicit route names when collapsed styles hide the visual labels', () => {
-    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
+    const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
 
-    for (const name of ['Overview', 'Deployments', 'Deployment history', 'Settings']) {
+    for (const name of ['Overview', 'Deployments', 'Compare Box environments', 'Deployment history', 'Settings']) {
       expect(within(container).getByRole('link', { name }).getAttribute('aria-label')).toBe(name)
     }
   })
 
   it('persists the compact preference while keeping the library toggle reachable', () => {
-    const { container } = render(<Sidebar activeView="overview" onOverview={vi.fn()} onNewDeployment={vi.fn()} onHistory={vi.fn()} onSettings={vi.fn()}/>)
+    const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
     const sidebar = container.querySelector('box-nav-sidebar')
     const toggle = container.querySelector('box-sidebar-toggle-button')
 

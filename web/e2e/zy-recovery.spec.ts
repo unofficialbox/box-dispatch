@@ -55,10 +55,10 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
       const bounds = await page.locator('.settings-connection-row').evaluateAll((rows) => rows.map((row) => {
         const card = row.closest('.settings-provider')!.getBoundingClientRect()
         const actions = row.querySelector('.settings-connection-actions')!.getBoundingClientRect()
-        return { fits: actions.left >= card.left && actions.right <= card.right && actions.right <= document.documentElement.clientWidth, width: actions.width }
+        return { fits: actions.left >= card.left && actions.right <= card.right && actions.right <= document.documentElement.clientWidth, width: actions.width, cardLeft: card.left, cardRight: card.right, actionsLeft: actions.left, actionsRight: actions.right, viewport: document.documentElement.clientWidth }
       }))
       expect(bounds.length).toBeGreaterThan(0)
-      expect(bounds.every((bound) => bound.fits && bound.width > 0)).toBe(true)
+      expect(bounds.filter((bound) => !bound.fits || bound.width <= 0)).toEqual([])
       await page.screenshot({ path: info.outputPath(`long-actions-${viewportWidth}.png`), fullPage: true })
     }
     await page.setViewportSize({ width, height: 1000 })
@@ -308,7 +308,7 @@ test('terminal REST status keeps incomplete validation activity explicitly quali
     await route.fulfill({ contentType: 'text/event-stream', body: `event: dispatch\ndata: ${JSON.stringify({ sequence: 1, type: 'activity', provider: 'salesforce', component: 'ApexClass:Held', progressState: 'running', status: 'running', message: 'Checking Held', at: '2026-10-11T18:00:00Z' })}\n\n` })
   })
   await page.goto('/#workspace')
-  await expect(page.locator('box-run-trace')).toContainText('Checking Held')
+  await expect(page.locator('box-run-trace.dispatch-run-trace')).toContainText('Checking Held')
   release()
   await expect(page.getByRole('button', { name: 'Continue to deployment' })).toBeVisible()
   await expect(page.getByText(/Run status is confirmed, but activity history is incomplete/)).toBeVisible()
