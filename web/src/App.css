@@ -1096,6 +1096,8 @@ html[data-theme='dark'] .overview-connection-copy {
 .compare-promotion-plan > div > p:last-child { margin: 6px 0 0; color: var(--dispatch-muted); font-size: 12px; }
 .compare-promotion-plan box-text-field { min-width: 0; }
 .compare-promotion-plan box-button { margin-bottom: 1px; }
+.compare-plan-action { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; }
+.compare-plan-remove { flex: none; }
 .compare-environments { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 22px; padding: 24px 0; border-bottom: 1px solid var(--dispatch-rule); }
 .compare-environments article { min-width: 0; padding: 0 4px; }
 .compare-environments article > span, .compare-detail-heading span { display: block; margin-bottom: 4px; color: var(--dispatch-secondary-ink); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }

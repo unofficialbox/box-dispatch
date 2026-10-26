@@ -142,6 +142,14 @@ describe('ComparePage', () => {
 
     await waitFor(() => expect(container.querySelector('box-button[label="Prepare deployment"]')).toBeTruthy())
     expect(screen.getByText('1 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
+    const removeButton = container.querySelector('box-icon-button[icon="cart-1"][label="Remove Legal Assistant from deployment plan"]')
+    expect(removeButton).toBeTruthy()
+    expect(container.querySelector('box-button[label="Remove from plan"]')).toBeNull()
+    fireEvent.click(removeButton!)
+    expect(screen.getByText('0 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
+    expect(container.querySelector('box-button[label="Prepare deployment"]')?.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(container.querySelector('box-button[label="Add to plan"]')!)
+    expect(screen.getByText('1 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
     fireEvent.click(container.querySelector('box-button[label="Prepare deployment"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))

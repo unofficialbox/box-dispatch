@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@unofficialbox/box-open-elements-react/alert'
 import { Select } from '@unofficialbox/box-open-elements-react/select'
 import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
@@ -32,6 +32,7 @@ const aiAgentColumns: TableColumn[] = [
   { key: 'agent', label: 'AI agent' },
   { key: 'kind', label: 'Mode' },
   { key: 'status', label: 'Result' },
+  { key: 'plan', label: 'Plan', align: 'center', hostContent: true },
 ]
 
 const comparisonTypeOptions = [
@@ -212,15 +213,12 @@ function AIAgentResults({ comparison, onPrepare }: { comparison: BoxAIAgentCompa
   const selected = comparison.agents.find((agent) => agent.key === selectedKey) ?? comparison.agents[0]
   const rows = useMemo<TableRow[]>(() => comparison.agents.map((agent) => {
     const presentation = statusPresentation[agent.status]
-    const deployable = isDeployableAIAgent(agent)
-    const planned = plannedKeys.includes(agent.key)
     return {
       id: agent.key,
-      cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone } },
+      cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone }, plan: isDeployableAIAgent(agent) ? '' : 'Not deployable' },
       detail: agent.status === 'changed' ? `${agent.changes.length} semantic changes` : presentation.label,
-      actions: [{ key: 'toggle-plan', label: deployable ? planned ? 'Remove from plan' : 'Add to plan' : 'Not deployable', disabled: !deployable, ariaLabel: `${deployable ? planned ? 'Remove' : 'Add' : 'Cannot add'} ${agent.name || agent.key} ${deployable ? planned ? 'from' : 'to' : 'to'} deployment plan` }],
     }
-  }), [comparison.agents, plannedKeys])
+  }), [comparison.agents])
 
   const togglePlannedAgent = (key: string) => {
     setPlannedKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key])
@@ -243,10 +241,32 @@ function AIAgentResults({ comparison, onPrepare }: { comparison: BoxAIAgentCompa
     {deployableKeys.length > 0 ? <section className="compare-promotion-plan" aria-labelledby="promotion-plan-title"><div><p className="overview-eyebrow">Deployment plan</p><h3 id="promotion-plan-title">Promote source-only agents</h3><p>{plannedKeys.length} of {deployableKeys.length} deployable agents selected for {comparison.right.alias}.</p></div><TextField label="Deployment name" value={deploymentName} required invalid={deploymentName.length > 80} errorMessage={deploymentName.length > 80 ? 'Use 80 characters or fewer.' : undefined} onValueChanged={(event) => setDeploymentName(event.detail.value)}/><box-button label={preparing ? 'Preparing deployment…' : 'Prepare deployment'} tone="primary" disabled={preparing || plannedKeys.length === 0 || !deploymentName.trim() || deploymentName.length > 80} onClick={() => void prepare()}></box-button></section> : <Alert className="compare-scope-alert" heading="No eligible source-only agents" message="Promotion currently supports unrestricted Ask and Extract agents. Changed agents require an update workflow, destination-only agents already exist, and restricted agents retain provider-specific audience principals that cannot be copied safely." tone="info" open/>}
     {promotionError ? <Alert className="compare-error" heading="Deployment plan could not be prepared" message={promotionError} tone="error" open/> : null}
     <div className="compare-browser">
-      <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')} onRowAction={(detail) => { if (detail.action === 'toggle-plan') togglePlannedAgent(detail.rowId) }}/></section>
+      <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')}>{comparison.agents.map((agent) => {
+        if (!isDeployableAIAgent(agent)) return null
+        const planned = plannedKeys.includes(agent.key)
+        const label = agent.name || agent.key
+        return <span slot={`cell-${agent.key}-plan`} className="compare-plan-action" key={agent.key}>{planned ? <RemoveFromPlanButton label={`Remove ${label} from deployment plan`} onRemove={() => togglePlannedAgent(agent.key)}/> : <box-button label="Add to plan" accessible-label={`Add ${label} to deployment plan`} size="small" tone="neutral" onClick={() => togglePlannedAgent(agent.key)}></box-button>}</span>
+      })}</BoeTable></section>
       <section className="compare-template-detail" aria-live="polite">{selected ? <AIAgentDiffView agent={selected} comparison={comparison}/> : <ComparisonEmpty title="No AI agents returned" message="Neither live enterprise returned a custom AI Studio agent."/>}</section>
     </div>
   </section>
+}
+
+function RemoveFromPlanButton({ label, onRemove }: { label: string; onRemove: () => void }) {
+  const ref = useRef<HTMLElementTagNameMap['box-icon-button']>(null)
+  const onRemoveRef = useRef(onRemove)
+  useEffect(() => { onRemoveRef.current = onRemove }, [onRemove])
+  useEffect(() => {
+    const button = ref.current
+    if (!button) return
+    const handleClick = (event: Event) => {
+      event.preventDefault()
+      onRemoveRef.current()
+    }
+    button.addEventListener('click', handleClick)
+    return () => button.removeEventListener('click', handleClick)
+  }, [])
+  return <box-icon-button ref={ref} className="compare-plan-remove" icon="cart-1" label={label}></box-icon-button>
 }
 
 function isDeployableAIAgent(agent: BoxAIAgentDiff) {
