@@ -281,7 +281,7 @@ func toBCLHCL(doc BCLDocument) string {
 func resourceSummaries(resources []BCLResource) []any {
 	out := make([]any, 0, len(resources))
 	for _, resource := range resources {
-		out = append(out, map[string]any{
+		summary := map[string]any{
 			"name":             resource.Name,
 			"type":             resource.Type,
 			"provider":         resource.Provider,
@@ -292,7 +292,14 @@ func resourceSummaries(resources []BCLResource) []any {
 			"artifactName":     maybeString(resource.Metadata, "artifactName"),
 			"scenario":         maybeString(resource.Metadata, "scenario"),
 			"createdAt":        maybeString(resource.Metadata, "createdAt"),
-		})
+		}
+		if len(resource.Config) > 0 {
+			summary["config"] = resource.Config
+		}
+		if len(resource.Metadata) > 0 {
+			summary["metadata"] = resource.Metadata
+		}
+		out = append(out, summary)
 	}
 	return out
 }

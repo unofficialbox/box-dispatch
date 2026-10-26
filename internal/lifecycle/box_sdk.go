@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,15 @@ type boxSDK struct {
 	client *boxclient.Client
 }
 
+type boxAIAgentCreate struct {
+	Mode          string
+	Name          string
+	AccessState   string
+	Description   string
+	Instructions  string
+	Configuration map[string]any
+}
+
 type boxAPI interface {
 	findFolder(context.Context, string, string) (string, bool, error)
 	ensureFolder(context.Context, string, string) (string, error)
@@ -42,7 +52,7 @@ type boxAPI interface {
 	aiAgentNames(context.Context) (map[string]bool, error)
 	// createAIAgent and createHub return the created resource ID so the deploy
 	// can record it; teardown deletes strictly by recorded ID.
-	createAIAgent(context.Context, string, string, string, string) (string, error)
+	createAIAgent(context.Context, boxAIAgentCreate) (string, error)
 	hubTitles(context.Context) (map[string]bool, error)
 	createHub(context.Context, string, string) (string, error)
 	automateWorkflowNames(context.Context, string) (map[string]bool, error)
@@ -345,18 +355,53 @@ func (sdk *boxSDK) aiAgentNames(ctx context.Context) (map[string]bool, error) {
 	return names, nil
 }
 
-func (sdk *boxSDK) createAIAgent(ctx context.Context, mode, name, description, instructions string) (string, error) {
-	body := &schemas.CreateAiAgent{Type: schemas.AiSingleAgentResponseTypeAiAgent, Name: name, AccessState: "enabled"}
-	if mode == "extract" {
-		body.Extract = &schemas.AiStudioAgentExtract{Type: schemas.AiAgentExtractTypeAiAgentExtract, AccessState: "enabled", Description: description, CustomInstructions: serialization.Value(instructions)}
-	} else {
-		body.Ask = &schemas.AiStudioAgentAsk{Type: schemas.AiAgentAskTypeAiAgentAsk, AccessState: "enabled", Description: description, CustomInstructions: serialization.Value(instructions)}
-	}
-	agent, err := sdk.client.AiStudio.CreateAiAgents(ctx, body)
-	if err != nil || agent == nil {
+func (sdk *boxSDK) createAIAgent(ctx context.Context, agent boxAIAgentCreate) (string, error) {
+	body, err := buildAIAgentCreateBody(agent)
+	if err != nil {
 		return "", err
 	}
-	return agent.Id, nil
+	created, err := sdk.client.AiStudio.CreateAiAgents(ctx, body)
+	if err != nil || created == nil {
+		return "", err
+	}
+	return created.Id, nil
+}
+
+func buildAIAgentCreateBody(agent boxAIAgentCreate) (*schemas.CreateAiAgent, error) {
+	accessState := strings.TrimSpace(agent.AccessState)
+	if accessState == "" {
+		accessState = "enabled"
+	}
+	body := &schemas.CreateAiAgent{Type: schemas.AiSingleAgentResponseTypeAiAgent, Name: agent.Name, AccessState: accessState}
+	mode := strings.ToLower(strings.TrimSpace(agent.Mode))
+	if mode != "ask" && mode != "extract" {
+		return nil, fmt.Errorf("unsupported AI agent mode %q", agent.Mode)
+	}
+	configuration, hasConfiguration := agent.Configuration[mode]
+	if hasConfiguration {
+		data, err := json.Marshal(configuration)
+		if err != nil {
+			return nil, fmt.Errorf("encode AI agent configuration: %w", err)
+		}
+		if mode == "extract" {
+			var extract schemas.AiStudioAgentExtract
+			if err := json.Unmarshal(data, &extract); err != nil {
+				return nil, fmt.Errorf("decode AI agent extract configuration: %w", err)
+			}
+			body.Extract = &extract
+		} else {
+			var ask schemas.AiStudioAgentAsk
+			if err := json.Unmarshal(data, &ask); err != nil {
+				return nil, fmt.Errorf("decode AI agent ask configuration: %w", err)
+			}
+			body.Ask = &ask
+		}
+	} else if mode == "extract" {
+		body.Extract = &schemas.AiStudioAgentExtract{Type: schemas.AiAgentExtractTypeAiAgentExtract, AccessState: accessState, Description: agent.Description, CustomInstructions: serialization.Value(agent.Instructions)}
+	} else {
+		body.Ask = &schemas.AiStudioAgentAsk{Type: schemas.AiAgentAskTypeAiAgentAsk, AccessState: accessState, Description: agent.Description, CustomInstructions: serialization.Value(agent.Instructions)}
+	}
+	return body, nil
 }
 
 func (sdk *boxSDK) hubTitles(ctx context.Context) (map[string]bool, error) {

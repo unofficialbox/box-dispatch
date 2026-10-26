@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import '@unofficialbox/box-open-elements/table'
 import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
-import type { TableColumn, TableRow, TableSelectionMode, TableSortDetail } from '@unofficialbox/box-open-elements/table'
+import type { TableColumn, TableRow, TableRowActionDetail, TableSelectionMode, TableSortDetail } from '@unofficialbox/box-open-elements/table'
 
 type BoeTableProps = {
+  children?: ReactNode
   className?: string
   columns: TableColumn[]
   emptyText?: string
@@ -11,6 +12,7 @@ type BoeTableProps = {
   label: string
   loading?: boolean
   onSelectionChange?: (selectedIds: string[]) => void
+  onRowAction?: (detail: TableRowActionDetail) => void
   onSort?: (detail: TableSortDetail) => void
   rows: TableRow[]
   selectedIds?: string[]
@@ -21,12 +23,14 @@ type BoeTableProps = {
 
 const EMPTY_SELECTED_IDS: string[] = []
 
-export function BoeTable({ className, columns, emptyText = 'No rows', errorText = '', label, loading = false, onSelectionChange, onSort, rows, selectedIds = EMPTY_SELECTED_IDS, selectionMode = 'none', sortDirection, sortKey }: BoeTableProps) {
+export function BoeTable({ children, className, columns, emptyText = 'No rows', errorText = '', label, loading = false, onSelectionChange, onRowAction, onSort, rows, selectedIds = EMPTY_SELECTED_IDS, selectionMode = 'none', sortDirection, sortKey }: BoeTableProps) {
   const tableRef = useRef<HTMLElementTagNameMap['box-table'] | null>(null)
   const onSelectionChangeRef = useRef(onSelectionChange)
+  const onRowActionRef = useRef(onRowAction)
   const onSortRef = useRef(onSort)
 
   useEffect(() => { onSelectionChangeRef.current = onSelectionChange }, [onSelectionChange])
+  useEffect(() => { onRowActionRef.current = onRowAction }, [onRowAction])
   useEffect(() => { onSortRef.current = onSort }, [onSort])
 
   useEffect(() => {
@@ -55,13 +59,16 @@ export function BoeTable({ className, columns, emptyText = 'No rows', errorText 
     if (!table) return
     const handleSort = (event: BoxElementEventMap['box-table']['sort']) => onSortRef.current?.(event.detail)
     const handleSelection = (event: BoxElementEventMap['box-table']['selection-changed']) => onSelectionChangeRef.current?.(event.detail.selectedIds)
+    const handleRowAction = (event: BoxElementEventMap['box-table']['row-action']) => onRowActionRef.current?.(event.detail)
     table.addEventListener('sort', handleSort)
     table.addEventListener('selection-changed', handleSelection)
+    table.addEventListener('row-action', handleRowAction)
     return () => {
       table.removeEventListener('sort', handleSort)
       table.removeEventListener('selection-changed', handleSelection)
+      table.removeEventListener('row-action', handleRowAction)
     }
   }, [])
 
-  return <box-table ref={tableRef} className={className} label={label} loading={loading} emptyText={emptyText} errorText={errorText}></box-table>
+  return <box-table ref={tableRef} className={className} label={label} loading={loading} emptyText={emptyText} errorText={errorText}>{children}</box-table>
 }

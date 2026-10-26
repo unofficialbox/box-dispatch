@@ -46,6 +46,32 @@ func TestUploadedFileIDUsesUploadResponse(t *testing.T) {
 	}
 }
 
+func TestBuildAIAgentCreateBodyPreservesAdvancedConfiguration(t *testing.T) {
+	body, err := buildAIAgentCreateBody(boxAIAgentCreate{
+		Mode: "ask", Name: "Legal Assistant", AccessState: "enabled",
+		Configuration: map[string]any{"ask": map[string]any{
+			"type": "ai_agent_ask", "access_state": "enabled", "description": "Answer legal questions",
+			"custom_instructions": "Cite the source", "suggested_questions": []string{"What is the term?"},
+			"basic_text": map[string]any{"model": "model-a", "prompt_template": "Answer precisely"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Legal Assistant", "Cite the source", "What is the term?", "model-a", "Answer precisely"} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("request %s does not include %q", encoded, want)
+		}
+	}
+	if _, err := buildAIAgentCreateBody(boxAIAgentCreate{Mode: "text generation", Name: "Writer"}); err == nil {
+		t.Fatal("unsupported AI agent mode was accepted")
+	}
+}
+
 func TestResolveUploadedFileIDRetriesFolderInventory(t *testing.T) {
 	attempts := 0
 	fileID, err := resolveUploadedFileID(context.Background(), &schemas.Files{}, "example.pdf", 3, 0, func(context.Context) (string, bool, error) {

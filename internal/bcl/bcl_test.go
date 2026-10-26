@@ -105,6 +105,38 @@ func TestWriteDeploymentBundle(t *testing.T) {
 	}
 }
 
+func TestWriteBCLRoundTripsNestedResourceConfig(t *testing.T) {
+	doc := NewDocument("promotion", "generic", "test", "2026-10-26T12:00:00Z", nil)
+	doc.Resources = []BCLResource{{
+		Name: "agents", Type: "config_file", Provider: "generic",
+		Config: map[string]any{"agents": []any{
+			map[string]any{"name": "Legal Assistant", "configuration": map[string]any{"ask": map[string]any{"suggested_questions": []any{"What is the term?"}}}},
+		}},
+	}}
+	path := filepath.Join(t.TempDir(), "agents.bcl")
+	if err := WriteBCL(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	object, err := ConfigObject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agents []struct {
+		Name          string         `json:"name"`
+		Configuration map[string]any `json:"configuration"`
+	}
+	if err := json.Unmarshal(object["agents"], &agents); err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].Name != "Legal Assistant" {
+		t.Fatalf("agents = %#v", agents)
+	}
+	questions := agents[0].Configuration["ask"].(map[string]any)["suggested_questions"].([]any)
+	if len(questions) != 1 || questions[0] != "What is the term?" {
+		t.Fatalf("suggested questions = %#v", questions)
+	}
+}
+
 func TestSanitizeResourceNameFallsBackToDefault(t *testing.T) {
 	name := sanitizeResourceName("", "")
 	if name != "resource" {

@@ -18,6 +18,8 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
+	"github.com/unofficialbox/box-dispatch/internal/shellstate"
+	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
 func TestBoxComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T) {
@@ -158,6 +160,107 @@ func TestBoxAIAgentComparisonRejectsInvalidSelections(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %s returned %d: %s", body, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestAIAgentPromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask", AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}}
+	comparison := boxdiff.AIAgentComparison{
+		Left:   boxdiff.Environment{ConnectionID: "left", EnterpriseID: "EID-source"},
+		Right:  boxdiff.Environment{ConnectionID: "right", EnterpriseID: "EID-destination"},
+		Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Name: agent.Name, Kind: agent.Kind, Status: "left_only", Left: &agent}},
+	}
+	compareCalls := 0
+	var savedPlan config.SolutionPlan
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		BoxAIAgentCompare: func(_ context.Context, left, right string) (boxdiff.AIAgentComparison, error) {
+			compareCalls++
+			if left != "left" || right != "right" {
+				t.Fatalf("connections = %q and %q", left, right)
+			}
+			return comparison, nil
+		},
+		AIAgentPromotionAssembler: func(name string, got boxdiff.AIAgentComparison, agents []boxdiff.AIAgent, _ time.Time) (config.SolutionPlan, error) {
+			if name != "Legal promotion" || got.Left.EnterpriseID != "EID-source" || len(agents) != 1 || agents[0].Name != "Legal Assistant" {
+				t.Fatalf("promotion input = %q %#v %#v", name, got, agents)
+			}
+			return config.SolutionPlan{Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion", Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/tmp/package"}, nil
+		},
+		PlanSaver: func(plan config.SolutionPlan) error { savedPlan = plan; return nil },
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/ai-agents", strings.NewReader(`{"name":"Legal promotion","leftConnectionId":"left","rightConnectionId":"right","agentKeys":["legal assistant"]}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	if compareCalls != 1 || settings.BoxSelectedConnectionID != "right" || savedPlan.TemplateID != aiAgentPromotionTemplateID {
+		t.Fatalf("calls=%d selected=%q plan=%#v", compareCalls, settings.BoxSelectedConnectionID, savedPlan)
+	}
+}
+
+func TestAIAgentPromotionRejectsAgentThatChangedSinceComparison(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask"}
+	assembled := false
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(config.ConnectionSettings) error { return nil },
+		BoxAIAgentCompare: func(context.Context, string, string) (boxdiff.AIAgentComparison, error) {
+			return boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Status: "changed", Left: &agent, Right: &agent}}}, nil
+		},
+		AIAgentPromotionAssembler: func(string, boxdiff.AIAgentComparison, []boxdiff.AIAgent, time.Time) (config.SolutionPlan, error) {
+			assembled = true
+			return config.SolutionPlan{}, nil
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/ai-agents", strings.NewReader(`{"name":"Legal promotion","leftConnectionId":"left","rightConnectionId":"right","agentKeys":["legal assistant"]}`)))
+	if response.Code != http.StatusConflict || assembled {
+		t.Fatalf("status=%d assembled=%t body=%s", response.Code, assembled, response.Body.String())
+	}
+}
+
+func TestAIAgentPromotionPersistsDestinationInsideMutationReservation(t *testing.T) {
+	t.Chdir(t.TempDir())
+	_ = shellstate.SetConnectionWriteGuard(nil)
+	t.Cleanup(func() { _ = shellstate.SetConnectionWriteGuard(nil) })
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	if _, err := shellstate.ApplyConnectionUpdate(func(config.ConnectionSettings) (config.ConnectionSettings, error) { return settings, nil }); err != nil {
+		t.Fatal(err)
+	}
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask"}
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs: newRunManagerWithExecutors(nil, nil, time.Now),
+		BoxAIAgentCompare: func(context.Context, string, string) (boxdiff.AIAgentComparison, error) {
+			return boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Kind: agent.Kind, Status: "left_only", Left: &agent}}}, nil
+		},
+		AIAgentPromotionAssembler: func(name string, _ boxdiff.AIAgentComparison, _ []boxdiff.AIAgent, _ time.Time) (config.SolutionPlan, error) {
+			return config.SolutionPlan{Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion", Repository: "box://source/ai-agents", Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/tmp/package"}, nil
+		},
+		PlanSaver: func(config.SolutionPlan) error { return nil },
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/ai-agents", strings.NewReader(`{"name":"Legal promotion","leftConnectionId":"left","rightConnectionId":"right","agentKeys":["legal assistant"]}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	saved, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.BoxSelectedConnectionID != "right" {
+		t.Fatalf("selected connection = %q, want right", saved.BoxSelectedConnectionID)
 	}
 }
 

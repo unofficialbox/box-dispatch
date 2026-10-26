@@ -36,36 +36,37 @@ type boxAIAgentComparison func(context.Context, string, string) (boxdiff.AIAgent
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
-	ContextFingerprint       validationContextReader
-	Profile                  string
-	DeploymentStore          deploymentStore
-	ConnectionStore          connectionStore
-	ConnectionSaver          connectionSaver
-	BoxCheck                 boxConnectionCheck
-	BoxCompare               boxComparison
-	BoxFolderCompare         boxFolderComparison
-	BoxAIAgentCompare        boxAIAgentComparison
-	SalesforceTargets        salesforceTargetStore
-	SalesforceCheck          salesforceCheck
-	SalesforceDevHubCheck    salesforceDevHubCheck
-	SalesforceCreate         salesforceScratchCreate
-	SalesforcePackagePrepare salesforcePackagePrepare
-	SalesforceOAuth          salesforceOAuthExchange
-	SalesforceRefresh        salesforceTokenRefresh
-	SalesforceScratchAccess  salesforceScratchAccess
-	SalesforceScratchOpen    salesforceScratchOpen
-	SalesforceExperiencePath salesforceExperiencePath
-	BoxOAuth                 boxOAuthExchange
-	SalesforceCallbackReady  func() bool
-	BoxCallbackReady         func() bool
-	PlanStore                planStore
-	PlanSaver                planSaver
-	DefaultsStore            deploymentDefaultsStore
-	DefaultsSaver            deploymentDefaultsSaver
-	Templates                templateStore
-	PackageAssembler         packageAssembler
-	Runs                     *runManager
-	Now                      func() time.Time
+	ContextFingerprint        validationContextReader
+	Profile                   string
+	DeploymentStore           deploymentStore
+	ConnectionStore           connectionStore
+	ConnectionSaver           connectionSaver
+	BoxCheck                  boxConnectionCheck
+	BoxCompare                boxComparison
+	BoxFolderCompare          boxFolderComparison
+	BoxAIAgentCompare         boxAIAgentComparison
+	AIAgentPromotionAssembler aiAgentPromotionAssembler
+	SalesforceTargets         salesforceTargetStore
+	SalesforceCheck           salesforceCheck
+	SalesforceDevHubCheck     salesforceDevHubCheck
+	SalesforceCreate          salesforceScratchCreate
+	SalesforcePackagePrepare  salesforcePackagePrepare
+	SalesforceOAuth           salesforceOAuthExchange
+	SalesforceRefresh         salesforceTokenRefresh
+	SalesforceScratchAccess   salesforceScratchAccess
+	SalesforceScratchOpen     salesforceScratchOpen
+	SalesforceExperiencePath  salesforceExperiencePath
+	BoxOAuth                  boxOAuthExchange
+	SalesforceCallbackReady   func() bool
+	BoxCallbackReady          func() bool
+	PlanStore                 planStore
+	PlanSaver                 planSaver
+	DefaultsStore             deploymentDefaultsStore
+	DefaultsSaver             deploymentDefaultsSaver
+	Templates                 templateStore
+	PackageAssembler          packageAssembler
+	Runs                      *runManager
+	Now                       func() time.Time
 }
 
 // NewHandler returns the API exposed to a local browser. Mount it only on a
@@ -97,6 +98,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.BoxAIAgentCompare == nil {
 		options.BoxAIAgentCompare = boxdiff.CompareAIAgentsLive
+	}
+	if options.AIAgentPromotionAssembler == nil {
+		options.AIAgentPromotionAssembler = assembleAIAgentPromotion
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -179,6 +183,19 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	options.Runs.mu.Unlock()
 	originalSaver := options.ConnectionSaver
+	saveReservedConnection := originalSaver
+	if usesPersistedConnections {
+		// A promotion already holds the run manager's mutation reservation. The
+		// ordinary persisted saver would re-enter that guard and reject its own
+		// transaction, so commit this one merge directly under shellstate's lock.
+		saveReservedConnection = func(next config.ConnectionSettings) error {
+			_, err := shellstate.ApplyConnectionUpdate(func(current config.ConnectionSettings) (config.ConnectionSettings, error) {
+				current = bootstrapConnectionEnvironment(current).HydrateBoxConnections().HydrateSalesforceOrgs()
+				return config.MergeObservedConnectionUpdate(next, current)
+			})
+			return err
+		}
+	}
 	options.ConnectionSaver = func(next config.ConnectionSettings) error {
 		apply := func(update shellstate.ConnectionUpdate) (config.ConnectionSettings, error) {
 			current, err := options.ConnectionStore()
@@ -316,6 +333,75 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, comparison)
+	})
+	mux.HandleFunc("POST /api/box/promotions/ai-agents", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input aiAgentPromotionRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "AI agent promotion must be one valid JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		release, err := options.Runs.beginContextMutation()
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		available := map[string]bool{}
+		for _, connection := range settings.HydrateBoxConnections().BoxConnections {
+			available[connection.ID] = true
+		}
+		if !available[input.LeftConnectionID] || !available[input.RightConnectionID] {
+			writeError(w, http.StatusBadRequest, "select two available Box connections")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		comparison, err := options.BoxAIAgentCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		agents, err := selectPromotionAgents(comparison, input.AgentKeys)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		plan, err := options.AIAgentPromotionAssembler(input.Name, comparison, agents, options.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not prepare the AI agent promotion package: "+err.Error())
+			return
+		}
+		selected, err := settings.SelectBoxConnection(input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// The run manager already reserves the validation/deployment context for
+		// this entire promotion transaction. Use the underlying saver here so the
+		// ordinary connection-change guard does not reject its own reservation.
+		if err := saveReservedConnection(selected); err != nil {
+			writeConnectionSaveError(w, err, "could not select the destination Box connection")
+			return
+		}
+		if err := options.PlanSaver(plan); err != nil {
+			_ = saveReservedConnection(settings)
+			writeError(w, http.StatusInternalServerError, "could not save the AI agent promotion plan")
+			return
+		}
+		writeJSON(w, http.StatusCreated, presentPlan(plan, selected))
 	})
 	mux.HandleFunc("GET /api/connections/salesforce/options", func(w http.ResponseWriter, _ *http.Request) {
 		settings, err := options.ConnectionStore()
