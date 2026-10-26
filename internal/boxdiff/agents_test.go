@@ -1,11 +1,16 @@
 package boxdiff
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/unofficialbox/box-open-go-sdk/auth"
+	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
 
@@ -95,5 +100,58 @@ func TestCompareAIAgentSnapshotsReturnsEmptyInventory(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"agents":[]`) {
 		t.Fatalf("empty inventory must be an array: %s", encoded)
+	}
+}
+
+func TestListAIAgentsFromSessionRejectsBoxAPIErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"type":"error","code":"insufficient_scope","status":403,"message":"The request requires higher privileges than provided by the access token."}`))
+	}))
+	defer server.Close()
+	session := gantryruntime.New(auth.DeveloperToken("test-token"), gantryruntime.WithBaseURL("api", server.URL), gantryruntime.WithHTTPClient(server.Client()), gantryruntime.WithMaxRetries(0))
+
+	_, err := listAIAgentsFromSession(context.Background(), session)
+	if err == nil || !strings.Contains(err.Error(), "403 insufficient_scope") || !strings.Contains(err.Error(), "higher privileges") || !strings.Contains(err.Error(), "reauthorize it in Box") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestListAIAgentsFromSessionPaginatesAndNormalizes(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Get("include_box_default") != "false" || !strings.Contains(r.URL.Query().Get("fields"), "extract") {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("marker") == "" {
+			_, _ = w.Write([]byte(`{"entries":[{"id":"agent-1","type":"ai_agent","origin":"CUSTOM","name":"Contract Extractor","access_state":"enabled","extract":{"type":"ai_agent_extract","access_state":"enabled","description":"Extract terms"}}],"next_marker":"page-2"}`))
+			return
+		}
+		if r.URL.Query().Get("marker") != "page-2" {
+			t.Fatalf("marker = %q", r.URL.Query().Get("marker"))
+		}
+		_, _ = w.Write([]byte(`{"entries":[{"id":"agent-2","type":"ai_agent","origin":"CUSTOM","name":"Legal Assistant","access_state":"enabled","ask":{"type":"ai_agent_ask","access_state":"enabled","description":"Answer questions"}}],"next_marker":null}`))
+	}))
+	defer server.Close()
+	session := gantryruntime.New(auth.DeveloperToken("test-token"), gantryruntime.WithBaseURL("api", server.URL), gantryruntime.WithHTTPClient(server.Client()), gantryruntime.WithMaxRetries(0))
+
+	agents, err := listAIAgentsFromSession(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(agents) != 2 || agents[0].Kind != "Extract" || agents[1].Kind != "Ask" {
+		t.Fatalf("requests = %d agents = %+v", requests, agents)
+	}
+	encoded, err := json.Marshal(agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "agent-1") || strings.Contains(string(encoded), "agent-2") {
+		t.Fatalf("provider IDs were retained: %s", encoded)
 	}
 }

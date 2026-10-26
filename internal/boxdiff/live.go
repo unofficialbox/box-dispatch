@@ -2,8 +2,10 @@ package boxdiff
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 	"github.com/unofficialbox/box-open-go-sdk/auth"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
+	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
@@ -196,21 +199,73 @@ func CompareAIAgentsLive(ctx context.Context, leftConnectionID, rightConnectionI
 }
 
 func captureAIAgentsLive(ctx context.Context, connectionID, alias string) (AIAgentSnapshot, error) {
-	environment, client, err := liveClient(ctx, connectionID, alias)
+	environment, _, accessToken, err := liveClientWithToken(ctx, connectionID, alias)
 	if err != nil {
 		return AIAgentSnapshot{}, err
 	}
-	includeBoxDefault := false
-	fields := []string{"id", "type", "origin", "name", "access_state", "allowed_entities", "ask", "text_gen", "extract"}
-	agents := make([]AIAgent, 0)
-	for agent, listErr := range client.AiStudio.ListAiAgents(ctx, &managers.AiStudioListAiAgentsOptions{Fields: fields, IncludeBoxDefault: &includeBoxDefault}) {
-		if listErr != nil {
-			return AIAgentSnapshot{}, fmt.Errorf("list AI Studio agents: %w", listErr)
-		}
-		agents = append(agents, NormalizeAIAgent(agent))
+	agents, err := listAIAgentsFromSession(ctx, gantryruntime.New(auth.DeveloperToken(accessToken)))
+	if err != nil {
+		return AIAgentSnapshot{}, fmt.Errorf("list AI Studio agents: %w", err)
 	}
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Key < agents[j].Key })
 	return AIAgentSnapshot{Environment: environment, Agents: agents}, nil
+}
+
+func listAIAgentsFromSession(ctx context.Context, session *gantryruntime.Client) ([]AIAgent, error) {
+	fields := []string{"id", "type", "origin", "name", "access_state", "allowed_entities", "ask", "text_gen", "extract"}
+	agents := make([]AIAgent, 0)
+	marker := ""
+	for {
+		request := session.NewRequest(http.MethodGet, session.BaseUrl("api")+"/ai_agents")
+		request = gantryruntime.WithQuery(request, "fields", strings.Join(fields, ","))
+		request = gantryruntime.WithQuery(request, "include_box_default", "false")
+		if marker != "" {
+			request = gantryruntime.WithQuery(request, "marker", marker)
+		}
+		response, err := session.Fetch(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		body, err := gantryruntime.ResponseBytes(response)
+		if err != nil {
+			return nil, err
+		}
+		status := gantryruntime.StatusCode(response)
+		if status < 200 || status >= 300 {
+			return nil, aiAgentResponseError(status, body)
+		}
+		var page schemas.AiMultipleAgentResponse
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("decode Box response: %w", err)
+		}
+		for index := range page.Entries {
+			agents = append(agents, NormalizeAIAgent(&page.Entries[index]))
+		}
+		if page.NextMarker == nil || !page.NextMarker.Valid || page.NextMarker.Value == "" {
+			return agents, nil
+		}
+		marker = page.NextMarker.Value
+	}
+}
+
+func aiAgentResponseError(status int64, body []byte) error {
+	var detail struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(body, &detail)
+	detail.Code = strings.TrimSpace(detail.Code)
+	detail.Message = strings.TrimSpace(detail.Message)
+	switch {
+	case detail.Code == "insufficient_scope" && detail.Message != "":
+		return fmt.Errorf("Box API returned %d %s: %s Update the Box application's scopes, reauthorize it in Box, and reconnect this account", status, detail.Code, detail.Message)
+	case detail.Code != "" && detail.Message != "":
+		return fmt.Errorf("Box API returned %d %s: %s", status, detail.Code, detail.Message)
+	case detail.Code != "":
+		return fmt.Errorf("Box API returned %d %s", status, detail.Code)
+	default:
+		return fmt.Errorf("Box API returned status %d", status)
+	}
 }
 
 type folderListFunc func(context.Context, string) iter.Seq2[*schemas.Item, error]
@@ -307,18 +362,23 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 }
 
 func liveClient(ctx context.Context, connectionID, alias string) (Environment, *boxclient.Client, error) {
+	environment, client, _, err := liveClientWithToken(ctx, connectionID, alias)
+	return environment, client, err
+}
+
+func liveClientWithToken(ctx context.Context, connectionID, alias string) (Environment, *boxclient.Client, string, error) {
 	connection, err := boxconn.ResolveAuthForConnection(connectionID)
 	if err != nil {
-		return Environment{}, nil, err
+		return Environment{}, nil, "", err
 	}
 	accessToken, err := connection.AccessToken(ctx)
 	if err != nil {
-		return Environment{}, nil, fmt.Errorf("authenticate: %w", err)
+		return Environment{}, nil, "", fmt.Errorf("authenticate: %w", err)
 	}
 	client := boxclient.NewClient(auth.DeveloperToken(accessToken))
 	user, err := client.Users.GetMe(ctx, &managers.UsersGetMeOptions{Fields: []string{"id", "login", "name", "enterprise", "hostname"}})
 	if err != nil {
-		return Environment{}, nil, fmt.Errorf("read live identity: %w", err)
+		return Environment{}, nil, "", fmt.Errorf("read live identity: %w", err)
 	}
 	environment := Environment{ConnectionID: connectionID, Alias: alias, CapturedAt: time.Now().UTC().Format(time.RFC3339Nano), Identity: stringValue(user.Login), Domain: stringValue(user.Hostname)}
 	if environment.Identity == "" {
@@ -328,9 +388,9 @@ func liveClient(ctx context.Context, connectionID, alias string) (Environment, *
 		environment.EnterpriseID = stringValue(user.Enterprise.Id)
 	}
 	if environment.EnterpriseID == "" {
-		return Environment{}, nil, fmt.Errorf("live identity did not include an enterprise ID")
+		return Environment{}, nil, "", fmt.Errorf("live identity did not include an enterprise ID")
 	}
-	return environment, client, nil
+	return environment, client, accessToken, nil
 }
 
 func sortTemplates(templates []MetadataTemplate) {
