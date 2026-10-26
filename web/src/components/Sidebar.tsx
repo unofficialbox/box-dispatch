@@ -4,9 +4,9 @@ import '@unofficialbox/box-open-elements/sidebar-toggle-button'
 import type { BoxElementEventMap } from '@unofficialbox/box-open-elements/native-types'
 import { RailIcon } from './RailIcon'
 
-export type AppView = 'overview' | 'workflow' | 'history' | 'settings' | 'help'
+export type AppView = 'overview' | 'workflow' | 'compare' | 'history' | 'settings' | 'help'
 
-export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, onSettings }: { activeView: AppView; onOverview: () => void; onNewDeployment: () => void; onHistory: () => void; onSettings: () => void }) {
+export function Sidebar({ activeView, onOverview, onNewDeployment, onCompare, onHistory, onSettings }: { activeView: AppView; onOverview: () => void; onNewDeployment: () => void; onCompare: () => void; onHistory: () => void; onSettings: () => void }) {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('dispatch-sidebar-collapsed') === 'true')
   const toggleRef = useRef<HTMLElementTagNameMap['box-sidebar-toggle-button'] | null>(null)
 
@@ -39,6 +39,7 @@ export function Sidebar({ activeView, onOverview, onNewDeployment, onHistory, on
     <span className="nav-group-label" data-nav-group data-nav-label>Workspace</span>
     <a className={`nav-link nav-route ${activeView === 'overview' ? 'active' : ''}`} href="#" onClick={route(onOverview)} aria-current={activeView === 'overview' ? 'page' : undefined} aria-label="Overview"><span data-nav-icon><RailIcon name="grid" /></span><span data-nav-label>Overview</span></a>
     <a className={`nav-link nav-route ${activeView === 'workflow' ? 'active' : ''}`} href="#workspace" onClick={route(onNewDeployment)} aria-current={activeView === 'workflow' ? 'page' : undefined} aria-label="Deployments"><span data-nav-icon><RailIcon name="rocket" /></span><span data-nav-label>Deployments</span></a>
+    <a className={`nav-link nav-route ${activeView === 'compare' ? 'active' : ''}`} href="#compare" onClick={route(onCompare)} aria-current={activeView === 'compare' ? 'page' : undefined} aria-label="Compare Box environments"><span data-nav-icon><RailIcon name="compare" /></span><span data-nav-label>Compare</span></a>
     <a className={`nav-link nav-route ${activeView === 'history' ? 'active' : ''}`} href="#history" onClick={route(onHistory)} aria-current={activeView === 'history' ? 'page' : undefined} aria-label="Deployment history"><span data-nav-icon><RailIcon name="clock2" /></span><span data-nav-label>History</span></a>
     <a className={`nav-link nav-route ${activeView === 'settings' ? 'active' : ''}`} href="#settings" onClick={route(onSettings)} aria-current={activeView === 'settings' ? 'page' : undefined} aria-label="Settings"><span data-nav-icon><RailIcon name="settings" /></span><span data-nav-label>Settings</span></a>
     <box-sidebar-toggle-button ref={toggleRef} className="sidebar-toggle" slot="header" label={collapsed ? 'Expand navigation' : 'Collapse navigation'} expanded={!collapsed}></box-sidebar-toggle-button>

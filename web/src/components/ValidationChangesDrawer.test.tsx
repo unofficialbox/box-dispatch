@@ -14,7 +14,7 @@ describe('ValidationChangesDrawer', () => {
     expect(screen.getByText('2 files')).toBeTruthy()
     const viewer = container.querySelector('box-diff-viewer')
     expect(viewer?.getAttribute('heading')).toBe('settings/Communities.settings-meta.xml')
-    expect(viewer?.getAttribute('before-label')).toBe('Current org')
+    expect(viewer?.getAttribute('before-label')).toBe('Current state')
     expect(viewer?.getAttribute('after-label')).toBe('Validated package')
     expect(viewer?.getAttribute('before-text')).toContain('<enabled>false</enabled>')
     expect(viewer?.getAttribute('after-text')).toContain('<enabled>true</enabled>')

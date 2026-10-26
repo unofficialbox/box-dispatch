@@ -13,11 +13,59 @@ import (
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/boxconn"
+	"github.com/unofficialbox/box-dispatch/internal/boxdiff"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceorg"
 )
+
+func TestBoxComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Sandbox"}, false)
+	calls := 0
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		BoxCompare: func(_ context.Context, left, right string) (boxdiff.Comparison, error) {
+			calls++
+			if left != "left" || right != "right" {
+				t.Fatalf("connections = %q and %q", left, right)
+			}
+			return boxdiff.Comparison{Summary: boxdiff.Summary{Changed: calls}}, nil
+		},
+	})
+
+	for want := 1; want <= 2; want++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons", strings.NewReader(`{"leftConnectionId":"left","rightConnectionId":"right"}`)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+		}
+		var comparison boxdiff.Comparison
+		if err := json.Unmarshal(response.Body.Bytes(), &comparison); err != nil {
+			t.Fatal(err)
+		}
+		if comparison.Summary.Changed != want {
+			t.Fatalf("request %d returned cached result %+v", want, comparison.Summary)
+		}
+	}
+}
+
+func TestBoxComparisonRejectsInvalidSelections(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "only", Alias: "Only"}, true)
+	handler := NewHandlerWithOptions(ServerOptions{ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil }})
+	for _, body := range []string{
+		`{"leftConnectionId":"only","rightConnectionId":"only"}`,
+		`{"leftConnectionId":"only","rightConnectionId":"missing"}`,
+		`{"leftConnectionId":"only"}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s returned %d: %s", body, response.Code, response.Body.String())
+		}
+	}
+}
 
 func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
 	handler := NewHandlerWithOptions(ServerOptions{

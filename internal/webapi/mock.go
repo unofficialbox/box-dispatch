@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/unofficialbox/box-dispatch/internal/audit"
+	"github.com/unofficialbox/box-dispatch/internal/boxdiff"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
 	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
@@ -173,6 +174,24 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			return settings.VerifiedConnections["box"], nil
 		},
+		BoxCompare: func(_ context.Context, left, right string) (boxdiff.Comparison, error) {
+			started := time.Now().UTC()
+			leftSnapshot := boxdiff.Snapshot{
+				Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
+				Templates: []boxdiff.MetadataTemplate{
+					{Key: "contracts", DisplayName: "Contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Options: []string{"Draft", "Approved"}}}},
+					{Key: "retention", DisplayName: "Retention", Fields: []boxdiff.MetadataTemplateField{{Key: "years", Type: "integer", DisplayName: "Years"}}},
+				},
+			}
+			rightSnapshot := boxdiff.Snapshot{
+				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
+				Templates: []boxdiff.MetadataTemplate{
+					{Key: "contracts", DisplayName: "Contract records", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Options: []string{"Draft", "Review", "Approved"}}}},
+					{Key: "vendor", DisplayName: "Vendors", Fields: []boxdiff.MetadataTemplateField{{Key: "risk", Type: "enum", DisplayName: "Risk", Options: []string{"Low", "High"}}}},
+				},
+			}
+			return boxdiff.CompareSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
+		},
 		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {
 			if options.ConnectionFailureProvider == "salesforce" {
 				return salesforceapi.OrgStatus{}, errors.New("Salesforce session has expired; reconnect the selected Salesforce org")
@@ -226,6 +245,11 @@ func mockConnectionSettings() config.ConnectionSettings {
 		BoxCCGSubjectID:       "123456",
 		BoxCCGAlias:           "box.user@example.test",
 		BoxDefaultConnection:  "box-dispatch-ccg",
+		BoxConnections: []config.BoxAppConnection{
+			{ID: "box-mock-production", Alias: "Acme Production", ClientID: "mock-client", ClientSecret: "mock-secret", SubjectType: "user", SubjectID: "123456", VerifiedAt: verifiedAt, Identity: "box.user@example.test", Account: "123456", Enterprise: "EID-mock", Hostname: "https://acme.app.box.com/"},
+			{ID: "box-mock-sandbox", Alias: "Acme Sandbox", ClientID: "mock-client-sandbox", ClientSecret: "mock-secret-sandbox", SubjectType: "user", SubjectID: "654321", VerifiedAt: verifiedAt, Identity: "sandbox.user@example.test", Account: "654321", Enterprise: "EID-sandbox", Hostname: "https://acme-sandbox.app.box.com/"},
+		},
+		BoxSelectedConnectionID: "box-mock-production",
 		VerifiedConnections: map[string]config.VerifiedConnection{
 			"box":        {VerifiedAt: verifiedAt, Selection: "box-dispatch-ccg", Identity: "box.user@example.test", Account: "123456", Enterprise: "EID-mock", Host: "https://acme.app.box.com/", AuthType: "CCG"},
 			"salesforce": {VerifiedAt: verifiedAt, Selection: "salesforce-mock", Identity: "admin@example.test", OrgID: "00D-mock", OrgStatus: "Ready", OrgType: "persistent", AuthType: "Salesforce OAuth"},

@@ -176,6 +176,59 @@ export type BoxOAuthJob = {
   account?: string
 }
 
+export type BoxComparisonEnvironment = {
+  connectionId: string
+  alias: string
+  identity: string
+  enterpriseId: string
+  domain?: string
+  capturedAt: string
+}
+
+export type BoxMetadataTemplateField = {
+  key: string
+  type: string
+  displayName: string
+  description?: string
+  hidden: boolean
+  options?: string[]
+  taxonomyKey?: string
+  multiSelect?: boolean
+  selectableLevels?: number[]
+}
+
+export type BoxMetadataTemplate = {
+  key: string
+  displayName: string
+  hidden: boolean
+  copyInstanceOnItemCopy: boolean
+  fields: BoxMetadataTemplateField[]
+}
+
+export type BoxMetadataChange = {
+  path: string
+  before?: unknown
+  after?: unknown
+}
+
+export type BoxMetadataTemplateDiff = {
+  key: string
+  displayName: string
+  status: 'equal' | 'changed' | 'left_only' | 'right_only'
+  changes: BoxMetadataChange[]
+  left?: BoxMetadataTemplate
+  right?: BoxMetadataTemplate
+}
+
+export type BoxComparison = {
+  startedAt: string
+  completedAt: string
+  left: BoxComparisonEnvironment
+  right: BoxComparisonEnvironment
+  summary: { equal: number; changed: number; leftOnly: number; rightOnly: number }
+  templates: BoxMetadataTemplateDiff[]
+}
+
 export type ConnectionSummary = {
   name: string
   configured: boolean
