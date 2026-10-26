@@ -5,10 +5,10 @@ import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/section'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import { BoeTable } from '../components/BoeTable'
-import type { BoxComparison, BoxConnectionOption, BoxFolder, BoxFolderComparison, BoxFolderDiff, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary } from '../types'
+import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolder, BoxFolderComparison, BoxFolderDiff, BoxMetadataChange, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary } from '../types'
 
-type ComparisonType = 'metadata_templates' | 'folders'
-type ComparisonResult = { type: 'metadata_templates'; value: BoxComparison } | { type: 'folders'; value: BoxFolderComparison }
+type ComparisonType = 'metadata_templates' | 'folders' | 'ai_agents'
+type ComparisonResult = { type: 'metadata_templates'; value: BoxComparison } | { type: 'folders'; value: BoxFolderComparison } | { type: 'ai_agents'; value: BoxAIAgentComparison }
 
 const statusPresentation = {
   changed: { label: 'Changed', tone: 'brand' },
@@ -27,13 +27,20 @@ const folderColumns: TableColumn[] = [
   { key: 'status', label: 'Result' },
 ]
 
+const aiAgentColumns: TableColumn[] = [
+  { key: 'agent', label: 'AI agent' },
+  { key: 'kind', label: 'Mode' },
+  { key: 'status', label: 'Result' },
+]
+
 const comparisonTypeOptions = [
   { label: 'Metadata templates', value: 'metadata_templates' },
   { label: 'Folders (connected user)', value: 'folders' },
+  { label: 'AI agents & extraction', value: 'ai_agents' },
 ]
 
 const formatCaptureTime = (value: string) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(value)) : 'Not captured'
-const comparisonText = (value?: BoxMetadataTemplate | BoxFolder) => value ? JSON.stringify(value, null, 2) : ''
+const comparisonText = (value?: BoxMetadataTemplate | BoxFolder | BoxAIAgent) => value ? JSON.stringify(value, null, 2) : ''
 const selectableConnections = (connections: ConnectionSummary[]) => connections.find((connection) => connection.name === 'Box')?.connections?.filter((connection): connection is BoxConnectionOption & { id: string } => Boolean(connection.id)) ?? []
 
 async function responseMessage(response: Response) {
@@ -65,7 +72,7 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
   }, [boxConnections])
 
   const changeComparisonType = (value: string) => {
-    const next = value === 'folders' ? 'folders' : 'metadata_templates'
+    const next: ComparisonType = value === 'folders' || value === 'ai_agents' ? value : 'metadata_templates'
     setComparisonType(next)
     setResult(null)
     setError('')
@@ -86,7 +93,7 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
     setRunning(true)
     setError('')
     try {
-      const endpoint = comparisonType === 'folders' ? '/api/box/comparisons/folders' : '/api/box/comparisons'
+      const endpoint = comparisonType === 'folders' ? '/api/box/comparisons/folders' : comparisonType === 'ai_agents' ? '/api/box/comparisons/ai-agents' : '/api/box/comparisons'
       const response = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leftConnectionId: leftConnectionID, rightConnectionId: rightConnectionID }),
@@ -94,6 +101,8 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
       if (!response.ok) throw new Error(await responseMessage(response))
       if (comparisonType === 'folders') {
         setResult({ type: 'folders', value: await response.json() as BoxFolderComparison })
+      } else if (comparisonType === 'ai_agents') {
+        setResult({ type: 'ai_agents', value: await response.json() as BoxAIAgentComparison })
       } else {
         setResult({ type: 'metadata_templates', value: await response.json() as BoxComparison })
       }
@@ -120,6 +129,7 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
         <box-button label={running ? 'Comparing live environments…' : 'Run live comparison'} tone="primary" disabled={!canCompare} onClick={() => void runComparison()}></box-button>
       </div>}
       {comparisonType === 'folders' ? <p className="compare-scope-note">Folder comparison reads each connected user’s All Files hierarchy to 4 levels and at most 500 folders per side. It counts direct child items but does not read file contents.</p> : null}
+      {comparisonType === 'ai_agents' ? <p className="compare-scope-note">AI comparison reads current custom AI Studio agents. Dispatch extraction configurations appear as Extract agents; provider IDs, timestamps, actor identities, icon references, and response warnings are excluded.</p> : null}
       {error ? <Alert className="compare-error" heading="Comparison could not be completed" message={error} tone="error" open/> : null}
     </section>
 
@@ -130,8 +140,8 @@ export function ComparePage({ connections }: { connections: ConnectionSummary[] 
         <EnvironmentSummary label="Destination" environment={comparison.right}/>
       </section>
       <SummaryMetrics summary={comparison.summary}/>
-      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : <MetadataResults key={result.value.completedAt} comparison={result.value}/>}
-    </> : <section className="compare-empty-state"><h2>Ready for a live comparison</h2><p>{comparisonType === 'folders' ? 'Dispatch will read the connected users’ current folder hierarchies from Box. Folder IDs and timestamps are excluded; relative paths provide the cross-enterprise comparison key.' : 'Dispatch will authenticate both saved connections in parallel and read the current enterprise metadata-template schemas. Results are not loaded from the saved readiness snapshot.'}</p></section>}
+      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value}/> : <MetadataResults key={result.value.completedAt} comparison={result.value}/>}
+    </> : <section className="compare-empty-state"><h2>Ready for a live comparison</h2><p>{comparisonType === 'folders' ? 'Dispatch will read the connected users’ current folder hierarchies from Box. Folder IDs and timestamps are excluded; relative paths provide the cross-enterprise comparison key.' : comparisonType === 'ai_agents' ? 'Dispatch will authenticate both saved connections in parallel and read their current custom AI Studio definitions, including extract-mode configurations. Results are not loaded from a cached configuration.' : 'Dispatch will authenticate both saved connections in parallel and read the current enterprise metadata-template schemas. Results are not loaded from the saved readiness snapshot.'}</p></section>}
   </section>
 }
 
@@ -181,6 +191,22 @@ function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
   </section>
 }
 
+function AIAgentResults({ comparison }: { comparison: BoxAIAgentComparison }) {
+  const [selectedKey, setSelectedKey] = useState(comparison.agents.find((agent) => agent.status !== 'equal')?.key ?? comparison.agents[0]?.key ?? '')
+  const selected = comparison.agents.find((agent) => agent.key === selectedKey) ?? comparison.agents[0]
+  const rows = useMemo<TableRow[]>(() => comparison.agents.map((agent) => {
+    const presentation = statusPresentation[agent.status]
+    return { id: agent.key, cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone } }, detail: agent.status === 'changed' ? `${agent.changes.length} semantic changes` : presentation.label }
+  }), [comparison.agents])
+
+  return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><div><h2 id="comparison-results-title">AI agents and extraction configurations</h2><p>Matched by case-insensitive agent name. Extract-mode agents are shown as extraction configurations; provider-generated response fields are excluded.</p></div><span>{comparison.agents.length} inspected</span></header>
+    <div className="compare-browser">
+      <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')}/></section>
+      <section className="compare-template-detail" aria-live="polite">{selected ? <AIAgentDiffView agent={selected} comparison={comparison}/> : <ComparisonEmpty title="No AI agents returned" message="Neither live enterprise returned a custom AI Studio agent."/>}</section>
+    </div>
+  </section>
+}
+
 function MetadataDiff({ template, comparison }: { template: BoxMetadataTemplateDiff; comparison: BoxComparison }) {
   const presentation = statusPresentation[template.status]
   return <><DiffHeading eyebrow="Metadata template" title={template.displayName || template.key} code={template.key} label={presentation.label} tone={presentation.tone}/><ChangeList changes={template.changes}/><DiffViewer heading={`${template.key}.json`} left={template.left} right={template.right} comparison={comparison}/></>
@@ -191,15 +217,20 @@ function FolderDiffView({ folder, comparison }: { folder: BoxFolderDiff; compari
   return <><DiffHeading eyebrow="Folder" title={folder.name} code={folder.path} label={presentation.label} tone={presentation.tone}/><ChangeList changes={folder.changes}/><DiffViewer heading="folder-structure.json" left={folder.left} right={folder.right} comparison={comparison}/></>
 }
 
+function AIAgentDiffView({ agent, comparison }: { agent: BoxAIAgentDiff; comparison: BoxAIAgentComparison }) {
+  const presentation = statusPresentation[agent.status]
+  return <><DiffHeading eyebrow={agent.kind === 'Extract' ? 'Extraction configuration' : 'AI agent'} title={agent.name || agent.key} code={agent.kind || 'Unknown mode'} label={presentation.label} tone={presentation.tone}/><ChangeList changes={agent.changes}/><DiffViewer heading={`${agent.key.replaceAll(' ', '-')}.json`} left={agent.left} right={agent.right} comparison={comparison}/></>
+}
+
 function DiffHeading({ eyebrow, title, code, label, tone }: { eyebrow: string; title: string; code: string; label: string; tone: 'brand' | 'warning' | 'neutral' }) {
   return <header className="compare-detail-heading"><div><span>{eyebrow}</span><h3>{title}</h3><code>{code}</code></div><box-badge label={label} tone={tone}></box-badge></header>
 }
 
-function ChangeList({ changes }: { changes: BoxMetadataTemplateDiff['changes'] }) {
+function ChangeList({ changes }: { changes: BoxMetadataChange[] }) {
   return changes.length > 0 ? <ul className="compare-change-list" aria-label="Semantic changes">{changes.map((change) => <li key={change.path}><code>{change.path}</code></li>)}</ul> : null
 }
 
-function DiffViewer({ heading, left, right, comparison }: { heading: string; left?: BoxMetadataTemplate | BoxFolder; right?: BoxMetadataTemplate | BoxFolder; comparison: Pick<BoxComparison, 'left' | 'right'> }) {
+function DiffViewer({ heading, left, right, comparison }: { heading: string; left?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; right?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; comparison: Pick<BoxComparison, 'left' | 'right'> }) {
   return <div className="compare-diff-scroll"><box-diff-viewer heading={heading} before-label={comparison.left.alias} after-label={comparison.right.alias} before-text={comparisonText(left)} after-text={comparisonText(right)} mode="split"></box-diff-viewer></div>
 }
 

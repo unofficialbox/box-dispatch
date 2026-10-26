@@ -257,6 +257,34 @@ export type BoxFolderComparison = {
   folders: BoxFolderDiff[]
 }
 
+export type BoxAIAgent = {
+  key: string
+  name: string
+  kind: string
+  accessState: string
+  allowedEntityTypes?: string[]
+  configuration: Record<string, unknown>
+}
+
+export type BoxAIAgentDiff = {
+  key: string
+  name: string
+  kind: string
+  status: BoxMetadataTemplateDiff['status']
+  changes: BoxMetadataChange[]
+  left?: BoxAIAgent
+  right?: BoxAIAgent
+}
+
+export type BoxAIAgentComparison = {
+  startedAt: string
+  completedAt: string
+  left: BoxComparisonEnvironment
+  right: BoxComparisonEnvironment
+  summary: BoxComparisonSummary
+  agents: BoxAIAgentDiff[]
+}
+
 export type ConnectionSummary = {
   name: string
   configured: boolean
