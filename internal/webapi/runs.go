@@ -14,6 +14,7 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/audit"
 	"github.com/unofficialbox/box-dispatch/internal/config"
 	"github.com/unofficialbox/box-dispatch/internal/lifecycle"
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/shellstate"
 )
 
@@ -378,9 +379,10 @@ func (m *runManager) changes(id string) (runChangesResponse, bool) {
 	if run == nil {
 		return runChangesResponse{}, false
 	}
-	var changes []audit.FileChange
+	changes := make([]audit.FileChange, 0)
 	for _, item := range run.items {
-		// Add Salesforce metadata file changes
+		// File-like changes include Salesforce metadata and previewable Box
+		// configuration objects such as AI agents.
 		for _, sfChange := range item.Changes {
 			changes = append(changes, audit.FileChange{
 				Component:   sfChange.Component,
@@ -394,6 +396,9 @@ func (m *runManager) changes(id string) (runChangesResponse, bool) {
 		// Add Box resource changes as file entries
 		for _, resource := range item.Resources {
 			if resource.Provider == "box" {
+				if hasComponentChange(item.Changes, resource.Component) {
+					continue
+				}
 				kind := "add"
 				if run.action == runActionDeploy {
 					kind = "add" // Box resources are always additions for now
@@ -414,6 +419,15 @@ func (m *runManager) changes(id string) (runChangesResponse, bool) {
 		}
 	}
 	return runChangesResponse{Files: changes}, true
+}
+
+func hasComponentChange(changes []salesforceapi.MetadataFileDiff, component string) bool {
+	for _, change := range changes {
+		if change.Component == component {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *runManager) history() []runResponse {

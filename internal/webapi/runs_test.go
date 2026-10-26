@@ -181,6 +181,37 @@ func TestValidationChangesEndpointReturnsFileByFilePreviews(t *testing.T) {
 	}
 }
 
+func TestValidationChangesEndpointReturnsEmptyArray(t *testing.T) {
+	validate := func(_ context.Context, _ config.SolutionPlan, _ []lifecycle.Item, _ func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
+		return []lifecycle.Item{{Provider: "box", Status: lifecycle.StatusPresent}}, nil
+	}
+	runs := newRunManagerWithExecutors(validate, nil, time.Now)
+	run, err := runs.startValidation(config.SolutionPlan{TemplateID: "clm", PackagePath: "/package", Components: []string{"box"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, runs, run.ID)
+	handler := NewHandlerWithOptions(ServerOptions{Runs: runs})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/runs/"+run.ID+"/changes", nil))
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"files":[]}` {
+		t.Fatalf("changes = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestValidationChangesDoNotDuplicateRecordedBoxResources(t *testing.T) {
+	runs := newRunManagerWithExecutors(nil, nil, time.Now)
+	runs.runs["box-agent"] = &deploymentRun{items: []lifecycle.Item{{
+		Provider:  "box",
+		Changes:   []salesforceapi.MetadataFileDiff{{Component: "AI Agent:Contract Extractor", Path: "ai-agents/contract-extractor.json", Kind: "add", After: `{}`, Previewable: true}},
+		Resources: []lifecycle.ResourceReference{{Provider: "box", Component: "AI Agent:Contract Extractor", Kind: "ai_agent", Name: "Contract Extractor", ID: "agent-1"}},
+	}}}
+	changes, ok := runs.changes("box-agent")
+	if !ok || len(changes.Files) != 1 || changes.Files[0].Path != "ai-agents/contract-extractor.json" {
+		t.Fatalf("changes = %#v, found=%t", changes.Files, ok)
+	}
+}
+
 func TestDeploymentRequiresSuccessfulValidation(t *testing.T) {
 	runs := newRunManagerWithExecutors(nil, nil, time.Now)
 	if _, err := runs.startDeployment("unknown"); err == nil || !strings.Contains(err.Error(), "not found") {

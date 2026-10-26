@@ -96,6 +96,18 @@ test('compares two Box enterprises live without changing the deployment selectio
     return connections.find((connection) => connection.name === 'Box')?.connections?.find((connection) => connection.selected)?.id
   })
   expect(selectedForPromotion).toBe('box-mock-sandbox')
+  await page.locator('box-button[label="Continue to configure"]').click()
+  await page.locator('box-button[label="Review plan"]').click()
+  await page.locator('box-button[label="Validate deployment"]').click()
+  await expect(page.locator('box-badge[label="Validation complete"]')).toBeVisible()
+  await page.locator('box-button[label="Review changes"]').click()
+  await expect(page.getByRole('heading', { name: 'Review validation changes' })).toBeVisible()
+  await expect(page.getByText('1 file', { exact: true })).toBeVisible()
+  const agentDiff = page.locator('box-diff-viewer[heading="ai-agents/legal-assistant.json"]')
+  await expect(agentDiff).toBeVisible()
+  await expect(agentDiff).toHaveAttribute('before-text', '')
+  await expect(agentDiff).toHaveAttribute('after-text', /Legal Assistant/)
+  await page.getByRole('button', { name: 'Close drawer' }).click()
   const restoredPlan = await page.request.put('/api/plan', { data: {
     name: 'Mock deployment', templateId: 'clm', template: 'Contract Lifecycle Management',
     repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: ['box', 'salesforce'],
