@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/unofficialbox/box-dispatch/internal/salesforceapi"
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
@@ -64,6 +65,9 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 		for _, agent := range agents {
 			present := existing[agent.Name]
 			report.component(agent.Component, ProgressRunning, "Inspecting the Box AI agent", componentIndex(components, agent.Component), len(components))
+			if err := appendBoxAIResourceChange(item, agent, present); err != nil {
+				return err
+			}
 			classifyBoxComponent(item, agent.Component, present, !present)
 			report.component(agent.Component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, agent.Component)+1, len(components))
 		}
@@ -103,6 +107,51 @@ func validateBoxPublicAdapters(ctx context.Context, root string, manifest soluti
 		}
 	}
 	return nil
+}
+
+func appendBoxAIResourceChange(item *Item, agent boxAIResource, present bool) error {
+	if present {
+		return nil
+	}
+	payload := struct {
+		Name          string         `json:"name"`
+		Mode          string         `json:"mode"`
+		AccessState   string         `json:"accessState"`
+		Description   string         `json:"description"`
+		Instructions  string         `json:"instructions,omitempty"`
+		Configuration map[string]any `json:"configuration"`
+	}{
+		Name: agent.Name, Mode: agent.Mode, AccessState: agent.AccessState,
+		Description: agent.Description, Instructions: agent.Instructions, Configuration: agent.Configuration,
+	}
+	after, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("prepare %s change preview: %w", agent.Component, err)
+	}
+	item.Changes = append(item.Changes, salesforceapi.MetadataFileDiff{
+		Component: agent.Component, Path: boxAIResourcePreviewPath(agent.Name), Kind: "add",
+		After: string(after), Previewable: true,
+	})
+	return nil
+}
+
+func boxAIResourcePreviewPath(name string) string {
+	var value strings.Builder
+	dash := false
+	for _, character := range strings.ToLower(strings.TrimSpace(name)) {
+		if unicode.IsLetter(character) || unicode.IsNumber(character) {
+			value.WriteRune(character)
+			dash = false
+		} else if value.Len() > 0 && !dash {
+			value.WriteByte('-')
+			dash = true
+		}
+	}
+	slug := strings.Trim(value.String(), "-")
+	if slug == "" {
+		slug = "agent"
+	}
+	return "ai-agents/" + slug + ".json"
 }
 
 func deployBoxPublicAdapters(ctx context.Context, root string, manifest solution.Manifest, selection solution.ComponentSelection, api boxAPI, workspaceID string, deployable []string, report Reporter) ([]string, []ResourceReference, error) {

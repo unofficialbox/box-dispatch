@@ -37,6 +37,13 @@ describe('ValidationChangesDrawer', () => {
     expect(viewer?.getAttribute('after-label')).toBe('After deployment')
   })
 
+  it('shows the empty state for a null files response', () => {
+    const { container } = render(<ValidationChangesDrawer loading={false} error="" onClose={vi.fn()} files={null}/>)
+
+    expect(screen.getByRole('heading', { name: 'No file changes' })).toBeTruthy()
+    expect(container.querySelector('box-diff-viewer')).toBeNull()
+  })
+
   it('keeps selection valid across repeated changes and a replacement file set', () => {
     const files = [
       { component: 'Settings:Communities', path: 'settings/Communities.settings-meta.xml', kind: 'update' as const, before: 'false', after: 'true', previewable: true },

@@ -633,3 +633,33 @@ func TestReadBoxAIResourcesPreservesPromotionConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendBoxAIResourceChangeRecordsPreviewableAddition(t *testing.T) {
+	item := Item{Provider: "box"}
+	agent := boxAIResource{
+		Component: "AI Agent:Contract Extractor", Mode: "extract", Name: "Contract Extractor",
+		AccessState: "enabled", Description: "Extract contract terms", Instructions: "Return exact values",
+		Configuration: map[string]any{"extract": map[string]any{"model": "model-a"}},
+	}
+	if err := appendBoxAIResourceChange(&item, agent, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Changes) != 1 {
+		t.Fatalf("changes = %#v", item.Changes)
+	}
+	change := item.Changes[0]
+	if change.Component != agent.Component || change.Path != "ai-agents/contract-extractor.json" || change.Kind != "add" || !change.Previewable || change.Before != "" {
+		t.Fatalf("change = %#v", change)
+	}
+	for _, expected := range []string{`"name": "Contract Extractor"`, `"mode": "extract"`, `"model": "model-a"`} {
+		if !strings.Contains(change.After, expected) {
+			t.Fatalf("preview omitted %s: %s", expected, change.After)
+		}
+	}
+	if err := appendBoxAIResourceChange(&item, agent, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Changes) != 1 {
+		t.Fatalf("present agent added a change: %#v", item.Changes)
+	}
+}

@@ -56,6 +56,11 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			default:
 			}
 			component := mockProviderComponent(provider)
+			changes := mockValidationChanges(provider)
+			if plan.TemplateID == aiAgentPromotionTemplateID && provider == "box" {
+				component = "AI Agent:Legal Assistant"
+				changes = mockAIAgentPromotionChanges()
+			}
 			emit(provider, lifecycle.ProgressUpdate{Message: "Inspecting mock " + provider + " configuration", Component: component, State: lifecycle.ProgressRunning, Total: 1})
 			time.Sleep(500 * time.Millisecond)
 			emit(provider, lifecycle.ProgressUpdate{Message: "Ready to deploy", Component: component, State: lifecycle.ProgressCompleted, Current: 1, Total: 1})
@@ -64,7 +69,7 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				Provider: provider, Name: providerName(provider), Status: lifecycle.StatusMissing,
 				Detail: "Mock validation found one deployable change.", Deployable: true,
 				Missing: []string{component}, DeployableComponents: []string{component}, Planned: []string{component},
-				Changes: mockValidationChanges(provider),
+				Changes: changes,
 			})
 			time.Sleep(30 * time.Millisecond)
 		}
@@ -336,6 +341,23 @@ func mockValidationChanges(provider string) []salesforceapi.MetadataFileDiff {
 			Previewable: true,
 		},
 	}
+}
+
+func mockAIAgentPromotionChanges() []salesforceapi.MetadataFileDiff {
+	return []salesforceapi.MetadataFileDiff{{
+		Component: "AI Agent:Legal Assistant", Path: "ai-agents/legal-assistant.json", Kind: "add", Previewable: true,
+		After: `{
+  "name": "Legal Assistant",
+  "mode": "ask",
+  "accessState": "enabled",
+  "description": "Answer legal questions",
+  "configuration": {
+    "ask": {
+      "description": "Answer legal questions"
+    }
+  }
+}`,
+	}}
 }
 
 func mockProviderRecords(items []lifecycle.Item) []audit.ProviderRecord {

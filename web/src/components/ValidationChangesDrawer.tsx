@@ -34,13 +34,16 @@ const changeColumns: TableColumn[] = [
   { key: 'component', label: 'Component' },
 ]
 
+const EMPTY_FILES: ValidationFileChange[] = []
+
 const fileID = (file: ValidationFileChange) => `${file.component}:${file.path}`
 
-export function ValidationChangesDrawer({ files, loading, error, stage = 'validation', onClose }: { files: ValidationFileChange[]; loading: boolean; error: string; stage?: ChangeReviewStage; onClose: () => void }) {
+export function ValidationChangesDrawer({ files, loading, error, stage = 'validation', onClose }: { files: ValidationFileChange[] | null | undefined; loading: boolean; error: string; stage?: ChangeReviewStage; onClose: () => void }) {
   const drawerRef = useRef<HTMLElementTagNameMap['box-drawer']>(null)
   const [selectedFileID, setSelectedFileID] = useState('')
-  const selected = useMemo(() => files.find((file) => fileID(file) === selectedFileID) ?? files[0], [files, selectedFileID])
-  const rows = useMemo<TableRow[]>(() => files.map((file) => ({
+  const safeFiles = files ?? EMPTY_FILES
+  const selected = useMemo(() => safeFiles.find((file) => fileID(file) === selectedFileID) ?? safeFiles[0], [safeFiles, selectedFileID])
+  const rows = useMemo<TableRow[]>(() => safeFiles.map((file) => ({
     id: fileID(file),
     cells: {
       change: { kind: 'badge', text: file.kind === 'add' ? 'Add' : 'Update', tone: file.kind === 'add' ? 'success' : 'brand' },
@@ -48,7 +51,7 @@ export function ValidationChangesDrawer({ files, loading, error, stage = 'valida
       component: file.component,
     },
     detail: file.path,
-  })), [files])
+  })), [safeFiles])
   const copy = reviewCopy[stage]
 
   useEffect(() => {
@@ -68,10 +71,10 @@ export function ValidationChangesDrawer({ files, loading, error, stage = 'valida
   return <box-drawer ref={drawerRef} className="validation-changes-drawer" open heading={copy.heading} description={copy.description} position="right" size="full" busy={loading}>
     <section className="validation-changes-content">
       {error && <Alert className="drawer-inline-error" heading="Changes could not be loaded" message={error} tone="error" open/>}
-      {!loading && !error && files.length === 0 && <div className="validation-changes-empty"><h3>{copy.emptyTitle}</h3><p>{copy.emptyDescription}</p></div>}
-      {files.length > 0 && <div className="validation-change-browser">
+      {!loading && !error && safeFiles.length === 0 && <div className="validation-changes-empty"><h3>{copy.emptyTitle}</h3><p>{copy.emptyDescription}</p></div>}
+      {safeFiles.length > 0 && <div className="validation-change-browser">
         <section className="validation-change-files" aria-label="Files with changes">
-          <header><span>{files.length} {files.length === 1 ? 'file' : 'files'}</span><strong>{copy.direction}</strong></header>
+          <header><span>{safeFiles.length} {safeFiles.length === 1 ? 'file' : 'files'}</span><strong>{copy.direction}</strong></header>
           <BoeTable className="validation-change-table" columns={changeColumns} rows={rows} label="Files with changes" emptyText={copy.emptyDescription} selectionMode="single" selectedIds={selected ? [fileID(selected)] : []} onSelectionChange={(selectedIDs) => setSelectedFileID(selectedIDs[0] ?? '')}/>
         </section>
         <section className="validation-change-preview" aria-live="polite">

@@ -434,7 +434,7 @@ function App() {
     void fetch(url).then(async (response) => {
       if (!response.ok) throw new Error('Deployment changes are unavailable.')
       return (await response.json()) as ValidationChanges
-    }).then((changes) => setValidationChanges(changes.files)).catch((error: unknown) => setValidationChangesError(error instanceof Error ? error.message : 'Deployment changes are unavailable.')).finally(() => setValidationChangesLoading(false))
+    }).then((changes) => setValidationChanges(Array.isArray(changes.files) ? changes.files : [])).catch((error: unknown) => setValidationChangesError(error instanceof Error ? error.message : 'Deployment changes are unavailable.')).finally(() => setValidationChangesLoading(false))
   }
   const openValidationChanges = (runID: string) => openChanges(`/api/runs/${encodeURIComponent(runID)}/changes`, 'validation')
   const openCompletedRunChanges = (runID: string) => openChanges(`/api/runs/${encodeURIComponent(runID)}/changes`, 'deployment')
