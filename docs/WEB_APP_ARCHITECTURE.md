@@ -20,6 +20,7 @@ flowchart LR
     LiveCompare --> Normalize{"Provider-neutral normalization"}
     Normalize --> MetadataDiff["Template and field diff"]
     Normalize --> FolderDiff["Bounded folder-path and item-count diff"]
+    Normalize --> AIAgentDiff["AI Studio agent and extract-definition diff"]
     Engine --> SalesforceREST["Salesforce REST API"]
     SalesforceREST --> SalesforceEligibility["UIBundle eligibility preflight"]
     Engine --> SalesforceMetadata["Salesforce Metadata API adapter"]
@@ -68,7 +69,7 @@ The browser workspace guides operators through:
 3. Configure deployment strategy and supported components.
 4. Validate provider state and deployment prerequisites.
 5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
-6. Compare metadata templates or the connected users' bounded folder structures in two saved Box enterprises directly from their live APIs without changing the deployment connection.
+6. Compare metadata templates, the connected users' bounded folder structures, or custom AI Studio agents and extract-mode configurations in two saved Box enterprises directly from their live APIs without changing the deployment connection.
 
 The browser is the only interactive user experience. The executable has no full-screen
 terminal mode, prompts, keyboard-driven terminal navigation, or terminal presentation
@@ -124,6 +125,7 @@ credentials from `.env`:
 | `POST /api/connections/box/check` | recheck the selected Box connection and refresh its verification snapshot | CCG secret, refresh token, access token |
 | `POST /api/box/comparisons` | authenticate two exact saved Box connection IDs in parallel, read their current enterprise metadata-template schemas, normalize provider-specific IDs, and return a semantic diff | credentials, access tokens, raw provider responses, cached readiness state, deployment connection selection |
 | `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse each connected user's current All Files hierarchy within the documented depth/folder limits, and compare provider-ID-free relative paths and direct item counts | credentials, access tokens, folder IDs, file contents, cached readiness state, deployment connection selection |
+| `POST /api/box/comparisons/ai-agents` | authenticate two exact saved Box connection IDs in parallel, read current custom AI Studio agents including extract-mode configurations, remove provider-generated response fields, and return a semantic definition diff | credentials, access tokens, agent IDs, principal IDs, timestamps, actor identities, icon references, response warnings, cached readiness state, deployment connection selection |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts and names, plus provider environment IDs and launch destinations | diagnostics, full resource inventories, source paths |
 | `GET /api/deployments/{id}/changes` | the bounded before/after file preview captured with a completed deployment | credentials, unchanged files, binary contents, oversized text |

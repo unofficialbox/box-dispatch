@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComparePage } from './ComparePage'
-import type { BoxComparison, BoxFolderComparison, ConnectionSummary } from '../types'
+import type { BoxAIAgentComparison, BoxComparison, BoxFolderComparison, ConnectionSummary } from '../types'
 
 const connections: ConnectionSummary[] = [{
   name: 'Box', configured: true, verified: true,
@@ -35,6 +35,18 @@ const folderComparison: BoxFolderComparison = {
     changes: [{ path: 'items.files', before: 2, after: 3 }],
     left: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 2, webLinks: 0, other: 0 } },
     right: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 3, webLinks: 0, other: 0 } },
+  }],
+}
+
+const aiAgentComparison: BoxAIAgentComparison = {
+  startedAt: '2026-10-26T12:00:00Z', completedAt: '2026-10-26T12:00:01Z',
+  left: comparison.left, right: comparison.right,
+  summary: { equal: 0, changed: 1, leftOnly: 0, rightOnly: 0 },
+  agents: [{
+    key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', status: 'changed',
+    changes: [{ path: 'configuration.extract.long_text.model', before: 'model-a', after: 'model-b' }],
+    left: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-a' } } } },
+    right: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-b' } } } },
   }],
 }
 
@@ -80,5 +92,21 @@ describe('ComparePage', () => {
     expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
     expect(screen.getByText('items.files')).toBeTruthy()
     expect(screen.getByText('/Contracts')).toBeTruthy()
+  })
+
+  it('compares live AI agents and extract-mode configurations', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(aiAgentComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const { container } = render(<ComparePage connections={connections}/>)
+    const typeSelect = container.querySelector('box-select[label="Box object type"]')!
+    fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'ai_agents' } }))
+
+    expect(screen.getByText(/current custom AI Studio agents/)).toBeTruthy()
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/ai-agents', expect.objectContaining({ method: 'POST' })))
+    await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="contract-extractor.json"]')).toBeTruthy())
+    expect(screen.getByRole('heading', { name: 'AI agents and extraction configurations' })).toBeTruthy()
+    expect(screen.getByText('configuration.extract.long_text.model')).toBeTruthy()
+    expect(screen.getByText('Extraction configuration')).toBeTruthy()
   })
 })

@@ -31,6 +31,7 @@ type connectionStore func() (config.ConnectionSettings, error)
 type salesforceExperiencePath func(context.Context, salesforceapi.Credential, string, string) (string, error)
 type boxComparison func(context.Context, string, string) (boxdiff.Comparison, error)
 type boxFolderComparison func(context.Context, string, string) (boxdiff.FolderComparison, error)
+type boxAIAgentComparison func(context.Context, string, string) (boxdiff.AIAgentComparison, error)
 
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
@@ -43,6 +44,7 @@ type ServerOptions struct {
 	BoxCheck                 boxConnectionCheck
 	BoxCompare               boxComparison
 	BoxFolderCompare         boxFolderComparison
+	BoxAIAgentCompare        boxAIAgentComparison
 	SalesforceTargets        salesforceTargetStore
 	SalesforceCheck          salesforceCheck
 	SalesforceDevHubCheck    salesforceDevHubCheck
@@ -92,6 +94,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.BoxFolderCompare == nil {
 		options.BoxFolderCompare = boxdiff.CompareFoldersLive
+	}
+	if options.BoxAIAgentCompare == nil {
+		options.BoxAIAgentCompare = boxdiff.CompareAIAgentsLive
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -292,6 +297,20 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		comparison, err := options.BoxFolderCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, comparison)
+	})
+	mux.HandleFunc("POST /api/box/comparisons/ai-agents", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := readBoxComparisonSelection(w, r, options.ConnectionStore)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		comparison, err := options.BoxAIAgentCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return

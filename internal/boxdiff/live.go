@@ -28,6 +28,11 @@ type capturedFolderSnapshot struct {
 	err      error
 }
 
+type capturedAIAgentSnapshot struct {
+	snapshot AIAgentSnapshot
+	err      error
+}
+
 // CompareLive queries both saved Box connections for every request. No
 // persisted verification snapshot or prior comparison result is used.
 func CompareLive(ctx context.Context, leftConnectionID, rightConnectionID string) (Comparison, error) {
@@ -145,6 +150,67 @@ func captureFoldersLive(ctx context.Context, connectionID, alias string) (Folder
 		return FolderSnapshot{}, fmt.Errorf("list live folder tree: %w", err)
 	}
 	return FolderSnapshot{Environment: environment, Folders: folders, Truncated: truncated}, nil
+}
+
+// CompareAIAgentsLive compares the current custom AI Studio agents visible to
+// two saved Box connections. Extract-mode agents are the extraction
+// configurations used by Dispatch.
+func CompareAIAgentsLive(ctx context.Context, leftConnectionID, rightConnectionID string) (AIAgentComparison, error) {
+	leftConnectionID = strings.TrimSpace(leftConnectionID)
+	rightConnectionID = strings.TrimSpace(rightConnectionID)
+	if leftConnectionID == "" || rightConnectionID == "" {
+		return AIAgentComparison{}, fmt.Errorf("select two saved Box connections")
+	}
+	if leftConnectionID == rightConnectionID {
+		return AIAgentComparison{}, fmt.Errorf("select two different Box connections")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return AIAgentComparison{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	leftAlias := boxConnectionAlias(settings, leftConnectionID)
+	rightAlias := boxConnectionAlias(settings, rightConnectionID)
+	if leftAlias == "" || rightAlias == "" {
+		return AIAgentComparison{}, fmt.Errorf("one or more saved Box connections were not found")
+	}
+
+	startedAt := time.Now()
+	var wait sync.WaitGroup
+	wait.Add(2)
+	results := make([]capturedAIAgentSnapshot, 2)
+	for index, input := range []struct{ id, alias string }{{leftConnectionID, leftAlias}, {rightConnectionID, rightAlias}} {
+		go func(index int, id, alias string) {
+			defer wait.Done()
+			results[index].snapshot, results[index].err = captureAIAgentsLive(ctx, id, alias)
+		}(index, input.id, input.alias)
+	}
+	wait.Wait()
+	if results[0].err != nil {
+		return AIAgentComparison{}, fmt.Errorf("read left Box connection: %w", results[0].err)
+	}
+	if results[1].err != nil {
+		return AIAgentComparison{}, fmt.Errorf("read right Box connection: %w", results[1].err)
+	}
+	return CompareAIAgentSnapshots(startedAt, results[0].snapshot, results[1].snapshot, time.Now())
+}
+
+func captureAIAgentsLive(ctx context.Context, connectionID, alias string) (AIAgentSnapshot, error) {
+	environment, client, err := liveClient(ctx, connectionID, alias)
+	if err != nil {
+		return AIAgentSnapshot{}, err
+	}
+	includeBoxDefault := false
+	fields := []string{"id", "type", "origin", "name", "access_state", "allowed_entities", "ask", "text_gen", "extract"}
+	agents := make([]AIAgent, 0)
+	for agent, listErr := range client.AiStudio.ListAiAgents(ctx, &managers.AiStudioListAiAgentsOptions{Fields: fields, IncludeBoxDefault: &includeBoxDefault}) {
+		if listErr != nil {
+			return AIAgentSnapshot{}, fmt.Errorf("list AI Studio agents: %w", listErr)
+		}
+		agents = append(agents, NormalizeAIAgent(agent))
+	}
+	sort.Slice(agents, func(i, j int) bool { return agents[i].Key < agents[j].Key })
+	return AIAgentSnapshot{Environment: environment, Agents: agents}, nil
 }
 
 type folderListFunc func(context.Context, string) iter.Seq2[*schemas.Item, error]

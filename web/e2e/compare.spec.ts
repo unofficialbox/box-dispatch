@@ -3,9 +3,11 @@ import { expect, test } from '@playwright/test'
 test('compares two Box enterprises live without changing the deployment selection', async ({ page }) => {
   let comparisonRequests = 0
   let folderComparisonRequests = 0
+  let aiAgentComparisonRequests = 0
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons')) comparisonRequests += 1
     if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/folders')) folderComparisonRequests += 1
+    if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/ai-agents')) aiAgentComparisonRequests += 1
   })
   await page.goto('/')
   const selectedBefore = await page.evaluate(async () => {
@@ -47,6 +49,21 @@ test('compares two Box enterprises live without changing the deployment selectio
   await expect(page.locator('box-diff-viewer[heading="folder-structure.json"]')).toBeVisible()
   await expect(page.getByText('items.files')).toBeVisible()
   await expect.poll(() => folderComparisonRequests).toBe(1)
+
+  await page.locator('box-select[label="Box object type"]').evaluate((element) => {
+    element.setAttribute('value', 'ai_agents')
+    element.dispatchEvent(new CustomEvent('value-changed', { bubbles: true, composed: true, detail: { value: 'ai_agents' } }))
+  })
+  await expect(page.getByText(/current custom AI Studio agents/)).toBeVisible()
+  await page.locator('box-button[label="Run live comparison"]').click()
+  await expect(page.getByRole('heading', { name: 'AI agents and extraction configurations' })).toBeVisible()
+  await expect(page.locator('box-metric-card[heading="Changed"]')).toHaveAttribute('value', '1')
+  await expect(page.locator('box-metric-card[heading="Source only"]')).toHaveAttribute('value', '1')
+  await expect(page.locator('box-metric-card[heading="Destination only"]')).toHaveAttribute('value', '1')
+  await expect(page.locator('box-diff-viewer[heading="contract-extractor.json"]')).toBeVisible()
+  await expect(page.getByText('configuration.extract.long_text.model')).toBeVisible()
+  await expect(page.getByText('Extraction configuration', { exact: true })).toBeVisible()
+  await expect.poll(() => aiAgentComparisonRequests).toBe(1)
 
   const selectedAfter = await page.evaluate(async () => {
     const connections = await fetch('/api/connections').then((response) => response.json()) as Array<{ name: string; connections?: Array<{ id: string; selected: boolean }> }>
