@@ -138,6 +138,8 @@ explicit baseline evidence; no global conformance claim is made.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
+| P1 | Components | Accessible folder tree ([#596](https://github.com/unofficialbox/box-open-elements/issues/596)) | A provider-neutral, controlled hierarchy for folders and files with lazy loading, conventional tree keyboard behavior, stable focus, and responsive light/dark presentation. | Keep the live folder inventory provider-owned and render its normalized relative paths in the existing table; do not build a Dispatch-only tree widget. |
+| P1 | Patterns | Folder tree diff ([#597](https://github.com/unofficialbox/box-open-elements/issues/597)) | A read-only unified/side-by-side structural diff for added, removed, changed, equal, moved, and partial folder/file nodes without reading file contents. | Keep host-owned matching and the temporary flat results table plus JSON diff viewer. Adopt the published tree diff when its data and accessibility contracts ship. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |
 | P2 | Patterns | Master-detail and compact-navigation recipes | Official examples covering the compositions above. | Keep Dispatch compositions small and documented. |
 

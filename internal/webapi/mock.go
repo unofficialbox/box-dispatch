@@ -192,6 +192,26 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			return boxdiff.CompareSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
 		},
+		BoxFolderCompare: func(_ context.Context, left, right string) (boxdiff.FolderComparison, error) {
+			started := time.Now().UTC()
+			leftSnapshot := boxdiff.FolderSnapshot{
+				Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
+				Folders: []boxdiff.Folder{
+					{Path: "/Contracts", Name: "Contracts", Depth: 1, Items: boxdiff.FolderItemCounts{Folders: 1, Files: 2}},
+					{Path: "/Contracts/Archive", Name: "Archive", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 1}},
+					{Path: "/Legal", Name: "Legal", Depth: 1},
+				},
+			}
+			rightSnapshot := boxdiff.FolderSnapshot{
+				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
+				Folders: []boxdiff.Folder{
+					{Path: "/Contracts", Name: "Contracts", Depth: 1, Items: boxdiff.FolderItemCounts{Folders: 1, Files: 3}},
+					{Path: "/Contracts/Templates", Name: "Templates", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 2}},
+					{Path: "/Operations", Name: "Operations", Depth: 1},
+				},
+			}
+			return boxdiff.CompareFolderSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
+		},
 		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {
 			if options.ConnectionFailureProvider == "salesforce" {
 				return salesforceapi.OrgStatus{}, errors.New("Salesforce session has expired; reconnect the selected Salesforce org")
