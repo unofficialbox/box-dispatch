@@ -3,6 +3,7 @@ package boxdiff
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sort"
 	"strings"
 	"sync"
@@ -14,10 +15,16 @@ import (
 	"github.com/unofficialbox/box-open-go-sdk/auth"
 	boxclient "github.com/unofficialbox/box-open-go-sdk/client"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
+	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
 
 type capturedSnapshot struct {
 	snapshot Snapshot
+	err      error
+}
+
+type capturedFolderSnapshot struct {
+	snapshot FolderSnapshot
 	err      error
 }
 
@@ -64,28 +71,9 @@ func CompareLive(ctx context.Context, leftConnectionID, rightConnectionID string
 }
 
 func captureLive(ctx context.Context, connectionID, alias string) (Snapshot, error) {
-	connection, err := boxconn.ResolveAuthForConnection(connectionID)
+	environment, client, err := liveClient(ctx, connectionID, alias)
 	if err != nil {
 		return Snapshot{}, err
-	}
-	accessToken, err := connection.AccessToken(ctx)
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("authenticate: %w", err)
-	}
-	client := boxclient.NewClient(auth.DeveloperToken(accessToken))
-	user, err := client.Users.GetMe(ctx, &managers.UsersGetMeOptions{Fields: []string{"id", "login", "name", "enterprise", "hostname"}})
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("read live identity: %w", err)
-	}
-	environment := Environment{ConnectionID: connectionID, Alias: alias, CapturedAt: time.Now().UTC().Format(time.RFC3339Nano), Identity: stringValue(user.Login), Domain: stringValue(user.Hostname)}
-	if environment.Identity == "" {
-		environment.Identity = stringValue(user.Name)
-	}
-	if user.Enterprise != nil {
-		environment.EnterpriseID = stringValue(user.Enterprise.Id)
-	}
-	if environment.EnterpriseID == "" {
-		return Snapshot{}, fmt.Errorf("live identity did not include an enterprise ID")
 	}
 	templates := make([]MetadataTemplate, 0)
 	for template, listErr := range client.MetadataTemplates.ListEnterprise(ctx, nil) {
@@ -96,6 +84,187 @@ func captureLive(ctx context.Context, connectionID, alias string) (Snapshot, err
 	}
 	sortTemplates(templates)
 	return Snapshot{Environment: environment, Templates: templates}, nil
+}
+
+// CompareFoldersLive compares the connected users' current All Files folder
+// structures. Box enterprises do not have one global folder root, so this
+// intentionally reflects the content visible to each saved connection.
+func CompareFoldersLive(ctx context.Context, leftConnectionID, rightConnectionID string) (FolderComparison, error) {
+	leftConnectionID = strings.TrimSpace(leftConnectionID)
+	rightConnectionID = strings.TrimSpace(rightConnectionID)
+	if leftConnectionID == "" || rightConnectionID == "" {
+		return FolderComparison{}, fmt.Errorf("select two saved Box connections")
+	}
+	if leftConnectionID == rightConnectionID {
+		return FolderComparison{}, fmt.Errorf("select two different Box connections")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return FolderComparison{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	leftAlias := boxConnectionAlias(settings, leftConnectionID)
+	rightAlias := boxConnectionAlias(settings, rightConnectionID)
+	if leftAlias == "" || rightAlias == "" {
+		return FolderComparison{}, fmt.Errorf("one or more saved Box connections were not found")
+	}
+
+	startedAt := time.Now()
+	var wait sync.WaitGroup
+	wait.Add(2)
+	results := make([]capturedFolderSnapshot, 2)
+	for index, input := range []struct{ id, alias string }{{leftConnectionID, leftAlias}, {rightConnectionID, rightAlias}} {
+		go func(index int, id, alias string) {
+			defer wait.Done()
+			results[index].snapshot, results[index].err = captureFoldersLive(ctx, id, alias)
+		}(index, input.id, input.alias)
+	}
+	wait.Wait()
+	if results[0].err != nil {
+		return FolderComparison{}, fmt.Errorf("read left Box connection: %w", results[0].err)
+	}
+	if results[1].err != nil {
+		return FolderComparison{}, fmt.Errorf("read right Box connection: %w", results[1].err)
+	}
+	return CompareFolderSnapshots(startedAt, results[0].snapshot, results[1].snapshot, time.Now())
+}
+
+func captureFoldersLive(ctx context.Context, connectionID, alias string) (FolderSnapshot, error) {
+	environment, client, err := liveClient(ctx, connectionID, alias)
+	if err != nil {
+		return FolderSnapshot{}, err
+	}
+	useMarker := true
+	limit := int64(1000)
+	options := &managers.FoldersListItemsOptions{Fields: []string{"id", "name", "type"}, Usemarker: &useMarker, Limit: &limit}
+	list := func(ctx context.Context, folderID string) iter.Seq2[*schemas.Item, error] {
+		return client.Folders.ListItems(ctx, folderID, options)
+	}
+	folders, truncated, err := crawlFolderTree(ctx, list, FolderComparisonMaxDepth, FolderComparisonMaxFolders)
+	if err != nil {
+		return FolderSnapshot{}, fmt.Errorf("list live folder tree: %w", err)
+	}
+	return FolderSnapshot{Environment: environment, Folders: folders, Truncated: truncated}, nil
+}
+
+type folderListFunc func(context.Context, string) iter.Seq2[*schemas.Item, error]
+
+func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFolders int) ([]Folder, bool, error) {
+	type pendingFolder struct {
+		id, path string
+		depth    int
+		index    int
+	}
+	type childFolder struct{ id, name string }
+	type listedFolder struct {
+		counts   FolderItemCounts
+		children []childFolder
+		err      error
+	}
+	level := []pendingFolder{{id: "0", depth: 0, index: -1}}
+	folders := make([]Folder, 0)
+	truncated := false
+	for len(level) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		results := make([]listedFolder, len(level))
+		semaphore := make(chan struct{}, 8)
+		var wait sync.WaitGroup
+		wait.Add(len(level))
+		for index, current := range level {
+			go func(index int, current pendingFolder) {
+				defer wait.Done()
+				select {
+				case semaphore <- struct{}{}:
+					defer func() { <-semaphore }()
+				case <-ctx.Done():
+					results[index].err = ctx.Err()
+					return
+				}
+				for item, listErr := range list(ctx, current.id) {
+					if listErr != nil {
+						results[index].err = listErr
+						return
+					}
+					switch {
+					case item == nil:
+						results[index].counts.Other++
+					case item.Folder != nil:
+						results[index].counts.Folders++
+						name := strings.TrimSpace(stringValue(item.Folder.Name))
+						if name == "" {
+							results[index].err = fmt.Errorf("folder listing returned an unnamed folder")
+							return
+						}
+						results[index].children = append(results[index].children, childFolder{id: item.Folder.Id, name: name})
+					case item.File != nil:
+						results[index].counts.Files++
+					case item.WebLink != nil:
+						results[index].counts.WebLinks++
+					default:
+						results[index].counts.Other++
+					}
+				}
+			}(index, current)
+		}
+		wait.Wait()
+
+		next := make([]pendingFolder, 0)
+		for index, current := range level {
+			result := results[index]
+			if result.err != nil {
+				return nil, false, result.err
+			}
+			if current.index >= 0 {
+				folders[current.index].Items = result.counts
+			}
+			if current.depth >= maxDepth {
+				truncated = truncated || len(result.children) > 0
+				continue
+			}
+			sort.Slice(result.children, func(i, j int) bool { return result.children[i].name < result.children[j].name })
+			for _, child := range result.children {
+				if len(folders) >= maxFolders {
+					truncated = true
+					continue
+				}
+				path := current.path + "/" + child.name
+				folders = append(folders, Folder{Path: path, Name: child.name, Depth: current.depth + 1})
+				next = append(next, pendingFolder{id: child.id, path: path, depth: current.depth + 1, index: len(folders) - 1})
+			}
+		}
+		level = next
+	}
+	sort.Slice(folders, func(i, j int) bool { return folders[i].Path < folders[j].Path })
+	return folders, truncated, nil
+}
+
+func liveClient(ctx context.Context, connectionID, alias string) (Environment, *boxclient.Client, error) {
+	connection, err := boxconn.ResolveAuthForConnection(connectionID)
+	if err != nil {
+		return Environment{}, nil, err
+	}
+	accessToken, err := connection.AccessToken(ctx)
+	if err != nil {
+		return Environment{}, nil, fmt.Errorf("authenticate: %w", err)
+	}
+	client := boxclient.NewClient(auth.DeveloperToken(accessToken))
+	user, err := client.Users.GetMe(ctx, &managers.UsersGetMeOptions{Fields: []string{"id", "login", "name", "enterprise", "hostname"}})
+	if err != nil {
+		return Environment{}, nil, fmt.Errorf("read live identity: %w", err)
+	}
+	environment := Environment{ConnectionID: connectionID, Alias: alias, CapturedAt: time.Now().UTC().Format(time.RFC3339Nano), Identity: stringValue(user.Login), Domain: stringValue(user.Hostname)}
+	if environment.Identity == "" {
+		environment.Identity = stringValue(user.Name)
+	}
+	if user.Enterprise != nil {
+		environment.EnterpriseID = stringValue(user.Enterprise.Id)
+	}
+	if environment.EnterpriseID == "" {
+		return Environment{}, nil, fmt.Errorf("live identity did not include an enterprise ID")
+	}
+	return environment, client, nil
 }
 
 func sortTemplates(templates []MetadataTemplate) {

@@ -30,6 +30,7 @@ type deploymentStore func() ([]audit.DeploymentRecord, error)
 type connectionStore func() (config.ConnectionSettings, error)
 type salesforceExperiencePath func(context.Context, salesforceapi.Credential, string, string) (string, error)
 type boxComparison func(context.Context, string, string) (boxdiff.Comparison, error)
+type boxFolderComparison func(context.Context, string, string) (boxdiff.FolderComparison, error)
 
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
@@ -41,6 +42,7 @@ type ServerOptions struct {
 	ConnectionSaver          connectionSaver
 	BoxCheck                 boxConnectionCheck
 	BoxCompare               boxComparison
+	BoxFolderCompare         boxFolderComparison
 	SalesforceTargets        salesforceTargetStore
 	SalesforceCheck          salesforceCheck
 	SalesforceDevHubCheck    salesforceDevHubCheck
@@ -87,6 +89,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.BoxCompare == nil {
 		options.BoxCompare = boxdiff.CompareLive
+	}
+	if options.BoxFolderCompare == nil {
+		options.BoxFolderCompare = boxdiff.CompareFoldersLive
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -266,43 +271,27 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, connectionSummaries(settings))
 	})
 	mux.HandleFunc("POST /api/box/comparisons", func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		var input struct {
-			LeftConnectionID  string `json:"leftConnectionId"`
-			RightConnectionID string `json:"rightConnectionId"`
-		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
-			writeError(w, http.StatusBadRequest, "Box comparison must be one valid JSON object")
-			return
-		}
-		input.LeftConnectionID = strings.TrimSpace(input.LeftConnectionID)
-		input.RightConnectionID = strings.TrimSpace(input.RightConnectionID)
-		if input.LeftConnectionID == "" || input.RightConnectionID == "" {
-			writeError(w, http.StatusBadRequest, "select two saved Box connections")
-			return
-		}
-		if input.LeftConnectionID == input.RightConnectionID {
-			writeError(w, http.StatusBadRequest, "select two different Box connections")
-			return
-		}
-		settings, err := options.ConnectionStore()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
-			return
-		}
-		available := map[string]bool{}
-		for _, connection := range settings.HydrateBoxConnections().BoxConnections {
-			available[connection.ID] = true
-		}
-		if !available[input.LeftConnectionID] || !available[input.RightConnectionID] {
-			writeError(w, http.StatusBadRequest, "select two available Box connections")
+		input, ok := readBoxComparisonSelection(w, r, options.ConnectionStore)
+		if !ok {
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		comparison, err := options.BoxCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, comparison)
+	})
+	mux.HandleFunc("POST /api/box/comparisons/folders", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := readBoxComparisonSelection(w, r, options.ConnectionStore)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		comparison, err := options.BoxFolderCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
@@ -1414,6 +1403,46 @@ func providerName(provider string) string {
 	default:
 		return provider
 	}
+}
+
+type boxComparisonSelection struct {
+	LeftConnectionID  string `json:"leftConnectionId"`
+	RightConnectionID string `json:"rightConnectionId"`
+}
+
+func readBoxComparisonSelection(w http.ResponseWriter, r *http.Request, load connectionStore) (boxComparisonSelection, bool) {
+	defer r.Body.Close()
+	var input boxComparisonSelection
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+		writeError(w, http.StatusBadRequest, "Box comparison must be one valid JSON object")
+		return boxComparisonSelection{}, false
+	}
+	input.LeftConnectionID = strings.TrimSpace(input.LeftConnectionID)
+	input.RightConnectionID = strings.TrimSpace(input.RightConnectionID)
+	if input.LeftConnectionID == "" || input.RightConnectionID == "" {
+		writeError(w, http.StatusBadRequest, "select two saved Box connections")
+		return boxComparisonSelection{}, false
+	}
+	if input.LeftConnectionID == input.RightConnectionID {
+		writeError(w, http.StatusBadRequest, "select two different Box connections")
+		return boxComparisonSelection{}, false
+	}
+	settings, err := load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+		return boxComparisonSelection{}, false
+	}
+	available := map[string]bool{}
+	for _, connection := range settings.HydrateBoxConnections().BoxConnections {
+		available[connection.ID] = true
+	}
+	if !available[input.LeftConnectionID] || !available[input.RightConnectionID] {
+		writeError(w, http.StatusBadRequest, "select two available Box connections")
+		return boxComparisonSelection{}, false
+	}
+	return input, true
 }
 
 func ensureEndOfJSON(decoder *json.Decoder) error {

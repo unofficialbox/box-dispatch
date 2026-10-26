@@ -2,8 +2,10 @@ import { expect, test } from '@playwright/test'
 
 test('compares two Box enterprises live without changing the deployment selection', async ({ page }) => {
   let comparisonRequests = 0
+  let folderComparisonRequests = 0
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons')) comparisonRequests += 1
+    if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/folders')) folderComparisonRequests += 1
   })
   await page.goto('/')
   const selectedBefore = await page.evaluate(async () => {
@@ -31,6 +33,21 @@ test('compares two Box enterprises live without changing the deployment selectio
 
   await page.locator('box-button[label="Run live comparison"]').click()
   await expect.poll(() => comparisonRequests).toBe(2)
+
+  await page.locator('box-select[label="Box object type"]').evaluate((element) => {
+    element.setAttribute('value', 'folders')
+    element.dispatchEvent(new CustomEvent('value-changed', { bubbles: true, composed: true, detail: { value: 'folders' } }))
+  })
+  await expect(page.getByText(/All Files hierarchy to 4 levels/)).toBeVisible()
+  await page.locator('box-button[label="Run live comparison"]').click()
+  await expect(page.getByRole('heading', { name: 'Folders', exact: true })).toBeVisible()
+  await expect(page.locator('box-metric-card[heading="Changed"]')).toHaveAttribute('value', '1')
+  await expect(page.locator('box-metric-card[heading="Source only"]')).toHaveAttribute('value', '2')
+  await expect(page.locator('box-metric-card[heading="Destination only"]')).toHaveAttribute('value', '2')
+  await expect(page.locator('box-diff-viewer[heading="folder-structure.json"]')).toBeVisible()
+  await expect(page.getByText('items.files')).toBeVisible()
+  await expect.poll(() => folderComparisonRequests).toBe(1)
+
   const selectedAfter = await page.evaluate(async () => {
     const connections = await fetch('/api/connections').then((response) => response.json()) as Array<{ name: string; connections?: Array<{ id: string; selected: boolean }> }>
     return connections.find((connection) => connection.name === 'Box')?.connections?.find((connection) => connection.selected)?.id

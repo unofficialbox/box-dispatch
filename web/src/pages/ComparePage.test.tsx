@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComparePage } from './ComparePage'
-import type { BoxComparison, ConnectionSummary } from '../types'
+import type { BoxComparison, BoxFolderComparison, ConnectionSummary } from '../types'
 
 const connections: ConnectionSummary[] = [{
   name: 'Box', configured: true, verified: true,
@@ -22,6 +22,19 @@ const comparison: BoxComparison = {
     changes: [{ path: 'fields.status.options', before: ['Draft'], after: ['Draft', 'Approved'] }],
     left: { key: 'contracts', displayName: 'Contracts', hidden: false, copyInstanceOnItemCopy: false, fields: [{ key: 'status', type: 'enum', displayName: 'Status', hidden: false, options: ['Draft'] }] },
     right: { key: 'contracts', displayName: 'Contracts', hidden: false, copyInstanceOnItemCopy: false, fields: [{ key: 'status', type: 'enum', displayName: 'Status', hidden: false, options: ['Draft', 'Approved'] }] },
+  }],
+}
+
+const folderComparison: BoxFolderComparison = {
+  startedAt: '2026-10-26T12:00:00Z', completedAt: '2026-10-26T12:00:01Z',
+  left: comparison.left, right: comparison.right,
+  scope: { rootLabel: 'All Files', maxDepth: 4, maxFolders: 500, leftTruncated: false, rightTruncated: false },
+  summary: { equal: 0, changed: 1, leftOnly: 0, rightOnly: 0 },
+  folders: [{
+    path: '/Contracts', name: 'Contracts', status: 'changed',
+    changes: [{ path: 'items.files', before: 2, after: 3 }],
+    left: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 2, webLinks: 0, other: 0 } },
+    right: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 3, webLinks: 0, other: 0 } },
   }],
 }
 
@@ -51,5 +64,21 @@ describe('ComparePage', () => {
     expect(viewer.getAttribute('before-text')).toContain('"Draft"')
     expect(viewer.getAttribute('after-text')).toContain('"Approved"')
     expect(screen.getByText('fields.status.options')).toBeTruthy()
+  })
+
+  it('switches to a bounded live folder comparison', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(folderComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const { container } = render(<ComparePage connections={connections}/>)
+    const typeSelect = container.querySelector('box-select[label="Box object type"]')!
+    fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'folders' } }))
+
+    expect(screen.getByText(/All Files hierarchy to 4 levels/)).toBeTruthy()
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ method: 'POST' })))
+    await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeTruthy())
+    expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
+    expect(screen.getByText('items.files')).toBeTruthy()
+    expect(screen.getByText('/Contracts')).toBeTruthy()
   })
 })

@@ -17,8 +17,9 @@ flowchart LR
     API --> LiveCompare["Live Box comparison"]
     Engine --> Box["Box public APIs"]
     LiveCompare -->|"parallel fresh reads"| Box
-    LiveCompare --> Normalize["Provider-neutral metadata schema"]
-    Normalize --> SemanticDiff["Template and field diff"]
+    LiveCompare --> Normalize{"Provider-neutral normalization"}
+    Normalize --> MetadataDiff["Template and field diff"]
+    Normalize --> FolderDiff["Bounded folder-path and item-count diff"]
     Engine --> SalesforceREST["Salesforce REST API"]
     SalesforceREST --> SalesforceEligibility["UIBundle eligibility preflight"]
     Engine --> SalesforceMetadata["Salesforce Metadata API adapter"]
@@ -67,7 +68,7 @@ The browser workspace guides operators through:
 3. Configure deployment strategy and supported components.
 4. Validate provider state and deployment prerequisites.
 5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
-6. Compare metadata templates in two saved Box enterprises directly from their live APIs without changing the deployment connection.
+6. Compare metadata templates or the connected users' bounded folder structures in two saved Box enterprises directly from their live APIs without changing the deployment connection.
 
 The browser is the only interactive user experience. The executable has no full-screen
 terminal mode, prompts, keyboard-driven terminal navigation, or terminal presentation
@@ -122,6 +123,7 @@ credentials from `.env`:
 | `GET /api/connections/box/oauth/{id}` | poll sanitized Box login status | authorization codes, tokens, PKCE verifier |
 | `POST /api/connections/box/check` | recheck the selected Box connection and refresh its verification snapshot | CCG secret, refresh token, access token |
 | `POST /api/box/comparisons` | authenticate two exact saved Box connection IDs in parallel, read their current enterprise metadata-template schemas, normalize provider-specific IDs, and return a semantic diff | credentials, access tokens, raw provider responses, cached readiness state, deployment connection selection |
+| `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse each connected user's current All Files hierarchy within the documented depth/folder limits, and compare provider-ID-free relative paths and direct item counts | credentials, access tokens, folder IDs, file contents, cached readiness state, deployment connection selection |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts and names, plus provider environment IDs and launch destinations | diagnostics, full resource inventories, source paths |
 | `GET /api/deployments/{id}/changes` | the bounded before/after file preview captured with a completed deployment | credentials, unchanged files, binary contents, oversized text |
@@ -153,15 +155,21 @@ execute their public lifecycle safely.
 
 The Compare workspace is a separate read-only path. Every run resolves the two
 requested saved Box connection IDs independently, verifies each acting user and
-enterprise through the live API, and then lists enterprise metadata templates.
+enterprise through the live API, and then reads the selected supported object type.
 It rejects a comparison when both connections resolve to the same enterprise.
 Templates match by `templateKey`; normalization removes Box template, field,
 option, taxonomy, scope, and enterprise-specific IDs while retaining ordered
 fields, option order, taxonomy behavior, visibility, descriptions, and copy
-behavior. The browser receives capture timestamps and sanitized identity data so
+behavior. Folder comparison reads each connected user's `All Files` hierarchy,
+because a Box enterprise does not expose one global folder root. It follows
+marker pagination, stops after depth 4 or 500 folders per side, and reports when
+either boundary truncates the result. Folders match by provider-ID-free relative
+path; direct folder, file, web-link, and unknown-item counts reveal structural
+differences without reading file bodies. The browser receives capture timestamps
+and sanitized identity data so
 the operator can distinguish live evidence from a saved connection-status
-snapshot. A later Git/BCL comparison can reuse this canonical schema, but it is
-not part of the live API contract.
+snapshot. A later Git/BCL comparison can reuse these canonical schemas, but it
+is not part of the live API contract.
 
 The browser can save Salesforce target-org and Dev Hub credentials directly to
 the loopback Go service. It can check the current org's availability and create

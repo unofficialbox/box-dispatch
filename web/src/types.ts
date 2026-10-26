@@ -220,13 +220,41 @@ export type BoxMetadataTemplateDiff = {
   right?: BoxMetadataTemplate
 }
 
+export type BoxComparisonSummary = { equal: number; changed: number; leftOnly: number; rightOnly: number }
+
 export type BoxComparison = {
   startedAt: string
   completedAt: string
   left: BoxComparisonEnvironment
   right: BoxComparisonEnvironment
-  summary: { equal: number; changed: number; leftOnly: number; rightOnly: number }
+  summary: BoxComparisonSummary
   templates: BoxMetadataTemplateDiff[]
+}
+
+export type BoxFolder = {
+  path: string
+  name: string
+  depth: number
+  items: { folders: number; files: number; webLinks: number; other: number }
+}
+
+export type BoxFolderDiff = {
+  path: string
+  name: string
+  status: BoxMetadataTemplateDiff['status']
+  changes: BoxMetadataChange[]
+  left?: BoxFolder
+  right?: BoxFolder
+}
+
+export type BoxFolderComparison = {
+  startedAt: string
+  completedAt: string
+  left: BoxComparisonEnvironment
+  right: BoxComparisonEnvironment
+  scope: { rootLabel: string; maxDepth: number; maxFolders: number; leftTruncated: boolean; rightTruncated: boolean }
+  summary: BoxComparisonSummary
+  folders: BoxFolderDiff[]
 }
 
 export type ConnectionSummary = {

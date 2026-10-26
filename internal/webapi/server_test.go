@@ -67,6 +67,53 @@ func TestBoxComparisonRejectsInvalidSelections(t *testing.T) {
 	}
 }
 
+func TestBoxFolderComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Sandbox"}, false)
+	calls := 0
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		BoxFolderCompare: func(_ context.Context, left, right string) (boxdiff.FolderComparison, error) {
+			calls++
+			if left != "left" || right != "right" {
+				t.Fatalf("connections = %q and %q", left, right)
+			}
+			return boxdiff.FolderComparison{Summary: boxdiff.Summary{Changed: calls}}, nil
+		},
+	})
+
+	for want := 1; want <= 2; want++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons/folders", strings.NewReader(`{"leftConnectionId":"left","rightConnectionId":"right"}`)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+		}
+		var comparison boxdiff.FolderComparison
+		if err := json.Unmarshal(response.Body.Bytes(), &comparison); err != nil {
+			t.Fatal(err)
+		}
+		if comparison.Summary.Changed != want {
+			t.Fatalf("request %d returned cached result %+v", want, comparison.Summary)
+		}
+	}
+}
+
+func TestBoxFolderComparisonRejectsInvalidSelections(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "only", Alias: "Only"}, true)
+	handler := NewHandlerWithOptions(ServerOptions{ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil }})
+	for _, body := range []string{
+		`{"leftConnectionId":"only","rightConnectionId":"only"}`,
+		`{"leftConnectionId":"only","rightConnectionId":"missing"}`,
+		`{"leftConnectionId":"only"}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons/folders", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s returned %d: %s", body, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestDeploymentsExposeSafeRunSummaries(t *testing.T) {
 	handler := NewHandlerWithOptions(ServerOptions{
 		Profile: "demo",
