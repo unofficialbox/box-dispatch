@@ -179,9 +179,10 @@ type FileChange struct {
 }
 
 func (r DeploymentRecord) FileChanges() []FileChange {
-	var changes []FileChange
+	changes := make([]FileChange, 0)
 	for _, provider := range r.Providers {
-		// Add Salesforce metadata file changes
+		// Previewable changes can represent Salesforce metadata or Box
+		// configuration objects such as AI agents.
 		for _, sfChange := range provider.Changes {
 			changes = append(changes, FileChange{
 				Component:   sfChange.Component,
@@ -195,6 +196,9 @@ func (r DeploymentRecord) FileChanges() []FileChange {
 		// Add Box resource changes
 		for _, resource := range provider.Resources {
 			if resource.Provider == "box" {
+				if providerHasComponentChange(provider.Changes, resource.Component) {
+					continue
+				}
 				path := resource.Name
 				if resource.Component != "" {
 					path = resource.Component + "/" + resource.Name
@@ -211,6 +215,15 @@ func (r DeploymentRecord) FileChanges() []FileChange {
 		}
 	}
 	return changes
+}
+
+func providerHasComponentChange(changes []salesforceapi.MetadataFileDiff, component string) bool {
+	for _, change := range changes {
+		if change.Component == component {
+			return true
+		}
+	}
+	return false
 }
 
 func ListDeployments() ([]DeploymentRecord, error) {
