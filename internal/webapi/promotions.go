@@ -88,11 +88,21 @@ func supportedAIAgentPromotion(agent boxdiff.AIAgent) bool {
 		// without those principals would silently broaden its audience.
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(agent.Kind)) {
-	case "ask", "extract":
-		return true
+	_, ok := aiAgentPromotionMode(agent)
+	return ok
+}
+
+func aiAgentPromotionMode(agent boxdiff.AIAgent) (string, bool) {
+	if len(agent.Capabilities) != 1 {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(agent.Capabilities[0])) {
+	case "ask":
+		return "ask", true
+	case "extract":
+		return "extract", true
 	default:
-		return false
+		return "", false
 	}
 }
 
@@ -131,8 +141,12 @@ func assembleAIAgentPromotion(name string, comparison boxdiff.AIAgentComparison,
 
 	payload := make([]any, 0, len(agents))
 	for _, agent := range agents {
+		mode, ok := aiAgentPromotionMode(agent)
+		if !ok {
+			return config.SolutionPlan{}, fmt.Errorf("AI Studio custom agent %q has unsupported capabilities", agent.Name)
+		}
 		payload = append(payload, map[string]any{
-			"key": agent.Key, "name": agent.Name, "mode": strings.ToLower(agent.Kind),
+			"key": agent.Key, "name": agent.Name, "mode": mode,
 			"accessState": agent.AccessState, "configuration": agent.Configuration,
 		})
 	}

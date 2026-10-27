@@ -17,7 +17,7 @@ func TestAssembleAIAgentPromotionWritesMinimalPackage(t *testing.T) {
 	t.Chdir(t.TempDir())
 	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	agent := boxdiff.AIAgent{
-		Key: "contract extractor", Name: "Contract Extractor", Kind: "Extract", AccessState: "enabled",
+		Key: "contract extractor", Name: "Contract Extractor", Product: "AI Studio custom agent", Capabilities: []string{"Extract"}, AccessState: "enabled",
 		Configuration: map[string]any{"extract": map[string]any{"description": "Extract contract terms", "custom_instructions": "Return exact values", "long_text": map[string]any{"model": "model-a"}}},
 	}
 	comparison := boxdiff.AIAgentComparison{Left: boxdiff.Environment{EnterpriseID: "5105484"}, Right: boxdiff.Environment{EnterpriseID: "1509916197"}}
@@ -73,16 +73,16 @@ func TestAssembleAIAgentPromotionWritesMinimalPackage(t *testing.T) {
 }
 
 func TestSelectPromotionAgentsRejectsUnsupportedMode(t *testing.T) {
-	agent := boxdiff.AIAgent{Key: "writer", Name: "Writer", Kind: "Text generation"}
-	comparison := boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Kind: agent.Kind, Status: "left_only", Left: &agent}}}
+	agent := boxdiff.AIAgent{Key: "writer", Name: "Writer", Product: "AI Studio custom agent", Capabilities: []string{"Text generation"}}
+	comparison := boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Product: agent.Product, Capabilities: agent.Capabilities, Status: "left_only", Left: &agent}}}
 	if _, err := selectPromotionAgents(comparison, []string{"writer"}); err == nil {
 		t.Fatal("unsupported Text generation agent was accepted")
 	}
 }
 
 func TestSelectPromotionAgentsRejectsRestrictedAudience(t *testing.T) {
-	agent := boxdiff.AIAgent{Key: "legal", Name: "Legal", Kind: "Ask", AllowedEntityTypes: []string{"group"}}
-	comparison := boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Kind: agent.Kind, Status: "left_only", Left: &agent}}}
+	agent := boxdiff.AIAgent{Key: "legal", Name: "Legal", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}, AllowedEntityTypes: []string{"group"}}
+	comparison := boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Product: agent.Product, Capabilities: agent.Capabilities, Status: "left_only", Left: &agent}}}
 	if _, err := selectPromotionAgents(comparison, []string{"legal"}); err == nil {
 		t.Fatal("agent with provider-specific audience principals was accepted")
 	}

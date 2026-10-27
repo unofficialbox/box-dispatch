@@ -280,6 +280,9 @@ func salesforcePlannedComponents(root string) ([]string, error) {
 }
 
 func boxComponentEntries(root string, manifest solution.Manifest, selection solution.ComponentSelection) ([]string, error) {
+	if manifest.CapabilityEnabled("Extract Configuration", selection) || manifest.CapabilityEnabled("Box Extract Agent", selection) {
+		return nil, fmt.Errorf("Box Automate Extract Agents are not deployable: Box does not document a public management API for their lifecycle")
+	}
 	entries := []string{}
 	arrays := []struct {
 		file, key, componentType string
@@ -310,33 +313,11 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 			entries = append(entries, spec.componentType+":"+name)
 		}
 	}
-	objects := []struct {
-		file, componentType string
-	}{
-		{"extract-field-prompts", "Extract Configuration"},
-	}
 	if manifest.CapabilityEnabled("Doc Gen Template", selection) {
 		for _, file := range manifest.Box.SampleContent {
 			if strings.EqualFold(filepath.Ext(file.Source), ".docx") {
 				entries = append(entries, "Doc Gen Template:"+filepath.Base(file.Source))
 			}
-		}
-	}
-	for _, spec := range objects {
-		if !manifest.CapabilityEnabled(spec.componentType, selection) {
-			continue
-		}
-		data, err := readBoxConfigObject(root, spec.file)
-		if err != nil {
-			return nil, err
-		}
-		keys := make([]string, 0, len(data))
-		for key := range data {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		for _, key := range keys {
-			entries = append(entries, spec.componentType+":"+key)
 		}
 	}
 	if manifest.CapabilityEnabled(manifest.Box.Workspace.ComponentType, selection) {

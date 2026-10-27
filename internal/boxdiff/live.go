@@ -156,8 +156,8 @@ func captureFoldersLive(ctx context.Context, connectionID, alias string) (Folder
 }
 
 // CompareAIAgentsLive compares the current custom AI Studio agents visible to
-// two saved Box connections. Extract-mode agents are the extraction
-// configurations used by Dispatch.
+// two saved Box connections. These are distinct from Box Automate Extract
+// Agents, which are not exposed by this API.
 func CompareAIAgentsLive(ctx context.Context, leftConnectionID, rightConnectionID string) (AIAgentComparison, error) {
 	leftConnectionID = strings.TrimSpace(leftConnectionID)
 	rightConnectionID = strings.TrimSpace(rightConnectionID)

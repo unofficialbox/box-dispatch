@@ -8,6 +8,7 @@ ship browser automation or adapters built on private application endpoints.
 
 | Capability ID | Public operations | Missing lifecycle operations | Dispatch behavior |
 |---|---|---|---|
+| `box_extract_agent` | None documented for the Box Automate Extract inventory | List, get, create, update, delete | Not modeled as an AI Studio custom agent; never packaged, validated, deployed, or reset |
 | `box_form` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
 | `box_app` | None | Portable list, get, create, update, delete, or template instantiation | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
 | `https_connector` | None | List, get, create, update, delete | Cataloged; hidden by default; never packaged, validated, deployed, or reset |
@@ -18,6 +19,18 @@ the gap. They cannot become deployable until Box publishes a supported API
 covering the complete lifecycle needed by an automated environment. A private
 web endpoint, reverse-engineered browser call, or UI script is not an acceptable
 substitute.
+
+### Box Automate Extract is not AI Studio
+
+The **Automate > Extract** product surface manages Box Extract Agents. Box AI
+Studio custom agents can separately contain an `extract` capability in their
+AI Studio definition. Those objects share terminology but are not interchangeable.
+
+Dispatch uses the documented AI Studio `/ai_agents` API only for custom agents.
+It must not translate an Extract prompt file into an AI Studio custom agent and
+report that object as a Box Extract Agent. Support for Box Automate Extract Agents
+remains blocked until Box documents a public management API that meets the
+lifecycle acceptance criteria below.
 
 ## Partial public APIs
 

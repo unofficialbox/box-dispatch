@@ -252,6 +252,9 @@ func findWorkspaceFile(ctx context.Context, api boxAPI, workspaceID, folderName,
 }
 
 func readBoxAIResources(root string, manifest solution.Manifest, selection solution.ComponentSelection) ([]boxAIResource, error) {
+	if manifest.CapabilityEnabled("Extract Configuration", selection) || manifest.CapabilityEnabled("Box Extract Agent", selection) {
+		return nil, fmt.Errorf("Box Automate Extract Agents are not deployable: Box does not document a public management API for their lifecycle")
+	}
 	resources := []boxAIResource{}
 	configRoot := filepath.Join(root, "config", "box")
 	if manifest.CapabilityEnabled("AI Agent", selection) {
@@ -293,41 +296,7 @@ func readBoxAIResources(root string, manifest solution.Manifest, selection solut
 			})
 		}
 	}
-	if manifest.CapabilityEnabled("Extract Configuration", selection) {
-		document, err := readBoxConfigObject(configRoot, "extract-field-prompts")
-		if err != nil {
-			return nil, err
-		}
-		keys := make([]string, 0, len(document))
-		for key := range document {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		for _, key := range keys {
-			var value struct {
-				Purpose string `json:"purpose"`
-			}
-			_ = json.Unmarshal(document[key], &value)
-			name := "CLM " + humanizeIdentifier(key) + " Extract"
-			resources = append(resources, boxAIResource{Component: "Extract Configuration:" + key, Mode: "extract", Name: name, Description: firstNonEmpty(value.Purpose, name), Instructions: string(document[key])})
-		}
-	}
 	return resources, nil
-}
-
-func humanizeIdentifier(value string) string {
-	var out []rune
-	for i, r := range []rune(value) {
-		if i > 0 && unicode.IsUpper(r) {
-			out = append(out, ' ')
-		}
-		out = append(out, r)
-	}
-	words := strings.Fields(string(out))
-	for i := range words {
-		words[i] = strings.ToUpper(words[i][:1]) + words[i][1:]
-	}
-	return strings.Join(words, " ")
 }
 
 func enabledCapability(manifest solution.Manifest, selection solution.ComponentSelection, componentType string) (solution.Capability, bool) {

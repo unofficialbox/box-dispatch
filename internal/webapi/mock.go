@@ -223,15 +223,15 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			leftSnapshot := boxdiff.AIAgentSnapshot{
 				Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
 				Agents: []boxdiff.AIAgent{
-					{Key: "contract extractor", Name: "Contract Extractor", Kind: "Extract", AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract contract terms", "long_text": map[string]any{"model": "model-production", "prompt_template": "Return contract terms"}}}},
-					{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask", AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}},
+					{Key: "contract extractor", Name: "Contract Extractor", Product: "AI Studio custom agent", Capabilities: []string{"Extract"}, AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract contract terms", "long_text": map[string]any{"model": "model-production", "prompt_template": "Return contract terms"}}}},
+					{Key: "legal assistant", Name: "Legal Assistant", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}, AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}},
 				},
 			}
 			rightSnapshot := boxdiff.AIAgentSnapshot{
 				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
 				Agents: []boxdiff.AIAgent{
-					{Key: "contract extractor", Name: "Contract Extractor", Kind: "Extract", AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract contract terms", "long_text": map[string]any{"model": "model-sandbox", "prompt_template": "Return contract terms and renewal dates"}}}},
-					{Key: "summary writer", Name: "Summary Writer", Kind: "Text generation", AccessState: "enabled", Configuration: map[string]any{"textGen": map[string]any{"description": "Draft contract summaries"}}},
+					{Key: "contract extractor", Name: "Contract Extractor", Product: "AI Studio custom agent", Capabilities: []string{"Extract"}, AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract contract terms", "long_text": map[string]any{"model": "model-sandbox", "prompt_template": "Return contract terms and renewal dates"}}}},
+					{Key: "summary writer", Name: "Summary Writer", Product: "AI Studio custom agent", Capabilities: []string{"Text generation"}, AccessState: "enabled", Configuration: map[string]any{"textGen": map[string]any{"description": "Draft contract summaries"}}},
 				},
 			}
 			return boxdiff.CompareAIAgentSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())

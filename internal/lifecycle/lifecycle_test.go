@@ -124,7 +124,6 @@ func TestCLMDeploymentOrder(t *testing.T) {
 		"Folder Structure",
 		"Metadata Template",
 		"Doc Gen Template",
-		"Extract Configuration",
 		"AI Agent",
 		"Box Hub",
 		"Sample Content",
@@ -139,7 +138,7 @@ func TestCLMCatalogRetainsUnsupportedCapabilitiesAsNonDeployable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, component := range []string{"Box Form", "Box App", "HTTPS Connector", "Automate Workflow"} {
+	for _, component := range []string{"Box Extract Agent", "Box Form", "Box App", "HTTPS Connector", "Automate Workflow"} {
 		capability, found := manifest.Capability(component)
 		if !found {
 			t.Fatalf("%s must remain documented in the capability catalog", component)
@@ -543,7 +542,6 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	write("automate-workflows.json", `{"workflows":[{"key":"intake","name":"Intake"}]}`)
 	write("metadata-templates.json", `{"templates":[{"templateKey":"contract","displayName":"Contract"}]}`)
 	write("docgen-template-data.json", `{"approvalMemo":{}}`)
-	write("extract-field-prompts.json", `{"contractIntake":{}}`)
 	for _, name := range []string{"folder-template.md", "hub-blueprint.md"} {
 		write(name, "# Blueprint")
 	}
@@ -555,11 +553,26 @@ func TestBoxComponentsAreParsedFromPackagedConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 8 {
-		t.Fatalf("got %d Box components, want 8: %#v", len(entries), entries)
+	if len(entries) != 7 {
+		t.Fatalf("got %d Box components, want 7: %#v", len(entries), entries)
 	}
 	if slices.Contains(entries, "Automate Workflow:Intake") {
 		t.Fatalf("validate-only Automate workflow leaked into package components: %#v", entries)
+	}
+}
+
+func TestLegacyExtractConfigurationFailsInsteadOfCreatingCustomAgent(t *testing.T) {
+	enabled := true
+	manifest := solution.Manifest{Box: solution.BoxManifest{Capabilities: []solution.Capability{{
+		ID: "extract_configuration", ComponentType: "Extract Configuration", EnabledByDefault: &enabled,
+		API: "public", Handler: "box.ai-extract", Operations: []string{"validate", "deploy"},
+	}}}}
+	selection := solution.ComponentSelection{Mode: "all"}
+	if _, err := boxComponentEntries(t.TempDir(), manifest, selection); err == nil || !strings.Contains(err.Error(), "Box Automate Extract Agents are not deployable") {
+		t.Fatalf("component inventory error = %v", err)
+	}
+	if _, err := readBoxAIResources(t.TempDir(), manifest, selection); err == nil || !strings.Contains(err.Error(), "Box Automate Extract Agents are not deployable") {
+		t.Fatalf("AI resource error = %v", err)
 	}
 }
 
