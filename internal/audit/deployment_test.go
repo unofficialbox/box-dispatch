@@ -62,3 +62,20 @@ func TestProviderRecordsCaptureValidatedFileChanges(t *testing.T) {
 		t.Fatalf("file changes = %#v", changes)
 	}
 }
+
+func TestFileChangesDoNotDuplicateRecordedBoxResources(t *testing.T) {
+	validated := salesforceapi.MetadataFileDiff{
+		Component: "AI Agent:Contract Extractor", Path: "ai-agents/contract-extractor.json",
+		Kind: "add", After: `{}`, Previewable: true,
+	}
+	record := DeploymentRecord{Providers: []ProviderRecord{{
+		Provider: "box", Changes: []salesforceapi.MetadataFileDiff{validated},
+		Resources: []lifecycle.ResourceReference{{
+			Provider: "box", Component: validated.Component, Kind: "ai_agent", Name: "Contract Extractor", ID: "agent-1",
+		}},
+	}}}
+	changes := record.FileChanges()
+	if len(changes) != 1 || changes[0].Path != validated.Path || !changes[0].Previewable {
+		t.Fatalf("file changes = %#v", changes)
+	}
+}
