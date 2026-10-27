@@ -43,10 +43,10 @@ const aiAgentComparison: BoxAIAgentComparison = {
   left: comparison.left, right: comparison.right,
   summary: { equal: 0, changed: 1, leftOnly: 0, rightOnly: 0 },
   agents: [{
-    key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', status: 'changed',
+    key: 'contract extractor', name: 'Contract Extractor', product: 'AI Studio custom agent', capabilities: ['Extract'], status: 'changed',
     changes: [{ path: 'configuration.extract.long_text.model', before: 'model-a', after: 'model-b' }],
-    left: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-a' } } } },
-    right: { key: 'contract extractor', name: 'Contract Extractor', kind: 'Extract', accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-b' } } } },
+    left: { key: 'contract extractor', name: 'Contract Extractor', product: 'AI Studio custom agent', capabilities: ['Extract'], accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-a' } } } },
+    right: { key: 'contract extractor', name: 'Contract Extractor', product: 'AI Studio custom agent', capabilities: ['Extract'], accessState: 'enabled', configuration: { extract: { description: 'Extract terms', long_text: { model: 'model-b' } } } },
   }],
 }
 
@@ -55,12 +55,12 @@ const promotableAIAgentComparison: BoxAIAgentComparison = {
   summary: { equal: 0, changed: 0, leftOnly: 2, rightOnly: 0 },
   agents: [
     {
-      key: 'legal assistant', name: 'Legal Assistant', kind: 'Ask', status: 'left_only', changes: [],
-      left: { key: 'legal assistant', name: 'Legal Assistant', kind: 'Ask', accessState: 'enabled', configuration: { ask: { description: 'Answer legal questions' } } },
+      key: 'legal assistant', name: 'Legal Assistant', product: 'AI Studio custom agent', capabilities: ['Ask'], status: 'left_only', changes: [],
+      left: { key: 'legal assistant', name: 'Legal Assistant', product: 'AI Studio custom agent', capabilities: ['Ask'], accessState: 'enabled', configuration: { ask: { description: 'Answer legal questions' } } },
     },
     {
-      key: 'summary writer', name: 'Summary Writer', kind: 'Text generation', status: 'left_only', changes: [],
-      left: { key: 'summary writer', name: 'Summary Writer', kind: 'Text generation', accessState: 'enabled', configuration: { textGen: { description: 'Write summaries' } } },
+      key: 'summary writer', name: 'Summary Writer', product: 'AI Studio custom agent', capabilities: ['Text generation'], status: 'left_only', changes: [],
+      left: { key: 'summary writer', name: 'Summary Writer', product: 'AI Studio custom agent', capabilities: ['Text generation'], accessState: 'enabled', configuration: { textGen: { description: 'Write summaries' } } },
     },
   ],
 }
@@ -115,20 +115,21 @@ describe('ComparePage', () => {
     expect(screen.getByText('/Contracts')).toBeTruthy()
   })
 
-  it('compares live AI agents and extract-mode configurations', async () => {
+  it('compares live AI Studio custom agents without calling them Box Extract Agents', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(aiAgentComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const { container } = render(<ComparePage connections={connections}/>)
     const typeSelect = container.querySelector('box-select[label="Box object type"]')!
     fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'ai_agents' } }))
 
-    expect(screen.getByText(/current custom AI Studio agents/)).toBeTruthy()
+    expect(screen.getByText(/does not inspect Box Automate Extract Agents/)).toBeTruthy()
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/ai-agents', expect.objectContaining({ method: 'POST' })))
     await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="contract-extractor.json"]')).toBeTruthy())
-    expect(screen.getByRole('heading', { name: 'AI agents and extraction configurations' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'AI Studio custom agents' })).toBeTruthy()
     expect(screen.getByText('configuration.extract.long_text.model')).toBeTruthy()
-    expect(screen.getByText('Extraction configuration')).toBeTruthy()
+    expect(screen.getByText('AI Studio custom agent')).toBeTruthy()
+    expect(screen.getByText('Extract')).toBeTruthy()
   })
 
   it('prepares a deployment from supported source-only AI agents', async () => {

@@ -166,11 +166,11 @@ func TestBoxAIAgentComparisonRejectsInvalidSelections(t *testing.T) {
 func TestAIAgentPromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
 	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
 	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
-	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask", AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}}
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}, AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}}
 	comparison := boxdiff.AIAgentComparison{
 		Left:   boxdiff.Environment{ConnectionID: "left", EnterpriseID: "EID-source"},
 		Right:  boxdiff.Environment{ConnectionID: "right", EnterpriseID: "EID-destination"},
-		Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Name: agent.Name, Kind: agent.Kind, Status: "left_only", Left: &agent}},
+		Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Name: agent.Name, Product: agent.Product, Capabilities: agent.Capabilities, Status: "left_only", Left: &agent}},
 	}
 	compareCalls := 0
 	var savedPlan config.SolutionPlan
@@ -207,7 +207,7 @@ func TestAIAgentPromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
 func TestAIAgentPromotionRejectsAgentThatChangedSinceComparison(t *testing.T) {
 	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
 	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
-	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask"}
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}}
 	assembled := false
 	handler := NewHandlerWithOptions(ServerOptions{
 		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
@@ -238,11 +238,11 @@ func TestAIAgentPromotionPersistsDestinationInsideMutationReservation(t *testing
 	if _, err := shellstate.ApplyConnectionUpdate(func(config.ConnectionSettings) (config.ConnectionSettings, error) { return settings, nil }); err != nil {
 		t.Fatal(err)
 	}
-	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Kind: "Ask"}
+	agent := boxdiff.AIAgent{Key: "legal assistant", Name: "Legal Assistant", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}}
 	handler := NewHandlerWithOptions(ServerOptions{
 		Runs: newRunManagerWithExecutors(nil, nil, time.Now),
 		BoxAIAgentCompare: func(context.Context, string, string) (boxdiff.AIAgentComparison, error) {
-			return boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Kind: agent.Kind, Status: "left_only", Left: &agent}}}, nil
+			return boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Product: agent.Product, Capabilities: agent.Capabilities, Status: "left_only", Left: &agent}}}, nil
 		},
 		AIAgentPromotionAssembler: func(name string, _ boxdiff.AIAgentComparison, _ []boxdiff.AIAgent, _ time.Time) (config.SolutionPlan, error) {
 			return config.SolutionPlan{Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion", Repository: "box://source/ai-agents", Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/tmp/package"}, nil

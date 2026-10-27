@@ -26,7 +26,7 @@ func TestNormalizeAIAgentRemovesProviderResponseFields(t *testing.T) {
 	}
 
 	normalized := NormalizeAIAgent(&agent)
-	if normalized.Key != "contract extractor" || normalized.Name != "Contract Extractor" || normalized.Kind != "Extract" {
+	if normalized.Key != "contract extractor" || normalized.Name != "Contract Extractor" || normalized.Product != "AI Studio custom agent" || len(normalized.Capabilities) != 1 || normalized.Capabilities[0] != "Extract" {
 		t.Fatalf("unexpected identity: %+v", normalized)
 	}
 	if len(normalized.AllowedEntityTypes) != 2 || normalized.AllowedEntityTypes[0] != "group" || normalized.AllowedEntityTypes[1] != "user" {
@@ -53,12 +53,12 @@ func TestCompareAIAgentSnapshotsFindsSemanticChanges(t *testing.T) {
 	leftEnvironment := Environment{ConnectionID: "left", Alias: "Production", EnterpriseID: "EID-left"}
 	rightEnvironment := Environment{ConnectionID: "right", Alias: "Sandbox", EnterpriseID: "EID-right"}
 	left := AIAgentSnapshot{Environment: leftEnvironment, Agents: []AIAgent{
-		{Key: "contract extractor", Name: "Contract Extractor", Kind: "Extract", AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract terms", "long_text": map[string]any{"model": "model-a"}}}},
-		{Key: "legal ask", Name: "Legal Ask", Kind: "Ask", AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}},
+		{Key: "contract extractor", Name: "Contract Extractor", Product: "AI Studio custom agent", Capabilities: []string{"Extract"}, AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract terms", "long_text": map[string]any{"model": "model-a"}}}},
+		{Key: "legal ask", Name: "Legal Ask", Product: "AI Studio custom agent", Capabilities: []string{"Ask"}, AccessState: "enabled", Configuration: map[string]any{"ask": map[string]any{"description": "Answer legal questions"}}},
 	}}
 	right := AIAgentSnapshot{Environment: rightEnvironment, Agents: []AIAgent{
-		{Key: "contract extractor", Name: "Contract Extractor", Kind: "Extract", AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract terms", "long_text": map[string]any{"model": "model-b"}}}},
-		{Key: "summary writer", Name: "Summary Writer", Kind: "Text generation", AccessState: "enabled", Configuration: map[string]any{"textGen": map[string]any{"description": "Draft summaries"}}},
+		{Key: "contract extractor", Name: "Contract Extractor", Product: "AI Studio custom agent", Capabilities: []string{"Extract"}, AccessState: "enabled", Configuration: map[string]any{"extract": map[string]any{"description": "Extract terms", "long_text": map[string]any{"model": "model-b"}}}},
+		{Key: "summary writer", Name: "Summary Writer", Product: "AI Studio custom agent", Capabilities: []string{"Text generation"}, AccessState: "enabled", Configuration: map[string]any{"textGen": map[string]any{"description": "Draft summaries"}}},
 	}}
 
 	comparison, err := CompareAIAgentSnapshots(started, left, right, started.Add(time.Second))
@@ -144,7 +144,7 @@ func TestListAIAgentsFromSessionPaginatesAndNormalizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 || len(agents) != 2 || agents[0].Kind != "Extract" || agents[1].Kind != "Ask" {
+	if requests != 2 || len(agents) != 2 || agents[0].Product != "AI Studio custom agent" || agents[0].Capabilities[0] != "Extract" || agents[1].Capabilities[0] != "Ask" {
 		t.Fatalf("requests = %d agents = %+v", requests, agents)
 	}
 	encoded, err := json.Marshal(agents)

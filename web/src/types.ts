@@ -260,7 +260,8 @@ export type BoxFolderComparison = {
 export type BoxAIAgent = {
   key: string
   name: string
-  kind: string
+  product: string
+  capabilities: string[]
   accessState: string
   allowedEntityTypes?: string[]
   configuration: Record<string, unknown>
@@ -269,7 +270,8 @@ export type BoxAIAgent = {
 export type BoxAIAgentDiff = {
   key: string
   name: string
-  kind: string
+  product: string
+  capabilities: string[]
   status: BoxMetadataTemplateDiff['status']
   changes: BoxMetadataChange[]
   left?: BoxAIAgent

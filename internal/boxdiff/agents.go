@@ -11,12 +11,14 @@ import (
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
 
-// AIAgent is a provider-ID-free view of a Box AI Studio agent. Box extraction
-// configurations are represented by agents whose definition includes Extract.
+// AIAgent is a provider-ID-free view of a Box AI Studio custom agent. An
+// Extract capability is part of that custom-agent definition; it is not a Box
+// Automate Extract Agent.
 type AIAgent struct {
 	Key                string         `json:"key"`
 	Name               string         `json:"name"`
-	Kind               string         `json:"kind"`
+	Product            string         `json:"product"`
+	Capabilities       []string       `json:"capabilities"`
 	AccessState        string         `json:"accessState"`
 	AllowedEntityTypes []string       `json:"allowedEntityTypes,omitempty"`
 	Configuration      map[string]any `json:"configuration"`
@@ -28,13 +30,14 @@ type AIAgentSnapshot struct {
 }
 
 type AIAgentDiff struct {
-	Key     string   `json:"key"`
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Status  string   `json:"status"`
-	Changes []Change `json:"changes"`
-	Left    *AIAgent `json:"left,omitempty"`
-	Right   *AIAgent `json:"right,omitempty"`
+	Key          string   `json:"key"`
+	Name         string   `json:"name"`
+	Product      string   `json:"product"`
+	Capabilities []string `json:"capabilities"`
+	Status       string   `json:"status"`
+	Changes      []Change `json:"changes"`
+	Left         *AIAgent `json:"left,omitempty"`
+	Right        *AIAgent `json:"right,omitempty"`
 }
 
 type AIAgentComparison struct {
@@ -53,23 +56,24 @@ func NormalizeAIAgent(agent *schemas.AiSingleAgentResponseFull) AIAgent {
 	normalized := AIAgent{
 		Key:           strings.ToLower(strings.TrimSpace(agent.Name)),
 		Name:          strings.TrimSpace(agent.Name),
+		Product:       "AI Studio custom agent",
 		AccessState:   strings.TrimSpace(agent.AccessState),
 		Configuration: map[string]any{},
 	}
-	kinds := make([]string, 0, 3)
+	capabilities := make([]string, 0, 3)
 	if agent.Ask != nil {
-		kinds = append(kinds, "Ask")
+		capabilities = append(capabilities, "Ask")
 		normalized.Configuration["ask"] = normalizeAgentSection(agent.Ask)
 	}
 	if agent.Extract != nil {
-		kinds = append(kinds, "Extract")
+		capabilities = append(capabilities, "Extract")
 		normalized.Configuration["extract"] = normalizeAgentSection(agent.Extract)
 	}
 	if agent.TextGen != nil {
-		kinds = append(kinds, "Text generation")
+		capabilities = append(capabilities, "Text generation")
 		normalized.Configuration["textGen"] = normalizeAgentSection(agent.TextGen)
 	}
-	normalized.Kind = strings.Join(kinds, " + ")
+	normalized.Capabilities = capabilities
 	for _, entity := range agent.AllowedEntities {
 		switch {
 		case entity.User != nil:
@@ -142,16 +146,20 @@ func CompareAIAgentSnapshots(startedAt time.Time, left, right AIAgentSnapshot, c
 		diff := AIAgentDiff{Key: key, Changes: []Change{}}
 		switch {
 		case !onRight:
-			diff.Name, diff.Kind, diff.Status = leftAgent.Name, leftAgent.Kind, "left_only"
+			diff.Name, diff.Product, diff.Capabilities, diff.Status = leftAgent.Name, leftAgent.Product, leftAgent.Capabilities, "left_only"
 			diff.Left = aiAgentPointer(leftAgent)
 			comparison.Summary.LeftOnly++
 		case !onLeft:
-			diff.Name, diff.Kind, diff.Status = rightAgent.Name, rightAgent.Kind, "right_only"
+			diff.Name, diff.Product, diff.Capabilities, diff.Status = rightAgent.Name, rightAgent.Product, rightAgent.Capabilities, "right_only"
 			diff.Right = aiAgentPointer(rightAgent)
 			comparison.Summary.RightOnly++
 		default:
 			diff.Name = firstNonEmpty(leftAgent.Name, rightAgent.Name, key)
-			diff.Kind = firstNonEmpty(leftAgent.Kind, rightAgent.Kind)
+			diff.Product = firstNonEmpty(leftAgent.Product, rightAgent.Product)
+			diff.Capabilities = append([]string(nil), leftAgent.Capabilities...)
+			if len(diff.Capabilities) == 0 {
+				diff.Capabilities = append([]string(nil), rightAgent.Capabilities...)
+			}
 			diff.Left = aiAgentPointer(leftAgent)
 			diff.Right = aiAgentPointer(rightAgent)
 			diff.Changes = compareAIAgent(leftAgent, rightAgent)
@@ -198,7 +206,8 @@ func compareAIAgent(left, right AIAgent) []Change {
 func flattenAIAgent(agent AIAgent) map[string]any {
 	values := map[string]any{
 		"name":               agent.Name,
-		"kind":               agent.Kind,
+		"product":            agent.Product,
+		"capabilities":       agent.Capabilities,
 		"accessState":        agent.AccessState,
 		"allowedEntityTypes": agent.AllowedEntityTypes,
 	}

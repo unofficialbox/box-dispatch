@@ -29,8 +29,8 @@ const folderColumns: TableColumn[] = [
 ]
 
 const aiAgentColumns: TableColumn[] = [
-  { key: 'agent', label: 'AI agent' },
-  { key: 'kind', label: 'Mode' },
+  { key: 'agent', label: 'Custom agent' },
+  { key: 'capabilities', label: 'Capabilities' },
   { key: 'status', label: 'Result' },
   { key: 'plan', label: 'Plan', align: 'center', hostContent: true },
 ]
@@ -38,7 +38,7 @@ const aiAgentColumns: TableColumn[] = [
 const comparisonTypeOptions = [
   { label: 'Metadata templates', value: 'metadata_templates' },
   { label: 'Folders (connected user)', value: 'folders' },
-  { label: 'AI agents & extraction', value: 'ai_agents' },
+  { label: 'AI Studio custom agents', value: 'ai_agents' },
 ]
 
 const formatCaptureTime = (value: string) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(value)) : 'Not captured'
@@ -141,7 +141,7 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
         <box-button label={running ? 'Comparing live environments…' : 'Run live comparison'} tone="primary" disabled={!canCompare} onClick={() => void runComparison()}></box-button>
       </div>}
       {comparisonType === 'folders' ? <p className="compare-scope-note">Folder comparison reads each connected user’s All Files hierarchy to 4 levels and at most 500 folders per side. It counts direct child items but does not read file contents.</p> : null}
-      {comparisonType === 'ai_agents' ? <p className="compare-scope-note">AI comparison reads current custom AI Studio agents. Dispatch extraction configurations appear as Extract agents; provider IDs, timestamps, actor identities, icon references, and response warnings are excluded.</p> : null}
+      {comparisonType === 'ai_agents' ? <p className="compare-scope-note">This compares current Box AI Studio custom agents, including their Ask, Extract, and text-generation capabilities. It does not inspect Box Automate Extract Agents.</p> : null}
       {error ? <Alert className="compare-error" heading="Comparison could not be completed" message={error} tone="error" open/> : null}
     </section>
 
@@ -153,7 +153,7 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
       </section>
       <SummaryMetrics summary={comparison.summary}/>
       {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareAIAgentPromotion}/> : <MetadataResults key={result.value.completedAt} comparison={result.value}/>}
-    </> : <section className="compare-empty-state"><h2>Ready for a live comparison</h2><p>{comparisonType === 'folders' ? 'Dispatch will read the connected users’ current folder hierarchies from Box. Folder IDs and timestamps are excluded; relative paths provide the cross-enterprise comparison key.' : comparisonType === 'ai_agents' ? 'Dispatch will authenticate both saved connections in parallel and read their current custom AI Studio definitions, including extract-mode configurations. Results are not loaded from a cached configuration.' : 'Dispatch will authenticate both saved connections in parallel and read the current enterprise metadata-template schemas. Results are not loaded from the saved readiness snapshot.'}</p></section>}
+    </> : <section className="compare-empty-state"><h2>Ready for a live comparison</h2><p>{comparisonType === 'folders' ? 'Dispatch will read the connected users’ current folder hierarchies from Box. Folder IDs and timestamps are excluded; relative paths provide the cross-enterprise comparison key.' : comparisonType === 'ai_agents' ? 'Dispatch will authenticate both saved connections in parallel and read their current Box AI Studio custom-agent definitions. Box Automate Extract Agents are a separate product surface and are not included.' : 'Dispatch will authenticate both saved connections in parallel and read the current enterprise metadata-template schemas. Results are not loaded from the saved readiness snapshot.'}</p></section>}
   </section>
 }
 
@@ -215,7 +215,7 @@ function AIAgentResults({ comparison, onPrepare }: { comparison: BoxAIAgentCompa
     const presentation = statusPresentation[agent.status]
     return {
       id: agent.key,
-      cells: { agent: agent.name || agent.key, kind: agent.kind || 'Unknown', status: { kind: 'badge', text: presentation.label, tone: presentation.tone }, plan: isDeployableAIAgent(agent) ? '' : 'Not deployable' },
+      cells: { agent: agent.name || agent.key, capabilities: agent.capabilities.join(', ') || 'None', status: { kind: 'badge', text: presentation.label, tone: presentation.tone }, plan: isDeployableAIAgent(agent) ? '' : 'Not deployable' },
       detail: agent.status === 'changed' ? `${agent.changes.length} semantic changes` : presentation.label,
     }
   }), [comparison.agents])
@@ -237,8 +237,8 @@ function AIAgentResults({ comparison, onPrepare }: { comparison: BoxAIAgentCompa
     }
   }
 
-  return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><div><h2 id="comparison-results-title">AI agents and extraction configurations</h2><p>Matched by case-insensitive agent name. Extract-mode agents are shown as extraction configurations; provider-generated response fields are excluded.</p></div><span>{comparison.agents.length} inspected</span></header>
-    {deployableKeys.length > 0 ? <section className="compare-promotion-plan" aria-labelledby="promotion-plan-title"><div><p className="overview-eyebrow">Deployment plan</p><h3 id="promotion-plan-title">Promote source-only agents</h3><p>{plannedKeys.length} of {deployableKeys.length} deployable agents selected for {comparison.right.alias}.</p></div><TextField label="Deployment name" value={deploymentName} required invalid={deploymentName.length > 80} errorMessage={deploymentName.length > 80 ? 'Use 80 characters or fewer.' : undefined} onValueChanged={(event) => setDeploymentName(event.detail.value)}/><box-button label={preparing ? 'Preparing deployment…' : 'Prepare deployment'} tone="primary" disabled={preparing || plannedKeys.length === 0 || !deploymentName.trim() || deploymentName.length > 80} onClick={() => void prepare()}></box-button></section> : <Alert className="compare-scope-alert" heading="No eligible source-only agents" message="Promotion currently supports unrestricted Ask and Extract agents. Changed agents require an update workflow, destination-only agents already exist, and restricted agents retain provider-specific audience principals that cannot be copied safely." tone="info" open/>}
+  return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><div><h2 id="comparison-results-title">AI Studio custom agents</h2><p>Matched by case-insensitive agent name. Ask, Extract, and text-generation capabilities belong to each custom agent; these are not Box Automate Extract Agents.</p></div><span>{comparison.agents.length} inspected</span></header>
+    {deployableKeys.length > 0 ? <section className="compare-promotion-plan" aria-labelledby="promotion-plan-title"><div><p className="overview-eyebrow">Deployment plan</p><h3 id="promotion-plan-title">Promote source-only custom agents</h3><p>{plannedKeys.length} of {deployableKeys.length} deployable agents selected for {comparison.right.alias}.</p></div><TextField label="Deployment name" value={deploymentName} required invalid={deploymentName.length > 80} errorMessage={deploymentName.length > 80 ? 'Use 80 characters or fewer.' : undefined} onValueChanged={(event) => setDeploymentName(event.detail.value)}/><box-button label={preparing ? 'Preparing deployment…' : 'Prepare deployment'} tone="primary" disabled={preparing || plannedKeys.length === 0 || !deploymentName.trim() || deploymentName.length > 80} onClick={() => void prepare()}></box-button></section> : <Alert className="compare-scope-alert" heading="No eligible source-only custom agents" message="Promotion currently supports unrestricted AI Studio custom agents with one Ask or Extract capability. Changed agents require an update workflow, destination-only agents already exist, and restricted agents retain provider-specific audience principals that cannot be copied safely." tone="info" open/>}
     {promotionError ? <Alert className="compare-error" heading="Deployment plan could not be prepared" message={promotionError} tone="error" open/> : null}
     <div className="compare-browser">
       <section className="compare-template-list" aria-label="AI agent comparison results"><BoeTable columns={aiAgentColumns} rows={rows} label="AI agent comparison results" emptyText="No custom AI Studio agents were returned." selectionMode="single" selectedIds={selected ? [selected.key] : []} onSelectionChange={(ids) => setSelectedKey(ids[0] ?? '')}>{comparison.agents.map((agent) => {
@@ -270,7 +270,8 @@ function RemoveFromPlanButton({ label, onRemove }: { label: string; onRemove: ()
 }
 
 function isDeployableAIAgent(agent: BoxAIAgentDiff) {
-  return agent.status === 'left_only' && Boolean(agent.left) && (agent.kind === 'Ask' || agent.kind === 'Extract') && (agent.left?.allowedEntityTypes?.length ?? 0) === 0
+  const capabilities = agent.left?.capabilities ?? agent.capabilities
+  return agent.status === 'left_only' && Boolean(agent.left) && capabilities.length === 1 && (capabilities[0] === 'Ask' || capabilities[0] === 'Extract') && (agent.left?.allowedEntityTypes?.length ?? 0) === 0
 }
 
 function MetadataDiff({ template, comparison }: { template: BoxMetadataTemplateDiff; comparison: BoxComparison }) {
@@ -285,7 +286,7 @@ function FolderDiffView({ folder, comparison }: { folder: BoxFolderDiff; compari
 
 function AIAgentDiffView({ agent, comparison }: { agent: BoxAIAgentDiff; comparison: BoxAIAgentComparison }) {
   const presentation = statusPresentation[agent.status]
-  return <><DiffHeading eyebrow={agent.kind === 'Extract' ? 'Extraction configuration' : 'AI agent'} title={agent.name || agent.key} code={agent.kind || 'Unknown mode'} label={presentation.label} tone={presentation.tone}/><ChangeList changes={agent.changes}/><DiffViewer heading={`${agent.key.replaceAll(' ', '-')}.json`} left={agent.left} right={agent.right} comparison={comparison}/></>
+  return <><DiffHeading eyebrow="AI Studio custom agent" title={agent.name || agent.key} code={agent.capabilities.join(' + ') || 'No capabilities'} label={presentation.label} tone={presentation.tone}/><ChangeList changes={agent.changes}/><DiffViewer heading={`${agent.key.replaceAll(' ', '-')}.json`} left={agent.left} right={agent.right} comparison={comparison}/></>
 }
 
 function DiffHeading({ eyebrow, title, code, label, tone }: { eyebrow: string; title: string; code: string; label: string; tone: 'brand' | 'warning' | 'neutral' }) {

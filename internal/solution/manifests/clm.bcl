@@ -60,7 +60,6 @@
           "Folder Structure",
           "Metadata Template",
           "Doc Gen Template",
-          "Extract Configuration",
           "AI Agent",
           "Box Hub",
           "Sample Content"
@@ -102,9 +101,9 @@
           {"id": "metadata_template", "component_type": "Metadata Template", "enabled_by_default": true, "api": "public", "handler": "box.metadata-template"},
           {"id": "sample_content", "component_type": "Sample Content", "enabled_by_default": true, "api": "public", "handler": "box.file-upload"},
           {"id": "docgen_template", "component_type": "Doc Gen Template", "enabled_by_default": true, "api": "public", "handler": "box.docgen-template", "operations": ["validate", "deploy"]},
-          {"id": "extract_configuration", "component_type": "Extract Configuration", "enabled_by_default": true, "api": "public", "handler": "box.ai-extract", "operations": ["validate", "deploy"]},
           {"id": "ai_agent", "component_type": "AI Agent", "enabled_by_default": true, "api": "public", "handler": "box.ai-agent", "operations": ["validate", "deploy"]},
           {"id": "box_hub", "component_type": "Box Hub", "display_name": "Acme Contract Clause Library", "source": "hub-blueprint.md", "enabled_by_default": true, "api": "public", "handler": "box.hub", "operations": ["validate", "deploy"]},
+          {"id": "box_extract_agent", "component_type": "Box Extract Agent", "enabled_by_default": false, "api": "none"},
           {"id": "box_form", "component_type": "Box Form", "enabled_by_default": false, "api": "none"},
           {"id": "box_app", "component_type": "Box App", "enabled_by_default": false, "api": "none"},
           {"id": "https_connector", "component_type": "HTTPS Connector", "enabled_by_default": false, "api": "none"},
