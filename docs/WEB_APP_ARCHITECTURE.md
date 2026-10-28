@@ -21,7 +21,8 @@ flowchart LR
     Normalize --> MetadataDiff["Template and field diff"]
     Normalize --> FolderDiff["Bounded folder-path and item-count diff"]
     Normalize --> AIAgentDiff["AI Studio custom-agent diff"]
-    AIAgentDiff -->|"selected source-only custom agents"| Promotion["Server-built BCL promotion package"]
+    MetadataDiff -->|"selected portable changed or source-only templates"| Promotion["Server-built BCL promotion package"]
+    AIAgentDiff -->|"selected source-only custom agents"| Promotion
     Promotion --> Engine
     Engine --> SalesforceREST["Salesforce REST API"]
     SalesforceREST --> SalesforceEligibility["UIBundle eligibility preflight"]
@@ -71,8 +72,8 @@ The browser workspace guides operators through:
 3. Configure deployment strategy and supported components.
 4. Validate provider state and deployment prerequisites.
 5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
-6. Compare metadata templates, the connected users' bounded folder structures, or Box AI Studio custom agents and their capabilities in two saved Box enterprises directly from their live APIs. Box Automate Extract Agents are a separate unsupported object type.
-7. Select supported source-only AI Studio custom agents with one Ask or Extract capability and no user/group audience restrictions, prepare a minimal promotion package from a fresh live re-check, and continue through the ordinary connection, review, validation, and confirmed deployment workflow.
+6. Compare metadata templates, the connected users' bounded folder structures, or Box AI Studio custom agents and their capabilities in two saved Box enterprises directly from their live APIs. Filter the change-first inventory by status or search without hiding the source/destination diff. Box Automate Extract Agents are a separate unsupported object type.
+7. Add portable changed or source-only metadata templates, or supported source-only AI Studio custom agents, to a deployment plan; prepare a minimal promotion package from a fresh live re-check; and continue through the ordinary connection, review, validation, and confirmed deployment workflow.
 
 The browser is the only interactive user experience. The executable has no full-screen
 terminal mode, prompts, keyboard-driven terminal navigation, or terminal presentation
@@ -129,6 +130,7 @@ credentials from `.env`:
 | `POST /api/box/comparisons` | authenticate two exact saved Box connection IDs in parallel, read their current enterprise metadata-template schemas, normalize provider-specific IDs, and return a semantic diff | credentials, access tokens, raw provider responses, cached readiness state, deployment connection selection |
 | `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse each connected user's current All Files hierarchy within the documented depth/folder limits, and compare provider-ID-free relative paths and direct item counts | credentials, access tokens, folder IDs, file contents, cached readiness state, deployment connection selection |
 | `POST /api/box/comparisons/ai-agents` | authenticate two exact saved Box connection IDs in parallel, read current AI Studio custom agents and their capabilities, remove provider-generated response fields, and return a semantic definition diff; this does not inspect Box Automate Extract Agents | credentials, access tokens, agent IDs, principal IDs, timestamps, actor identities, icon references, response warnings, cached readiness state, deployment connection selection |
+| `POST /api/box/promotions/metadata-templates` | rerun the exact live metadata-template comparison, verify every selected template is still changed or source-only and contains only portable field types, build a minimal BCL package, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, enterprise-specific taxonomy fields, deployment execution |
 | `POST /api/box/promotions/ai-agents` | rerun the exact live AI-agent comparison, verify every selected agent is still source-only, has no provider-specific audience principals, and uses a supported Ask or Extract mode, build a minimal BCL package with its complete normalized configuration, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, unsupported modes or restricted audiences, deployment execution |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts and names, plus provider environment IDs and launch destinations | diagnostics, full resource inventories, source paths |
@@ -159,7 +161,7 @@ policy and must remain loopback-only. The plan writer accepts only Box and
 Salesforce selections; future providers remain unavailable until Dispatch can
 execute their public lifecycle safely.
 
-The Compare workspace is a separate read-only path. Every run resolves the two
+The comparison request itself is read-only. Every run resolves the two
 requested saved Box connection IDs independently, verifies each acting user and
 enterprise through the live API, and then reads the selected supported object type.
 It rejects a comparison when both connections resolve to the same enterprise.
@@ -174,10 +176,16 @@ path; direct folder, file, web-link, and unknown-item counts reveal structural
 differences without reading file bodies. The browser receives capture timestamps
 and sanitized identity data so
 the operator can distinguish live evidence from a saved connection-status
-snapshot. Source-only AI Studio custom agents with one Ask or Extract capability can enter a promotion workflow. The
-server reruns the live comparison at plan creation time, rejects selections whose
-status or mode changed, writes only the selected normalized definitions to a
-server-chosen BCL package, and selects the destination Box connection. The plan
+snapshot. The browser defaults the inventory to changed objects followed by objects
+missing from the destination, with explicit status and text filters. Portable changed or
+source-only metadata templates and source-only AI Studio custom agents with one Ask or Extract
+capability can enter a promotion workflow. Changed metadata templates are applied through
+Box's atomic schema-update operations, while source-only templates use schema creation.
+Changes that require field or option removal remain review-only until Dispatch has a safe
+removal policy. The server reruns the
+live comparison at plan creation time, rejects selections whose status or supported shape
+changed, writes only the selected normalized definitions to a server-chosen BCL package,
+and selects the destination Box connection. The plan
 then uses the existing validation and explicit deployment-confirmation boundary;
 plan creation itself does not change either Box enterprise. A later Git/BCL
 comparison can reuse these canonical schemas, but it is not part of the live API

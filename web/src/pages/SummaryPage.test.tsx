@@ -50,7 +50,6 @@ describe('SummaryPage', () => {
     const { container } = render(<SummaryPage plan={plan} connections={[]} run={run} onOpenProvider={vi.fn()} onViewChanges={vi.fn()} onOverview={vi.fn()} />)
 
     expect(screen.getByText('Northstar CLM needs attention')).toBeTruthy()
-    expect(screen.getByText('Deployment needs attention')).toBeTruthy()
     expect(screen.getByText(/Some components remain or require manual work/)).toBeTruthy()
     expect(container.querySelector('.summary-surface-attention')).toBeTruthy()
     expect(container.querySelector('box-status-icon.summary-status-icon[kind="warning"][label="Needs attention"]')).toBeTruthy()
@@ -65,7 +64,6 @@ describe('SummaryPage', () => {
     const { container } = render(<SummaryPage plan={plan} connections={[]} run={run} onOpenProvider={vi.fn()} onViewChanges={vi.fn()} onOverview={vi.fn()} />)
 
     expect(screen.getByText('Northstar CLM was recorded')).toBeTruthy()
-    expect(screen.getByText('Deployment recorded')).toBeTruthy()
     expect(container.querySelector('box-status-icon.summary-status-icon[kind="pending"][label="Recorded"]')).toBeTruthy()
     const facts = container.querySelector('box-fact-list') as HTMLElement & { rows: Array<{ label: string; value: string }> }
     expect(facts.rows).toContainEqual({ label: 'Status', value: 'Recorded' })

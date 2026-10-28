@@ -204,6 +204,48 @@ func TestAIAgentPromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
 	}
 }
 
+func TestMetadataTemplatePromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	template := boxdiff.MetadataTemplate{Key: "contracts", DisplayName: "Contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum"}}}
+	destination := boxdiff.MetadataTemplate{Key: "contracts", DisplayName: "Contract records", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum"}}}
+	comparison := boxdiff.Comparison{
+		Left:      boxdiff.Environment{ConnectionID: "left", EnterpriseID: "EID-source"},
+		Right:     boxdiff.Environment{ConnectionID: "right", EnterpriseID: "EID-destination"},
+		Templates: []boxdiff.MetadataTemplateDiff{{Key: template.Key, Status: "changed", Left: &template, Right: &destination}},
+	}
+	compareCalls := 0
+	var savedPlan config.SolutionPlan
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		BoxCompare: func(_ context.Context, left, right string) (boxdiff.Comparison, error) {
+			compareCalls++
+			if left != "left" || right != "right" {
+				t.Fatalf("connections = %q and %q", left, right)
+			}
+			return comparison, nil
+		},
+		MetadataPromotionAssembler: func(name string, got boxdiff.Comparison, templates []boxdiff.MetadataTemplate, _ time.Time) (config.SolutionPlan, error) {
+			if name != "Metadata promotion" || got.Left.EnterpriseID != "EID-source" || len(templates) != 1 || templates[0].Key != "contracts" {
+				t.Fatalf("promotion input = %q %#v %#v", name, got, templates)
+			}
+			return config.SolutionPlan{Name: name, TemplateID: metadataTemplatePromotionTemplateID, Template: "Metadata template promotion", Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/tmp/package"}, nil
+		},
+		PlanSaver: func(plan config.SolutionPlan) error { savedPlan = plan; return nil },
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/metadata-templates", strings.NewReader(`{"name":"Metadata promotion","leftConnectionId":"left","rightConnectionId":"right","templateKeys":["contracts"]}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	if compareCalls != 1 || settings.BoxSelectedConnectionID != "right" || savedPlan.TemplateID != metadataTemplatePromotionTemplateID {
+		t.Fatalf("calls=%d selected=%q plan=%#v", compareCalls, settings.BoxSelectedConnectionID, savedPlan)
+	}
+}
+
 func TestAIAgentPromotionRejectsAgentThatChangedSinceComparison(t *testing.T) {
 	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
 	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
@@ -1722,6 +1764,22 @@ func TestDeploymentDefaultsDeriveFromSavedPlanAndCanBeUpdated(t *testing.T) {
 	}
 	if saved.TemplateID != "lifesciences" || saved.Template != "Life Sciences" || saved.Repository != "https://example.test/lifesciences" || saved.Strategy != "create_new" || strings.Join(saved.Components, ",") != "box" {
 		t.Fatalf("saved defaults = %#v", saved)
+	}
+}
+
+func TestDeploymentDefaultsStartWithBoxOnly(t *testing.T) {
+	handler := NewHandlerWithOptions(ServerOptions{
+		PlanStore:     func() (config.SolutionPlan, error) { return config.SolutionPlan{}, nil },
+		DefaultsStore: func() (config.DeploymentDefaults, error) { return config.DeploymentDefaults{}, nil },
+		Templates: func() ([]packageTemplate, error) {
+			return []packageTemplate{{ID: "clm", Name: "Contract Lifecycle Management", repository: "https://example.test/clm"}}, nil
+		},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/defaults", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"components":["box"]`) {
+		t.Fatalf("get defaults = %d %s", response.Code, response.Body.String())
 	}
 }
 

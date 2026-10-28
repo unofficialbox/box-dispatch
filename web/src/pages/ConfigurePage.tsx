@@ -26,11 +26,11 @@ export function ConfigurePage({ plan, connections, notice, checkingConnections, 
   const selectedConnection = connections.find((connection) => connection.name === (selectedProviderID === 'box' ? 'Box' : 'Salesforce'))
   const selectedTitle = selectedProviderID === 'box' ? 'Box content' : 'Salesforce metadata'
   return <section className="configure-stage" aria-label="Configure deployment">
-    <header className="task-heading"><div><h2>Configure deployment</h2><p>Choose a strategy and the providers included in the prepared package.</p></div></header>
+    <header className="task-heading"><h2>Configure deployment</h2></header>
     <box-split-view className="configure-workspace" label="Deployment configuration and selected provider details" ratio={0.66}>
       <div slot="primary">
         <section className="strategy-section"><StrategyTileGroup value={plan.strategy} legend="Deployment strategy" onChange={onStrategyChange}/></section>
-        <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" description="Deploy the selected content model and workspace structure to Box." fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} refreshing={refreshing} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/>{salesforceIncluded && <ProviderConfiguration id="salesforce" title="Salesforce metadata" description="Deploy the selected objects, fields, layouts, and supported setup to Salesforce." fallback="Selected for this deployment" connection={connections.find((connection) => connection.name === 'Salesforce')} refreshing={refreshing} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/>}</div>
+        <div className="configuration-list"><ProviderConfiguration id="box" title="Box content" fallback="Required for every Dispatch solution" connection={connections.find((connection) => connection.name === 'Box')} refreshing={refreshing} included required selected={selectedProviderID === 'box'} onSelect={() => setSelectedProviderID('box')} onToggle={onToggleProvider}/>{salesforceIncluded && <ProviderConfiguration id="salesforce" title="Salesforce metadata" fallback="Selected for this deployment" connection={connections.find((connection) => connection.name === 'Salesforce')} refreshing={refreshing} included={salesforceIncluded} selected={selectedProviderID === 'salesforce'} onSelect={() => setSelectedProviderID('salesforce')} onToggle={onToggleProvider}/>}</div>
         <ComponentScope title={selectedTitle} included={selectedProviderID === 'box' || salesforceIncluded}/>
       </div>
       <DetailsRail title={`${selectedTitle} details`}><ProviderLogo provider={selectedProviderID} size="standard"/><DetailList rows={[["Connection", selectedConnection?.selection || selectedConnection?.authType || 'Not configured'], ['Status', refreshing ? 'Checking live status' : readinessLabel(Boolean(selectedConnection?.verified))], ['Scope', selectedProviderID === 'box' || salesforceIncluded ? 'Prepared package' : 'Provider excluded'], ['Strategy', plan.strategy === 'reuse' ? 'Reuse existing' : 'Create new']]}/></DetailsRail>
@@ -39,7 +39,7 @@ export function ConfigurePage({ plan, connections, notice, checkingConnections, 
   </section>
 }
 
-function ProviderConfiguration({ id, title, description, fallback, connection, refreshing, included, required = false, selected, onSelect, onToggle }: { id: ProviderID; title: string; description: string; fallback: string; connection?: ConnectionSummary; refreshing: boolean; included: boolean; required?: boolean; selected: boolean; onSelect: () => void; onToggle: (provider: ProviderID, included: boolean) => void }) {
+function ProviderConfiguration({ id, title, fallback, connection, refreshing, included, required = false, selected, onSelect, onToggle }: { id: ProviderID; title: string; fallback: string; connection?: ConnectionSummary; refreshing: boolean; included: boolean; required?: boolean; selected: boolean; onSelect: () => void; onToggle: (provider: ProviderID, included: boolean) => void }) {
   const ref = useRef<HTMLElementTagNameMap['box-switch']>(null)
   useEffect(() => {
     const switchElement = ref.current
@@ -51,7 +51,7 @@ function ProviderConfiguration({ id, title, description, fallback, connection, r
 
   const ready = Boolean(connection?.verified)
   const statusLabel = refreshing ? 'Checking' : ready ? 'Ready' : 'Needs attention'
-  const meta = `${description}\n${connectionDetailsText(connection, fallback)}`
+  const meta = connectionDetailsText(connection, fallback)
   const toggle = <box-switch ref={ref} checked={included} disabled={required} label={included ? 'Included' : 'Not included'} description={required ? 'Required' : 'Optional'}></box-switch>
   return <SelectableResourceRow className={`configuration-resource-row ${included ? 'included' : 'excluded'}`} label={title} meta={meta} value={id} selected={selected} icon={<ProviderLogo provider={id} size="standard"/>} status={<box-badge label={statusLabel} tone={refreshing ? 'info' : ready ? 'success' : 'error'}></box-badge>} actions={toggle} onSelect={onSelect}/>
 }

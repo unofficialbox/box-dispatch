@@ -72,6 +72,92 @@ func TestAssembleAIAgentPromotionWritesMinimalPackage(t *testing.T) {
 	}
 }
 
+func TestAssembleMetadataTemplatePromotionWritesMinimalPackage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	template := boxdiff.MetadataTemplate{
+		Key: "contracts", DisplayName: "Contracts", Hidden: true, CopyInstanceOnItemCopy: true,
+		Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Description: "Contract status", Hidden: true, Options: []string{"Draft", "Approved"}}},
+	}
+	comparison := boxdiff.Comparison{Left: boxdiff.Environment{EnterpriseID: "5105484"}, Right: boxdiff.Environment{EnterpriseID: "1509916197"}}
+	plan, err := assembleMetadataTemplatePromotion("Contract metadata", comparison, []boxdiff.MetadataTemplate{template}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TemplateID != metadataTemplatePromotionTemplateID || plan.Repository != "box://enterprise/5105484/metadata-templates" || plan.Strategy != solution.StrategyReuse {
+		t.Fatalf("plan = %#v", plan)
+	}
+	manifest, err := solution.Load(plan.PackagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Box.Capabilities) != 1 || manifest.Box.Capabilities[0].ComponentType != "Metadata Template" {
+		t.Fatalf("capabilities = %#v", manifest.Box.Capabilities)
+	}
+	configPath := filepath.Join(plan.PackagePath, "config", "box", "metadata-templates.bcl")
+	object, err := bcl.ConfigObject(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packaged []struct {
+		TemplateKey            string `json:"templateKey"`
+		Hidden                 bool   `json:"hidden"`
+		CopyInstanceOnItemCopy bool   `json:"copyInstanceOnItemCopy"`
+		Fields                 []struct {
+			Description string `json:"description"`
+			Hidden      bool   `json:"hidden"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(object["templates"], &packaged); err != nil {
+		t.Fatal(err)
+	}
+	if len(packaged) != 1 || packaged[0].TemplateKey != "contracts" || !packaged[0].Hidden || !packaged[0].CopyInstanceOnItemCopy || len(packaged[0].Fields) != 1 || packaged[0].Fields[0].Description != "Contract status" || !packaged[0].Fields[0].Hidden {
+		t.Fatalf("packaged templates = %s", object["templates"])
+	}
+}
+
+func TestSelectPromotionTemplatesAcceptsPortableChangedAndSourceOnlyTemplates(t *testing.T) {
+	changed := boxdiff.MetadataTemplate{Key: "contracts", DisplayName: "Contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum"}}}
+	added := boxdiff.MetadataTemplate{Key: "retention", DisplayName: "Retention", Fields: []boxdiff.MetadataTemplateField{{Key: "years", Type: "float"}}}
+	comparison := boxdiff.Comparison{Templates: []boxdiff.MetadataTemplateDiff{
+		{Key: changed.Key, Status: "changed", Left: &changed, Right: &changed},
+		{Key: added.Key, Status: "left_only", Left: &added},
+	}}
+	selected, err := selectPromotionTemplates(comparison, []string{"contracts", "retention"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 2 || selected[0].Key != "contracts" || selected[1].Key != "retention" {
+		t.Fatalf("selected templates = %#v", selected)
+	}
+}
+
+func TestSelectPromotionTemplatesRejectsEnterpriseSpecificTemplates(t *testing.T) {
+	for name, field := range map[string]boxdiff.MetadataTemplateField{
+		"taxonomy key":      {Key: "class", Type: "string", TaxonomyKey: "enterprise-specific"},
+		"selectable levels": {Key: "class", Type: "string", SelectableLevels: []int64{1, 2}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			taxonomy := boxdiff.MetadataTemplate{Key: "taxonomy", Fields: []boxdiff.MetadataTemplateField{field}}
+			comparison := boxdiff.Comparison{Templates: []boxdiff.MetadataTemplateDiff{
+				{Key: taxonomy.Key, Status: "left_only", Left: &taxonomy},
+			}}
+			if _, err := selectPromotionTemplates(comparison, []string{"taxonomy"}); err == nil {
+				t.Fatal("enterprise-specific metadata template was accepted")
+			}
+		})
+	}
+}
+
+func TestSelectPromotionTemplatesRejectsChangedTemplateThatRequiresDestructiveRemoval(t *testing.T) {
+	desired := boxdiff.MetadataTemplate{Key: "contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", Options: []string{"Draft"}}}}
+	current := boxdiff.MetadataTemplate{Key: "contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", Options: []string{"Draft", "Legacy"}}}}
+	comparison := boxdiff.Comparison{Templates: []boxdiff.MetadataTemplateDiff{{Key: desired.Key, Status: "changed", Left: &desired, Right: &current}}}
+	if _, err := selectPromotionTemplates(comparison, []string{"contracts"}); err == nil {
+		t.Fatal("destructive metadata template update was accepted")
+	}
+}
+
 func TestSelectPromotionAgentsRejectsUnsupportedMode(t *testing.T) {
 	agent := boxdiff.AIAgent{Key: "writer", Name: "Writer", Product: "AI Studio custom agent", Capabilities: []string{"Text generation"}}
 	comparison := boxdiff.AIAgentComparison{Agents: []boxdiff.AIAgentDiff{{Key: agent.Key, Product: agent.Product, Capabilities: agent.Capabilities, Status: "left_only", Left: &agent}}}

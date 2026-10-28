@@ -65,10 +65,42 @@ const promotableAIAgentComparison: BoxAIAgentComparison = {
   ],
 }
 
+const promotableMetadataComparison: BoxComparison = {
+  ...comparison,
+  summary: { equal: 1, changed: 1, leftOnly: 1, rightOnly: 1 },
+  templates: [
+    {
+      key: 'contracts', displayName: 'Contracts', status: 'changed',
+      changes: [{ path: 'fields.status.options', before: ['Draft', 'Approved'], after: ['Draft'] }],
+      left: { key: 'contracts', displayName: 'Contracts', hidden: false, copyInstanceOnItemCopy: false, fields: [{ key: 'status', type: 'enum', displayName: 'Status', hidden: false, options: ['Draft', 'Approved'] }] },
+      right: { key: 'contracts', displayName: 'Contract records', hidden: false, copyInstanceOnItemCopy: false, fields: [{ key: 'status', type: 'enum', displayName: 'State', hidden: false, options: ['Draft'] }] },
+    },
+    {
+      key: 'retention', displayName: 'Retention', status: 'left_only', changes: [],
+      left: { key: 'retention', displayName: 'Retention', hidden: false, copyInstanceOnItemCopy: true, fields: [{ key: 'years', type: 'float', displayName: 'Years', description: 'Retention term', hidden: false, options: [] }] },
+    },
+    {
+      key: 'vendor', displayName: 'Vendor', status: 'right_only', changes: [],
+      right: { key: 'vendor', displayName: 'Vendor', hidden: false, copyInstanceOnItemCopy: false, fields: [] },
+    },
+    {
+      key: 'equal', displayName: 'Equal', status: 'equal', changes: [],
+      left: { key: 'equal', displayName: 'Equal', hidden: false, copyInstanceOnItemCopy: false, fields: [] },
+      right: { key: 'equal', displayName: 'Equal', hidden: false, copyInstanceOnItemCopy: false, fields: [] },
+    },
+  ],
+}
+
 const preparedPlan: DeploymentPlan = {
   exists: true, name: 'AI agents to Sandbox', templateId: 'ai-agent-promotion', template: 'AI agent promotion',
   repository: 'box://enterprise/EID-prod/ai-agents', strategy: 'reuse',
   components: [{ id: 'box', name: 'Box', configured: true, verified: true, ready: true }],
+}
+
+const preparedMetadataPlan: DeploymentPlan = {
+  ...preparedPlan,
+  name: 'Metadata templates to Sandbox', templateId: 'metadata-template-promotion', template: 'Metadata template promotion',
+  repository: 'box://enterprise/EID-prod/metadata-templates',
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -83,6 +115,9 @@ describe('ComparePage', () => {
   it('runs an exact live comparison and renders a Box Open Elements diff', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(comparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const { container } = render(<ComparePage connections={connections}/>)
+    expect(screen.queryByText('Live environment inspection')).toBeNull()
+    expect(screen.queryByText('Comparison direction')).toBeNull()
+    expect(screen.queryByText(/Query two Box enterprises now/)).toBeNull()
     await waitFor(() => expect(container.querySelector('box-select[label="Source Box connection"]')?.getAttribute('value')).toBe('box-prod'))
     await waitFor(() => expect(container.querySelector('box-select[label="Destination Box connection"]')?.getAttribute('value')).toBe('box-test'))
 
@@ -96,7 +131,8 @@ describe('ComparePage', () => {
     expect(viewer.getAttribute('after-label')).toBe('Sandbox')
     expect(viewer.getAttribute('before-text')).toContain('"Draft"')
     expect(viewer.getAttribute('after-text')).toContain('"Approved"')
-    expect(screen.getByText('fields.status.options')).toBeTruthy()
+    expect(screen.queryByText('fields.status.options')).toBeNull()
+    expect(container.querySelector('box-icon-button[label="Add Contracts to deployment plan"]')).toBeNull()
   })
 
   it('switches to a bounded live folder comparison', async () => {
@@ -105,14 +141,13 @@ describe('ComparePage', () => {
     const typeSelect = container.querySelector('box-select[label="Box object type"]')!
     fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'folders' } }))
 
-    expect(screen.getByText(/All Files hierarchy to 4 levels/)).toBeTruthy()
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ method: 'POST' })))
     await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeTruthy())
     expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
-    expect(screen.getByText('items.files')).toBeTruthy()
-    expect(screen.getByText('/Contracts')).toBeTruthy()
+    expect(screen.queryByText('items.files')).toBeNull()
+    expect(container.querySelector('box-diff-viewer')?.getAttribute('before-text')).toContain('/Contracts')
   })
 
   it('compares live AI Studio custom agents without calling them Box Extract Agents', async () => {
@@ -121,15 +156,13 @@ describe('ComparePage', () => {
     const typeSelect = container.querySelector('box-select[label="Box object type"]')!
     fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'ai_agents' } }))
 
-    expect(screen.getByText(/does not inspect Box Automate Extract Agents/)).toBeTruthy()
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/ai-agents', expect.objectContaining({ method: 'POST' })))
     await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="contract-extractor.json"]')).toBeTruthy())
     expect(screen.getByRole('heading', { name: 'AI Studio custom agents' })).toBeTruthy()
-    expect(screen.getByText('configuration.extract.long_text.model')).toBeTruthy()
-    expect(screen.getByText('AI Studio custom agent')).toBeTruthy()
-    expect(screen.getByText('Extract')).toBeTruthy()
+    expect(screen.queryByText('configuration.extract.long_text.model')).toBeNull()
+    expect(container.querySelector('box-diff-viewer')?.getAttribute('before-text')).toContain('Extract')
   })
 
   it('prepares a deployment from supported source-only AI agents', async () => {
@@ -142,15 +175,13 @@ describe('ComparePage', () => {
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(container.querySelector('box-button[label="Prepare deployment"]')).toBeTruthy())
-    expect(screen.getByText('1 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
+    expect(screen.getByText('0 of 1 selected')).toBeTruthy()
+    expect(container.querySelector('box-button[label="Prepare deployment"]')?.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(container.querySelector('box-icon-button[icon="plus"][label="Add Legal Assistant to deployment plan"]')!)
+    expect(screen.getByText('1 of 1 selected')).toBeTruthy()
     const removeButton = container.querySelector('box-icon-button[icon="cart-1"][label="Remove Legal Assistant from deployment plan"]')
     expect(removeButton).toBeTruthy()
     expect(container.querySelector('box-button[label="Remove from plan"]')).toBeNull()
-    fireEvent.click(removeButton!)
-    expect(screen.getByText('0 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
-    expect(container.querySelector('box-button[label="Prepare deployment"]')?.hasAttribute('disabled')).toBe(true)
-    fireEvent.click(container.querySelector('box-button[label="Add to plan"]')!)
-    expect(screen.getByText('1 of 1 deployable agents selected for Sandbox.')).toBeTruthy()
     fireEvent.click(container.querySelector('box-button[label="Prepare deployment"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
@@ -159,5 +190,37 @@ describe('ComparePage', () => {
       name: 'AI agents to Sandbox', leftConnectionId: 'box-prod', rightConnectionId: 'box-test', agentKeys: ['legal assistant'],
     })
     await waitFor(() => expect(onPromotionPrepared).toHaveBeenCalledWith(preparedPlan))
+  })
+
+  it('focuses the list on changed and source-only templates and prepares selected templates for deployment', async () => {
+    const onPromotionPrepared = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(promotableMetadataComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(preparedMetadataPlan), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    const { container } = render(<ComparePage connections={connections} onPromotionPrepared={onPromotionPrepared}/>)
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+
+    await waitFor(() => expect(container.querySelector('box-icon-button[icon="plus"][label="Add Contracts to deployment plan"]')).toBeTruthy())
+    expect(container.querySelector('box-icon-button[icon="plus"][label="Add Retention to deployment plan"]')).toBeTruthy()
+    const table = container.querySelector('box-table[label="Metadata template comparison results"]') as HTMLElement & { rows: Array<{ id: string }> }
+    expect(table.rows.map((row) => row.id)).toEqual(['contracts', 'retention'])
+    expect(screen.getByText('Showing 2 of 4')).toBeTruthy()
+    expect(screen.getByText('0 of 2 selected')).toBeTruthy()
+
+    fireEvent.click(container.querySelector('box-icon-button[icon="plus"][label="Add Contracts to deployment plan"]')!)
+    expect(screen.getByText('1 of 2 selected')).toBeTruthy()
+
+    fireEvent(container.querySelector('box-text-field[label="Filter results"]')!, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'retention' } }))
+    await waitFor(() => expect(table.rows.map((row) => row.id)).toEqual(['retention']))
+    fireEvent.click(container.querySelector('box-icon-button[icon="plus"][label="Add Retention to deployment plan"]')!)
+    expect(screen.getByText('2 of 2 selected')).toBeTruthy()
+    fireEvent.click(container.querySelector('box-button[label="Prepare deployment"]')!)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/box/promotions/metadata-templates')
+    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({
+      name: 'Metadata templates to Sandbox', leftConnectionId: 'box-prod', rightConnectionId: 'box-test', templateKeys: ['contracts', 'retention'],
+    })
+    await waitFor(() => expect(onPromotionPrepared).toHaveBeenCalledWith(preparedMetadataPlan))
   })
 })

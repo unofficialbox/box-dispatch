@@ -346,13 +346,17 @@ type boxMetadataField struct {
 	Type        string   `json:"type"`
 	Key         string   `json:"key"`
 	DisplayName string   `json:"displayName"`
+	Description string   `json:"description,omitempty"`
+	Hidden      bool     `json:"hidden,omitempty"`
 	Options     []string `json:"options"`
 }
 
 type boxMetadataTemplate struct {
-	TemplateKey string             `json:"templateKey"`
-	DisplayName string             `json:"displayName"`
-	Fields      []boxMetadataField `json:"fields"`
+	TemplateKey            string             `json:"templateKey"`
+	DisplayName            string             `json:"displayName"`
+	Hidden                 bool               `json:"hidden,omitempty"`
+	CopyInstanceOnItemCopy bool               `json:"copyInstanceOnItemCopy,omitempty"`
+	Fields                 []boxMetadataField `json:"fields"`
 }
 
 func validateBox(root string, item Item, components []string, report Reporter) (Item, error) {
@@ -452,16 +456,20 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
 			report.component(component, ProgressRunning, "Inspecting the Box metadata template", componentIndex(components, component), len(components))
 		}
-		existingTemplates, templateErr := api.metadataTemplateDisplayNames(ctx)
+		existingTemplates, templateErr := api.metadataTemplates(ctx)
 		if templateErr != nil {
 			item.Status, item.Detail = StatusFailed, "Unable to inspect Box metadata templates: "+templateErr.Error()
 			return item, nil
 		}
 		for _, template := range templates {
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
-			present := existingTemplates[template.TemplateKey] == template.DisplayName
-			classifyBoxComponent(&item, component, present, !present)
-			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
+			current, found := existingTemplates[template.TemplateKey]
+			present, deployable, updateErr := metadataTemplateValidation(template, current, found)
+			if updateErr != nil {
+				report.step("Cannot update Box metadata template " + template.TemplateKey + ": " + updateErr.Error())
+			}
+			classifyBoxComponent(&item, component, present, deployable)
+			report.component(component, ProgressCompleted, validationResultMessage(present, deployable), componentIndex(components, component)+1, len(components))
 		}
 	}
 	if manifest.CapabilityEnabled("Sample Content", selection) {
@@ -536,11 +544,11 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			item.Detail += " The workspace was not found at the Box root; select a parent folder to check or deploy it."
 		}
 	}
-	reportValidationResults(report, components, item.Present, item.Missing)
+	reportValidationResults(report, components, item.Present, item.Missing, item.DeployableComponents)
 	return item, nil
 }
 
-func reportValidationResults(report Reporter, components, present, missing []string) {
+func reportValidationResults(report Reporter, components, present, missing, deployable []string) {
 	presentSet := make(map[string]bool, len(present))
 	for _, component := range present {
 		presentSet[component] = true
@@ -548,6 +556,10 @@ func reportValidationResults(report Reporter, components, present, missing []str
 	missingSet := make(map[string]bool, len(missing))
 	for _, component := range missing {
 		missingSet[component] = true
+	}
+	deployableSet := make(map[string]bool, len(deployable))
+	for _, component := range deployable {
+		deployableSet[component] = true
 	}
 	ordered := append([]string(nil), components...)
 	slices.Sort(ordered)
@@ -557,8 +569,10 @@ func reportValidationResults(report Reporter, components, present, missing []str
 		switch {
 		case presentSet[component]:
 			message = "Already present"
-		case missingSet[component]:
+		case deployableSet[component]:
 			message = "Ready to deploy"
+		case missingSet[component]:
+			message = "Manual review required"
 		}
 		report.component(component, ProgressCompleted, message, index+1, len(ordered))
 	}
@@ -580,6 +594,19 @@ func validationResultMessage(present, deployable bool) string {
 		return "Ready to deploy"
 	}
 	return "Manual review required"
+}
+
+func metadataTemplateValidation(desired, current boxMetadataTemplate, found bool) (present, deployable bool, err error) {
+	if !found {
+		return false, true, nil
+	}
+	if metadataTemplatesEqual(desired, current) {
+		return true, false, nil
+	}
+	if _, err := metadataTemplateUpdateOperations(desired, current); err != nil {
+		return false, false, err
+	}
+	return false, true, nil
 }
 
 func classifyBoxComponent(item *Item, component string, present, deployable bool) {
@@ -1180,7 +1207,7 @@ func validateSalesforce(root string, item Item, report Reporter) (Item, error) {
 		}
 	}
 	result := classifySalesforceInventory(item, expected, existing, settings.SalesforceAlias)
-	reportValidationResults(report, metadataComponents, result.Present, result.Missing)
+	reportValidationResults(report, metadataComponents, result.Present, result.Missing, result.DeployableComponents)
 	result = addSalesforcePackageResults(result, manifestContract.Salesforce.RequiredPackages, installedPackages, settings.SalesforceAlias)
 	return addSalesforcePermissionSetResults(result, manifestContract.Salesforce.RequiredPermissionSets, permissionInventory.Assigned, settings.SalesforceAlias), nil
 }

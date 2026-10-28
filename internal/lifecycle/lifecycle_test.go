@@ -15,7 +15,7 @@ func TestReportValidationResultsStreamsEveryComponentState(t *testing.T) {
 	updates := make([]ProgressUpdate, 0)
 	reportValidationResults(Reporter(func(update ProgressUpdate) {
 		updates = append(updates, update)
-	}), []string{"CustomField:Contract__c.Status__c", "CustomObject:Contract__c"}, []string{"CustomObject:Contract__c"}, []string{"CustomField:Contract__c.Status__c"})
+	}), []string{"CustomField:Contract__c.Status__c", "CustomObject:Contract__c"}, []string{"CustomObject:Contract__c"}, []string{"CustomField:Contract__c.Status__c"}, nil)
 
 	if len(updates) != 4 {
 		t.Fatalf("updates = %#v", updates)
@@ -27,6 +27,51 @@ func TestReportValidationResultsStreamsEveryComponentState(t *testing.T) {
 		if updates[index+1].Current != index/2+1 || updates[index+1].Total != 2 {
 			t.Fatalf("progress counters = %#v", updates[index+1])
 		}
+	}
+	if updates[1].Message != "Manual review required" || updates[3].Message != "Already present" {
+		t.Fatalf("component messages = %#v", []string{updates[1].Message, updates[3].Message})
+	}
+}
+
+func TestMetadataTemplateValidationRejectsIncompatibleUpdates(t *testing.T) {
+	desired := boxMetadataTemplate{
+		TemplateKey: "contracts",
+		Fields:      []boxMetadataField{{Type: "string", Key: "status"}},
+	}
+	current := boxMetadataTemplate{
+		TemplateKey: "contracts",
+		Fields: []boxMetadataField{
+			{Type: "string", Key: "status"},
+			{Type: "string", Key: "legacy"},
+		},
+	}
+	present, deployable, err := metadataTemplateValidation(desired, current, true)
+	if err == nil {
+		t.Fatal("incompatible metadata template update was accepted")
+	}
+	if present || deployable {
+		t.Fatalf("present = %v, deployable = %v, want both false", present, deployable)
+	}
+}
+
+func TestMetadataTemplateValidationAcceptsCompatibleUpdates(t *testing.T) {
+	desired := boxMetadataTemplate{
+		TemplateKey: "contracts",
+		Fields: []boxMetadataField{
+			{Type: "string", Key: "status", DisplayName: "Status"},
+			{Type: "string", Key: "owner", DisplayName: "Owner"},
+		},
+	}
+	current := boxMetadataTemplate{
+		TemplateKey: "contracts",
+		Fields:      []boxMetadataField{{Type: "string", Key: "status", DisplayName: "State"}},
+	}
+	present, deployable, err := metadataTemplateValidation(desired, current, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if present || !deployable {
+		t.Fatalf("present = %v, deployable = %v, want false and true", present, deployable)
 	}
 }
 

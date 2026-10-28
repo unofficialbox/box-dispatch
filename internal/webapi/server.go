@@ -36,37 +36,38 @@ type boxAIAgentComparison func(context.Context, string, string) (boxdiff.AIAgent
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
 type ServerOptions struct {
-	ContextFingerprint        validationContextReader
-	Profile                   string
-	DeploymentStore           deploymentStore
-	ConnectionStore           connectionStore
-	ConnectionSaver           connectionSaver
-	BoxCheck                  boxConnectionCheck
-	BoxCompare                boxComparison
-	BoxFolderCompare          boxFolderComparison
-	BoxAIAgentCompare         boxAIAgentComparison
-	AIAgentPromotionAssembler aiAgentPromotionAssembler
-	SalesforceTargets         salesforceTargetStore
-	SalesforceCheck           salesforceCheck
-	SalesforceDevHubCheck     salesforceDevHubCheck
-	SalesforceCreate          salesforceScratchCreate
-	SalesforcePackagePrepare  salesforcePackagePrepare
-	SalesforceOAuth           salesforceOAuthExchange
-	SalesforceRefresh         salesforceTokenRefresh
-	SalesforceScratchAccess   salesforceScratchAccess
-	SalesforceScratchOpen     salesforceScratchOpen
-	SalesforceExperiencePath  salesforceExperiencePath
-	BoxOAuth                  boxOAuthExchange
-	SalesforceCallbackReady   func() bool
-	BoxCallbackReady          func() bool
-	PlanStore                 planStore
-	PlanSaver                 planSaver
-	DefaultsStore             deploymentDefaultsStore
-	DefaultsSaver             deploymentDefaultsSaver
-	Templates                 templateStore
-	PackageAssembler          packageAssembler
-	Runs                      *runManager
-	Now                       func() time.Time
+	ContextFingerprint         validationContextReader
+	Profile                    string
+	DeploymentStore            deploymentStore
+	ConnectionStore            connectionStore
+	ConnectionSaver            connectionSaver
+	BoxCheck                   boxConnectionCheck
+	BoxCompare                 boxComparison
+	BoxFolderCompare           boxFolderComparison
+	BoxAIAgentCompare          boxAIAgentComparison
+	AIAgentPromotionAssembler  aiAgentPromotionAssembler
+	MetadataPromotionAssembler metadataTemplatePromotionAssembler
+	SalesforceTargets          salesforceTargetStore
+	SalesforceCheck            salesforceCheck
+	SalesforceDevHubCheck      salesforceDevHubCheck
+	SalesforceCreate           salesforceScratchCreate
+	SalesforcePackagePrepare   salesforcePackagePrepare
+	SalesforceOAuth            salesforceOAuthExchange
+	SalesforceRefresh          salesforceTokenRefresh
+	SalesforceScratchAccess    salesforceScratchAccess
+	SalesforceScratchOpen      salesforceScratchOpen
+	SalesforceExperiencePath   salesforceExperiencePath
+	BoxOAuth                   boxOAuthExchange
+	SalesforceCallbackReady    func() bool
+	BoxCallbackReady           func() bool
+	PlanStore                  planStore
+	PlanSaver                  planSaver
+	DefaultsStore              deploymentDefaultsStore
+	DefaultsSaver              deploymentDefaultsSaver
+	Templates                  templateStore
+	PackageAssembler           packageAssembler
+	Runs                       *runManager
+	Now                        func() time.Time
 }
 
 // NewHandler returns the API exposed to a local browser. Mount it only on a
@@ -101,6 +102,9 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.AIAgentPromotionAssembler == nil {
 		options.AIAgentPromotionAssembler = assembleAIAgentPromotion
+	}
+	if options.MetadataPromotionAssembler == nil {
+		options.MetadataPromotionAssembler = assembleMetadataTemplatePromotion
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -399,6 +403,72 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		if err := options.PlanSaver(plan); err != nil {
 			_ = saveReservedConnection(settings)
 			writeError(w, http.StatusInternalServerError, "could not save the AI agent promotion plan")
+			return
+		}
+		writeJSON(w, http.StatusCreated, presentPlan(plan, selected))
+	})
+	mux.HandleFunc("POST /api/box/promotions/metadata-templates", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input metadataTemplatePromotionRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "metadata template promotion must be one valid JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		release, err := options.Runs.beginContextMutation()
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		available := map[string]bool{}
+		for _, connection := range settings.HydrateBoxConnections().BoxConnections {
+			available[connection.ID] = true
+		}
+		if !available[input.LeftConnectionID] || !available[input.RightConnectionID] {
+			writeError(w, http.StatusBadRequest, "select two available Box connections")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		comparison, err := options.BoxCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		templates, err := selectPromotionTemplates(comparison, input.TemplateKeys)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		plan, err := options.MetadataPromotionAssembler(input.Name, comparison, templates, options.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not prepare the metadata template promotion package: "+err.Error())
+			return
+		}
+		selected, err := settings.SelectBoxConnection(input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := saveReservedConnection(selected); err != nil {
+			writeConnectionSaveError(w, err, "could not select the destination Box connection")
+			return
+		}
+		if err := options.PlanSaver(plan); err != nil {
+			_ = saveReservedConnection(settings)
+			writeError(w, http.StatusInternalServerError, "could not save the metadata template promotion plan")
 			return
 		}
 		writeJSON(w, http.StatusCreated, presentPlan(plan, selected))

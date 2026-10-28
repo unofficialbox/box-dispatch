@@ -90,8 +90,8 @@ test('follows the system color preference across primary pages', async ({ page }
     heading: getComputedStyle(document.querySelector('.overview-heading h1')!).color,
     token: getComputedStyle(document.documentElement).getPropertyValue('--boe-token-surface-surface').trim(),
   }))).toEqual({ page: 'rgb(18, 21, 19)', heading: 'rgb(244, 244, 244)', token: '#121513' })
-  await expect(page.locator('.overview-summary')).toHaveCSS('color', 'rgb(188, 188, 188)')
-  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
+  await expect(page.locator('.overview-heading h1')).toHaveCSS('color', 'rgb(244, 244, 244)')
+  await expectAccessible(page, ['.overview-heading h1'], ['color-contrast'])
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
@@ -117,7 +117,7 @@ test('follows the system color preference across primary pages', async ({ page }
   }))).toEqual({ page: 'rgb(255, 255, 255)', token: '#ffffff' })
   await page.getByRole('link', { name: 'Overview', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
-  await expectAccessible(page, ['.overview-summary'], ['color-contrast'])
+  await expectAccessible(page, ['.overview-heading h1'], ['color-contrast'])
 })
 
 test('configures, validates, and deploys against the mock backend', async ({ page }) => {
@@ -163,7 +163,6 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.locator('box-sidebar-toggle-button').getByRole('button', { name: 'Expand navigation' }).click()
   await expect(sidebar).not.toHaveAttribute('collapsed', '')
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
-  await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await expect(page.getByText(/\d+ saved/).first()).toBeVisible()
@@ -181,15 +180,12 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 
   const overviewGutter = await page.evaluate(() => {
-    const progress = document.querySelector('box-progress-bar')!.getBoundingClientRect()
     const providerRail = document.querySelector('.overview-secondary')!.getBoundingClientRect()
     const history = document.querySelector('.overview-history-table')!.getBoundingClientRect()
     return {
-      progressToDivider: providerRail.left - progress.right,
       historyToDivider: providerRail.left - history.right,
     }
   })
-  expect(overviewGutter.progressToDivider).toBeGreaterThanOrEqual(29)
   expect(overviewGutter.historyToDivider).toBeGreaterThanOrEqual(29)
 
   await page.getByRole('button', { name: 'New deployment' }).click()
@@ -244,6 +240,10 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     { provider: 'databricks', loaded: true },
     { provider: 'bedrock', loaded: true },
   ])
+  const salesforceSource = page.locator('box-switch[label="Salesforce"]')
+  await expect(salesforceSource).not.toHaveAttribute('checked')
+  await salesforceSource.evaluate((control) => control.dispatchEvent(new CustomEvent('checked-changed', { detail: { checked: true } })))
+  await expect(salesforceSource).toHaveAttribute('checked', '')
   await page.getByRole('textbox', { name: 'Name this deployment' }).fill('Northstar CLM rollout')
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
   await page.getByRole('button', { name: 'Prepare package' }).click()
@@ -411,7 +411,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout is ready' })).toBeVisible()
   await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('kind', 'done')
   await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('label', 'Complete')
-  await expect(page.getByText('Every selected system finished successfully. Open a destination to review the deployed experience.')).toBeVisible()
+  await expect(page.getByText('Every selected system finished successfully. Open a destination to review the deployed experience.')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Deployment targets' })).toBeVisible()
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('Enterprise ID EID-mock')).toBeVisible()
@@ -435,7 +435,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Provider summary' })).toBeVisible()
-  await expect(page.getByText('The immutable audit record for this run.')).toBeVisible()
+  await expect(page.getByText('The immutable audit record for this run.')).toHaveCount(0)
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
   await expect(page.getByText('Enterprise ID EID-mock')).toBeVisible()
   await expect(page.getByText('example.my.salesforce.com', { exact: true })).toBeVisible()
@@ -566,7 +566,7 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
   const defaults = page.locator('.defaults-settings')
 
   await expect(defaults.getByRole('heading', { name: 'Defaults' })).toBeVisible()
-  await expect(defaults.getByText('Starting configuration for new deployments. Each deployment can override these choices.')).toBeVisible()
+  await expect(defaults.getByText('Starting configuration for new deployments. Each deployment can override these choices.')).toHaveCount(0)
   await expect(defaults.getByText('Readiness')).toHaveCount(0)
   await expect(page.getByText('Package configuration')).toHaveCount(0)
   await expect(defaults.locator('box-select[label="Default solution"]')).toHaveCount(0)
