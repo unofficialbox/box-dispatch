@@ -64,6 +64,7 @@ The executable contains the compiled browser UI and starts both the UI and local
 
 ## Documentation
 
+- [Design philosophy and practices](design.md)
 - [Development and verification](docs/DEVELOPMENT.md)
 - [Command reference](docs/COMMAND_REFERENCE.md)
 - [Web application architecture](docs/WEB_APP_ARCHITECTURE.md)
