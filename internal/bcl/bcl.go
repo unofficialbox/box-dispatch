@@ -686,6 +686,12 @@ func renderHCLValue(value any, indent int) string {
 		return renderHCLMap(typed, indent)
 	case []any:
 		return renderHCLList(typed, indent)
+	case []string:
+		values := make([]any, len(typed))
+		for index, entry := range typed {
+			values[index] = entry
+		}
+		return renderHCLList(values, indent)
 	case string:
 		return strconv.Quote(typed)
 	case bool:
