@@ -27,8 +27,8 @@ import { watchLoginJob } from './loginPolling'
 import { scratchOrgRequest } from './scratchOrg'
 import { connectionsReadyForPlan, guardedWorkflowPhase, resumeWorkflowPhase } from './workflowResume'
 
-const fallbackPlan: DeploymentPlan = { exists: false, name: '', templateId: 'clm', template: 'CLM deployment', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: false, verified: false, ready: false }, { id: 'salesforce', name: 'Salesforce', configured: false, verified: false, ready: false }] }
-const fallbackDeploymentDefaults: DeploymentDefaults = { templateId: 'clm', template: 'Contract Lifecycle Management', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: ['box', 'salesforce'] }
+const fallbackPlan: DeploymentPlan = { exists: false, name: '', templateId: 'clm', template: 'CLM deployment', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: [{ id: 'box', name: 'Box', configured: false, verified: false, ready: false }] }
+const fallbackDeploymentDefaults: DeploymentDefaults = { templateId: 'clm', template: 'Contract Lifecycle Management', repository: 'https://github.com/unofficialbox/box-bedrock-for-clm', strategy: 'reuse', components: ['box'] }
 const fallbackTemplates: SolutionTemplate[] = [
   { id: 'clm', name: 'Contract Lifecycle Management', sector: 'Legal operations', description: 'Content-centric contract workflows with Box and intelligent agents.' },
   { id: 'lifesciences', name: 'Life Sciences', sector: 'Regulated content', description: 'Accelerate document-heavy life sciences processes and insight.' },
@@ -72,7 +72,7 @@ function App() {
   const [deploymentName, setDeploymentName] = useState('')
   const [templates, setTemplates] = useState<SolutionTemplate[]>(fallbackTemplates)
   const [selectedTemplateID, setSelectedTemplateID] = useState('clm')
-  const [selectedComponents, setSelectedComponents] = useState<string[]>(['box', 'salesforce'])
+  const [selectedComponents, setSelectedComponents] = useState<string[]>(['box'])
   const [assembling, setAssembling] = useState(false)
   const [run, setRun] = useState<DispatchRun | null>(null)
   const [streamNotice, setStreamNotice] = useState('')
@@ -777,7 +777,7 @@ function App() {
     setPlan(preparedPlan)
     setDeploymentName(preparedPlan.name)
     setActivePhase('Connect')
-    setNotice('AI agent promotion package prepared. Verify the destination connection, then review the deployment.')
+    setNotice('Promotion package prepared. Verify the destination connection, then review the deployment.')
     navigateTo('workflow')
   }
   const toggleSalesforce = () => setSelectedComponents((components) => components.includes('salesforce') ? ['box'] : ['box', 'salesforce'])

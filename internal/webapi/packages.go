@@ -213,7 +213,7 @@ func resolveDeploymentDefaults(defaults config.DeploymentDefaults, plan config.S
 				break
 			}
 		}
-		defaults = config.DeploymentDefaults{TemplateID: selected.ID, Template: selected.Name, Repository: selected.repository, Components: []string{"box", "salesforce"}, Strategy: solution.StrategyReuse}
+		defaults = config.DeploymentDefaults{TemplateID: selected.ID, Template: selected.Name, Repository: selected.repository, Components: []string{"box"}, Strategy: solution.StrategyReuse}
 	}
 	if selected, ok := packageTemplateByID(templates, defaults.TemplateID); ok {
 		defaults.Template = selected.Name

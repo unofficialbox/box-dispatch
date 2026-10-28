@@ -14,15 +14,65 @@ import (
 	"github.com/unofficialbox/box-dispatch/internal/solution"
 )
 
-const aiAgentPromotionTemplateID = "ai-agent-promotion"
+const (
+	aiAgentPromotionTemplateID          = "ai-agent-promotion"
+	metadataTemplatePromotionTemplateID = "metadata-template-promotion"
+)
 
 type aiAgentPromotionAssembler func(string, boxdiff.AIAgentComparison, []boxdiff.AIAgent, time.Time) (config.SolutionPlan, error)
+type metadataTemplatePromotionAssembler func(string, boxdiff.Comparison, []boxdiff.MetadataTemplate, time.Time) (config.SolutionPlan, error)
 
 type aiAgentPromotionRequest struct {
 	Name              string   `json:"name"`
 	LeftConnectionID  string   `json:"leftConnectionId"`
 	RightConnectionID string   `json:"rightConnectionId"`
 	AgentKeys         []string `json:"agentKeys"`
+}
+
+type metadataTemplatePromotionRequest struct {
+	Name              string   `json:"name"`
+	LeftConnectionID  string   `json:"leftConnectionId"`
+	RightConnectionID string   `json:"rightConnectionId"`
+	TemplateKeys      []string `json:"templateKeys"`
+}
+
+func (r metadataTemplatePromotionRequest) normalized() metadataTemplatePromotionRequest {
+	r.Name = normalizeDeploymentName(r.Name)
+	r.LeftConnectionID = strings.TrimSpace(r.LeftConnectionID)
+	r.RightConnectionID = strings.TrimSpace(r.RightConnectionID)
+	for index := range r.TemplateKeys {
+		r.TemplateKeys[index] = strings.TrimSpace(r.TemplateKeys[index])
+	}
+	return r
+}
+
+func (r metadataTemplatePromotionRequest) validate() error {
+	if r.Name == "" {
+		return fmt.Errorf("enter a deployment name")
+	}
+	if utf8.RuneCountInString(r.Name) > 80 {
+		return fmt.Errorf("deployment name must be 80 characters or fewer")
+	}
+	if r.LeftConnectionID == "" || r.RightConnectionID == "" {
+		return fmt.Errorf("select two saved Box connections")
+	}
+	if r.LeftConnectionID == r.RightConnectionID {
+		return fmt.Errorf("select two different Box connections")
+	}
+	if len(r.TemplateKeys) == 0 {
+		return fmt.Errorf("select at least one changed or source-only metadata template")
+	}
+	seen := map[string]bool{}
+	for _, key := range r.TemplateKeys {
+		if key == "" {
+			return fmt.Errorf("metadata template keys cannot be empty")
+		}
+		if seen[key] {
+			return fmt.Errorf("metadata template %q is selected more than once", key)
+		}
+		seen[key] = true
+	}
+	return nil
 }
 
 func (r aiAgentPromotionRequest) normalized() aiAgentPromotionRequest {
@@ -80,6 +130,69 @@ func selectPromotionAgents(comparison boxdiff.AIAgentComparison, keys []string) 
 		agents = append(agents, agent)
 	}
 	return agents, nil
+}
+
+func selectPromotionTemplates(comparison boxdiff.Comparison, keys []string) ([]boxdiff.MetadataTemplate, error) {
+	available := make(map[string]boxdiff.MetadataTemplate, len(comparison.Templates))
+	for _, diff := range comparison.Templates {
+		if supportedMetadataTemplateDiffPromotion(diff) {
+			available[diff.Key] = *diff.Left
+		}
+	}
+	templates := make([]boxdiff.MetadataTemplate, 0, len(keys))
+	for _, key := range keys {
+		template, ok := available[key]
+		if !ok {
+			return nil, fmt.Errorf("metadata template %q is no longer eligible for promotion; rerun the live comparison", key)
+		}
+		templates = append(templates, template)
+	}
+	return templates, nil
+}
+
+func supportedMetadataTemplateDiffPromotion(diff boxdiff.MetadataTemplateDiff) bool {
+	if diff.Left == nil || !supportedMetadataTemplatePromotion(*diff.Left) {
+		return false
+	}
+	if diff.Status == "left_only" {
+		return true
+	}
+	if diff.Status != "changed" || diff.Right == nil {
+		return false
+	}
+	desiredFields := make(map[string]boxdiff.MetadataTemplateField, len(diff.Left.Fields))
+	for _, field := range diff.Left.Fields {
+		desiredFields[field.Key] = field
+	}
+	for _, current := range diff.Right.Fields {
+		desired, ok := desiredFields[current.Key]
+		if !ok || desired.Type != current.Type {
+			return false
+		}
+		desiredOptions := make(map[string]bool, len(desired.Options))
+		for _, option := range desired.Options {
+			desiredOptions[option] = true
+		}
+		for _, option := range current.Options {
+			if !desiredOptions[option] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func supportedMetadataTemplatePromotion(template boxdiff.MetadataTemplate) bool {
+	for _, field := range template.Fields {
+		switch field.Type {
+		case "string", "float", "date", "enum", "multiSelect":
+		default:
+			// Taxonomy fields reference enterprise-specific objects and cannot be
+			// copied safely from one Box enterprise to another.
+			return false
+		}
+	}
+	return true
 }
 
 func supportedAIAgentPromotion(agent boxdiff.AIAgent) bool {
@@ -174,6 +287,82 @@ func assembleAIAgentPromotion(name string, comparison boxdiff.AIAgentComparison,
 	return config.SolutionPlan{
 		Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion",
 		Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/ai-agents",
+		Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: destination,
+	}, nil
+}
+
+func assembleMetadataTemplatePromotion(name string, comparison boxdiff.Comparison, templates []boxdiff.MetadataTemplate, now time.Time) (plan config.SolutionPlan, err error) {
+	stamp := now.UTC().Format("20060102-150405.000000000")
+	destination := filepath.Join(config.Paths().Root, ".box-dispatch", "web-packages", metadataTemplatePromotionTemplateID+"-"+stamp)
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return config.SolutionPlan{}, fmt.Errorf("create metadata template promotion package: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(destination)
+		}
+	}()
+
+	enabled := true
+	manifest := solution.Manifest{
+		SchemaVersion:    "1.0",
+		TemplateID:       metadataTemplatePromotionTemplateID,
+		DeploymentConfig: ".dispatch/deployment.bcl",
+		Box: solution.BoxManifest{
+			DeploymentDefaults: solution.DefaultDeploymentSettings().Box,
+			ComponentOrder:     []string{"Metadata Template"},
+			Capabilities: []solution.Capability{{
+				ID: "metadata_template", ComponentType: "Metadata Template", EnabledByDefault: &enabled,
+				API: "public", Handler: "box.metadata-template", Operations: []string{"validate", "deploy"},
+			}},
+		},
+	}
+	if err := solution.WriteManifest(destination, manifest); err != nil {
+		return config.SolutionPlan{}, err
+	}
+	if err := solution.WriteDeploymentSettings(destination, manifest.DeploymentConfig, solution.DefaultDeploymentSettings()); err != nil {
+		return config.SolutionPlan{}, err
+	}
+
+	payload := make([]any, 0, len(templates))
+	for _, template := range templates {
+		fields := make([]any, 0, len(template.Fields))
+		for _, field := range template.Fields {
+			fields = append(fields, map[string]any{
+				"type": field.Type, "key": field.Key, "displayName": field.DisplayName,
+				"description": field.Description, "hidden": field.Hidden, "options": field.Options,
+			})
+		}
+		payload = append(payload, map[string]any{
+			"templateKey": template.Key, "displayName": template.DisplayName,
+			"hidden": template.Hidden, "copyInstanceOnItemCopy": template.CopyInstanceOnItemCopy,
+			"fields": fields,
+		})
+	}
+	doc := bcl.NewDocument(metadataTemplatePromotionTemplateID, "generic", "box-metadata-template-promotion", now.UTC().Format(time.RFC3339), map[string]any{
+		"sourceEnterpriseId":      comparison.Left.EnterpriseID,
+		"destinationEnterpriseId": comparison.Right.EnterpriseID,
+	})
+	doc.Resources = []bcl.BCLResource{{
+		Name: "config_box_metadata-templates", Type: "config_file", TerraformType: "null_resource", Provider: "generic",
+		Config: map[string]any{
+			"artifact_name": "metadata-templates", "artifact_type": "config", "provider": "generic",
+			"provider_object_id": "box/metadata-templates", "enterprise_id": comparison.Left.EnterpriseID,
+			"created_at": now.UTC().Format(time.RFC3339), "templates": payload,
+		},
+		Metadata: map[string]any{
+			"artifactName": "metadata-templates", "artifactType": "config_file", "provider": "generic",
+			"providerObjectId": "box/metadata-templates", "enterpriseId": comparison.Left.EnterpriseID,
+			"scenario": metadataTemplatePromotionTemplateID, "createdAt": now.UTC().Format(time.RFC3339),
+		},
+	}}
+	if err := bcl.WriteBCL(filepath.Join(destination, "config", "box", "metadata-templates.bcl"), doc); err != nil {
+		return config.SolutionPlan{}, err
+	}
+
+	return config.SolutionPlan{
+		Name: name, TemplateID: metadataTemplatePromotionTemplateID, Template: "Metadata template promotion",
+		Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/metadata-templates",
 		Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: destination,
 	}, nil
 }

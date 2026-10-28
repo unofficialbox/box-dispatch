@@ -31,7 +31,7 @@ type MockOptions struct {
 func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 	var mu sync.Mutex
 	plan := config.SolutionPlan{}
-	defaults := config.DeploymentDefaults{TemplateID: "clm", Template: "Contract Lifecycle Management", Repository: "https://github.com/unofficialbox/box-bedrock-for-clm", Strategy: "reuse", Components: []string{"box", "salesforce"}}
+	defaults := config.DeploymentDefaults{TemplateID: "clm", Template: "Contract Lifecycle Management", Repository: "https://github.com/unofficialbox/box-bedrock-for-clm", Strategy: "reuse", Components: []string{"box"}}
 	settings := mockConnectionSettings()
 	deployments := []audit.DeploymentRecord{}
 	validate := func(ctx context.Context, plan config.SolutionPlan, _ []lifecycle.Item, emit func(string, lifecycle.ProgressUpdate)) ([]lifecycle.Item, error) {
@@ -185,14 +185,14 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			leftSnapshot := boxdiff.Snapshot{
 				Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
 				Templates: []boxdiff.MetadataTemplate{
-					{Key: "contracts", DisplayName: "Contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Options: []string{"Draft", "Approved"}}}},
-					{Key: "retention", DisplayName: "Retention", Fields: []boxdiff.MetadataTemplateField{{Key: "years", Type: "integer", DisplayName: "Years"}}},
+					{Key: "contracts", DisplayName: "Contracts", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Options: []string{"Draft", "Review", "Approved"}}}},
+					{Key: "retention", DisplayName: "Retention", Fields: []boxdiff.MetadataTemplateField{{Key: "years", Type: "float", DisplayName: "Years"}}},
 				},
 			}
 			rightSnapshot := boxdiff.Snapshot{
 				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
 				Templates: []boxdiff.MetadataTemplate{
-					{Key: "contracts", DisplayName: "Contract records", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "Status", Options: []string{"Draft", "Review", "Approved"}}}},
+					{Key: "contracts", DisplayName: "Contract records", Fields: []boxdiff.MetadataTemplateField{{Key: "status", Type: "enum", DisplayName: "State", Options: []string{"Draft", "Approved"}}}},
 					{Key: "vendor", DisplayName: "Vendors", Fields: []boxdiff.MetadataTemplateField{{Key: "risk", Type: "enum", DisplayName: "Risk", Options: []string{"Low", "High"}}}},
 				},
 			}
@@ -244,6 +244,16 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				Name: name, TemplateID: aiAgentPromotionTemplateID, Template: "AI agent promotion",
 				Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/ai-agents",
 				Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/mock/ai-agent-promotion",
+			}, nil
+		},
+		MetadataPromotionAssembler: func(name string, comparison boxdiff.Comparison, templates []boxdiff.MetadataTemplate, _ time.Time) (config.SolutionPlan, error) {
+			if len(templates) == 0 {
+				return config.SolutionPlan{}, errors.New("select at least one metadata template")
+			}
+			return config.SolutionPlan{
+				Name: name, TemplateID: metadataTemplatePromotionTemplateID, Template: "Metadata template promotion",
+				Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/metadata-templates",
+				Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/mock/metadata-template-promotion",
 			}, nil
 		},
 		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {

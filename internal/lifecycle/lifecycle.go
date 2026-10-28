@@ -346,13 +346,17 @@ type boxMetadataField struct {
 	Type        string   `json:"type"`
 	Key         string   `json:"key"`
 	DisplayName string   `json:"displayName"`
+	Description string   `json:"description,omitempty"`
+	Hidden      bool     `json:"hidden,omitempty"`
 	Options     []string `json:"options"`
 }
 
 type boxMetadataTemplate struct {
-	TemplateKey string             `json:"templateKey"`
-	DisplayName string             `json:"displayName"`
-	Fields      []boxMetadataField `json:"fields"`
+	TemplateKey            string             `json:"templateKey"`
+	DisplayName            string             `json:"displayName"`
+	Hidden                 bool               `json:"hidden,omitempty"`
+	CopyInstanceOnItemCopy bool               `json:"copyInstanceOnItemCopy,omitempty"`
+	Fields                 []boxMetadataField `json:"fields"`
 }
 
 func validateBox(root string, item Item, components []string, report Reporter) (Item, error) {
@@ -452,14 +456,15 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
 			report.component(component, ProgressRunning, "Inspecting the Box metadata template", componentIndex(components, component), len(components))
 		}
-		existingTemplates, templateErr := api.metadataTemplateDisplayNames(ctx)
+		existingTemplates, templateErr := api.metadataTemplates(ctx)
 		if templateErr != nil {
 			item.Status, item.Detail = StatusFailed, "Unable to inspect Box metadata templates: "+templateErr.Error()
 			return item, nil
 		}
 		for _, template := range templates {
 			component := "Metadata Template:" + firstNonEmpty(template.DisplayName, template.TemplateKey)
-			present := existingTemplates[template.TemplateKey] == template.DisplayName
+			current, found := existingTemplates[template.TemplateKey]
+			present := found && metadataTemplatesEqual(template, current)
 			classifyBoxComponent(&item, component, present, !present)
 			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
 		}

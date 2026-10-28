@@ -26,7 +26,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('acme.app.box.com')).toBeTruthy()
     expect(screen.getByText('example.scratch.my.salesforce.com')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Defaults' })).toBeTruthy()
-    expect(screen.getByText('Starting configuration for new deployments. Each deployment can override these choices.')).toBeTruthy()
+    expect(screen.queryByText('Starting configuration for new deployments. Each deployment can override these choices.')).toBeNull()
     const solutions = container.querySelector<HTMLElement & { options: Array<{ id: string; disabled?: boolean; status?: { label: string } }> }>('box-tile-group.settings-default-solution-list')!
     expect(solutions.getAttribute('value')).toBe('clm')
     expect(solutions.options.every((option) => option.disabled)).toBe(true)

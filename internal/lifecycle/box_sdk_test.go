@@ -242,3 +242,117 @@ func TestApplyMetadataTemplateRenamesExistingTemplate(t *testing.T) {
 		t.Fatalf("requests = %d, want get and update", requests)
 	}
 }
+
+func TestApplyMetadataTemplateUpdatesFieldsAndOptionsAtomically(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/metadata_templates/enterprise":
+			_, _ = io.WriteString(w, `{"entries":[{"type":"metadata_template","templateKey":"contracts","displayName":"Contract records","hidden":false,"copyInstanceOnItemCopy":false,"fields":[{"type":"enum","key":"status","displayName":"State","description":"Old status","hidden":false,"options":[{"key":"Draft"}]}]}]}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/metadata_templates/enterprise/contracts/schema":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded := string(body)
+			for _, want := range []string{
+				`"op":"editTemplate"`, `"displayName":"Contracts"`, `"copyInstanceOnItemCopy":true`,
+				`"op":"addField"`, `"fieldKey":"owner"`, `"type":"string"`,
+				`"op":"editField"`, `"fieldKey":"status"`, `"description":"Contract status"`,
+				`"op":"addEnumOption"`, `"key":"Approved"`,
+				`"op":"reorderEnumOptions"`, `"enumOptionKeys":["Draft","Approved"]`,
+				`"op":"reorderFields"`, `"fieldKeys":["owner","status"]`,
+			} {
+				if !strings.Contains(encoded, want) {
+					t.Fatalf("update body %s does not include %s", encoded, want)
+				}
+			}
+			_, _ = io.WriteString(w, `{"type":"metadata_template","templateKey":"contracts","displayName":"Contracts"}`)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	sdk := &boxSDK{client: boxclient.NewClient(
+		auth.DeveloperToken("access-token"),
+		gantryruntime.WithBaseURL("api", server.URL),
+		gantryruntime.WithHTTPClient(server.Client()),
+	)}
+	err := sdk.applyMetadataTemplate(context.Background(), boxMetadataTemplate{
+		TemplateKey: "contracts", DisplayName: "Contracts", Hidden: true, CopyInstanceOnItemCopy: true,
+		Fields: []boxMetadataField{
+			{Type: "string", Key: "owner", DisplayName: "Owner"},
+			{Type: "enum", Key: "status", DisplayName: "Status", Description: "Contract status", Hidden: true, Options: []string{"Draft", "Approved"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want get and one atomic update", requests)
+	}
+}
+
+func TestMetadataTemplateUpdateOperationsRejectsDestructiveChanges(t *testing.T) {
+	desired := boxMetadataTemplate{
+		TemplateKey: "contracts", DisplayName: "Contracts",
+		Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "Status", Options: []string{"Draft"}}},
+	}
+	for name, current := range map[string]boxMetadataTemplate{
+		"field removal": {
+			TemplateKey: "contracts", DisplayName: "Contracts",
+			Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "Status", Options: []string{"Draft"}}, {Type: "string", Key: "legacy", DisplayName: "Legacy"}},
+		},
+		"option removal": {
+			TemplateKey: "contracts", DisplayName: "Contracts",
+			Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "Status", Options: []string{"Draft", "Legacy"}}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := metadataTemplateUpdateOperations(desired, current); err == nil {
+				t.Fatal("destructive metadata template change was accepted")
+			}
+		})
+	}
+}
+
+func TestApplyMetadataTemplateCreatesPortableSchemaWithoutDroppingPresentation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/metadata_templates/enterprise":
+			_, _ = io.WriteString(w, `{"entries":[]}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/metadata_templates/schema":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded := string(body)
+			for _, want := range []string{`"templateKey":"contracts"`, `"hidden":true`, `"copyInstanceOnItemCopy":true`, `"description":"Contract status"`, `"options":[{"key":"Draft"}]`} {
+				if !strings.Contains(encoded, want) {
+					t.Fatalf("create body %s does not include %s", encoded, want)
+				}
+			}
+			_, _ = io.WriteString(w, `{"type":"metadata_template","templateKey":"contracts","displayName":"Contracts"}`)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	sdk := &boxSDK{client: boxclient.NewClient(
+		auth.DeveloperToken("access-token"),
+		gantryruntime.WithBaseURL("api", server.URL),
+		gantryruntime.WithHTTPClient(server.Client()),
+	)}
+	err := sdk.applyMetadataTemplate(context.Background(), boxMetadataTemplate{
+		TemplateKey: "contracts", DisplayName: "Contracts", Hidden: true, CopyInstanceOnItemCopy: true,
+		Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "Status", Description: "Contract status", Hidden: true, Options: []string{"Draft"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

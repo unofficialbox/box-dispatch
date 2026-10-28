@@ -41,9 +41,9 @@ function HistoricalDeploymentDetail({ detail, onBack, onOpenDestination, onViewC
   const componentRows: TableRow[] = deployedComponents.map(({ provider, component }) => ({ id: `${provider}-${component}`, cells: { system: displayProvider(provider), component, result: { kind: 'badge', text: 'Deployed', tone: 'success' } } }))
   return <section className="record-page history-detail-page" aria-labelledby="history-detail-title">
     <box-link-button className="history-back-link" href="#history" label="Back to deployment history" onClick={onBack}></box-link-button>
-    <header className="record-page-heading history-detail-heading"><div><p className="overview-eyebrow">Historical deployment</p><h1 id="history-detail-title">{detail.name || detail.id}</h1><p>Read-only results captured when this deployment finished.</p></div><box-badge label={outcome.label} tone={outcome.tone}></box-badge></header>
+    <header className="record-page-heading history-detail-heading"><h1 id="history-detail-title">{detail.name || detail.id}</h1><box-badge label={outcome.label} tone={outcome.tone}></box-badge></header>
     <div className="history-detail-layout">
-      <box-section className="history-provider-summary" heading="Provider summary" description="Recorded configuration results for each deployed system.">
+      <box-section className="history-provider-summary" heading="Provider summary">
         <div slot="actions" className="history-environment-actions" role="group" aria-label="Deployment actions">{detail.changesRecorded ? <box-button label="Review changes" tone="neutral" onClick={() => onViewChanges(detail.id)}></box-button> : <span className="history-change-unavailable">Change preview not recorded</span>}</div>
         <div className="history-provider-cards">{detail.providers.map((provider) => {
           const providerOutcome = deploymentOutcome({ ...detail, providers: [provider] })
@@ -52,9 +52,9 @@ function HistoricalDeploymentDetail({ detail, onBack, onOpenDestination, onViewC
           const environmentIDLabel = provider.name.toLowerCase() === 'box' ? 'Enterprise ID' : 'Org ID'
           return <box-card className="history-provider-card" key={provider.name}><section><header><div className="history-provider-identity"><strong>{providerName}</strong>{provider.environmentDomain ? <span>{provider.environmentDomain}</span> : null}{provider.environmentId ? <small>{environmentIDLabel} {provider.environmentId}</small> : null}</div><div className="history-provider-heading-actions">{provider.launchUrl ? <box-button label={openLabel} tone="neutral" onClick={() => onOpenDestination(provider.launchUrl!, openLabel)}></box-button> : null}<box-badge label={providerOutcome.label} tone={providerOutcome.tone}></box-badge></div></header><box-fact-list rows={[{ label: 'Deployed', value: String(provider.deployedCount) }, { label: 'Present', value: String(provider.presentCount) }, { label: 'Remaining', value: String(provider.remainingCount) }, { label: 'Manual', value: String(provider.manualItemCount) }]}></box-fact-list></section></box-card>
         })}</div>
-        <box-section className="history-components" heading="Deployment details" description="Individual components added or updated by this deployment."><span slot="actions">{deployedComponents.length} deployed</span><BoeTable className="deployment-component-table" columns={componentColumns} rows={componentRows} label="Components deployed by this deployment" emptyText="No component changes were recorded for this deployment."/></box-section>
+        <box-section className="history-components" heading="Deployment details"><span slot="actions">{deployedComponents.length} deployed</span><BoeTable className="deployment-component-table" columns={componentColumns} rows={componentRows} label="Components deployed by this deployment" emptyText="No component changes were recorded for this deployment."/></box-section>
       </box-section>
-      <DetailsRail title="Deployment summary" description="The immutable audit record for this run."><DetailList rows={[["Deployment ID", detail.id], ["Run ID", detail.runId || 'Not recorded'], ["Systems", systems], ["Strategy", displayStrategy(detail.strategy)], ["Started", formatDeploymentDate(detail.startedAt)], ["Completed", formatDeploymentDate(detail.completedAt)], ["Duration", detail.duration || 'Not recorded']]}/></DetailsRail>
+      <DetailsRail title="Deployment summary"><DetailList rows={[["Deployment ID", detail.id], ["Run ID", detail.runId || 'Not recorded'], ["Systems", systems], ["Strategy", displayStrategy(detail.strategy)], ["Started", formatDeploymentDate(detail.startedAt)], ["Completed", formatDeploymentDate(detail.completedAt)], ["Duration", detail.duration || 'Not recorded']]}/></DetailsRail>
     </div>
   </section>
 }
@@ -106,13 +106,13 @@ export function HistoryPage({ deployments, selectedDeploymentID = null, onCloseD
     setStrategyFilter('all')
   }
   return <section className="record-page history-page" aria-labelledby="history-title">
-    <header className="record-page-heading"><div><p className="overview-eyebrow">Audit records</p><h1 id="history-title">Deployment history</h1><p>Review every recorded deployment and its provider outcome.</p></div></header>
+    <header className="record-page-heading"><h1 id="history-title">Deployment history</h1></header>
     <section className="record-page-metrics" aria-label="History summary">
-      <box-metric-card heading="Total deployments" value={String(deployments.length)} message="Recorded audit entries"></box-metric-card>
-      <box-metric-card heading="Complete" value={String(complete)} message="Finished successfully"></box-metric-card>
-      <box-metric-card heading="Needs attention" value={String(attention)} message="Review provider results"></box-metric-card>
+      <box-metric-card heading="Total deployments" value={String(deployments.length)}></box-metric-card>
+      <box-metric-card heading="Complete" value={String(complete)}></box-metric-card>
+      <box-metric-card heading="Needs attention" value={String(attention)}></box-metric-card>
     </section>
-    <section className="record-page-section" aria-labelledby="all-deployments-title"><header><div><h2 id="all-deployments-title">All deployments</h2><p>Filter the audit trail, then open any deployment for its recorded summary.</p></div><span>{filteredDeployments.length === deployments.length ? `${deployments.length} recorded` : `Showing ${filteredDeployments.length} of ${deployments.length}`}</span></header>
+    <section className="record-page-section" aria-labelledby="all-deployments-title"><header><h2 id="all-deployments-title">All deployments</h2><span>{filteredDeployments.length === deployments.length ? `${deployments.length} recorded` : `Showing ${filteredDeployments.length} of ${deployments.length}`}</span></header>
       <fieldset className="history-filters"><legend className="visually-hidden">Filter deployment history</legend><SearchFieldControl label="Search" value={query} placeholder="Name or deployment ID" onChange={setQuery}/><Select label="System" value={providerFilter} options={[{ label: 'All systems', value: 'all' }, ...providerOptions.map((provider) => ({ label: displayProvider(provider), value: provider }))]} onValueChanged={(event) => setProviderFilter(event.detail.value)}/><Select label="Result" value={resultFilter} options={[{ label: 'All results', value: 'all' }, { label: 'Complete', value: 'complete' }, { label: 'Needs attention', value: 'attention' }, { label: 'Recorded', value: 'recorded' }]} onValueChanged={(event) => setResultFilter(event.detail.value as ResultFilter)}/><Select label="Strategy" value={strategyFilter} options={[{ label: 'All strategies', value: 'all' }, { label: 'Reuse existing', value: 'reuse' }, { label: 'Create new', value: 'create_new' }]} onValueChanged={(event) => setStrategyFilter(event.detail.value)}/><box-button className="history-clear-filters" label="Clear filters" tone="neutral" disabled={!filtersActive} onClick={clearFilters}></box-button></fieldset>
       <DeploymentHistoryTable deployments={filteredDeployments} caption="All deployments" includeResult emptyMessage={filtersActive ? 'No deployments match these filters.' : undefined}/>
     </section>

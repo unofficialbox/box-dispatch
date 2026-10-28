@@ -29,11 +29,11 @@ describe('OverviewPage', () => {
   it('does not present healthy connections as an existing deployment plan', () => {
     const { container } = render(<OverviewPage plan={plan} connections={connections} deployments={[]} run={null} onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()} />)
 
-    expect(screen.getByText('Choose a solution to start a deployment.')).toBeTruthy()
+    expect(screen.queryByText('Choose a solution to start a deployment.')).toBeNull()
     expect(container.querySelector('box-metric-card[heading="Active deployment"]')?.getAttribute('value')).toBe('Not started')
     expect(container.querySelector('box-metric-card[heading="Latest deployment"]')?.getAttribute('value')).toBe('No runs')
-    expect(screen.getByText('Choose a solution')).toBeTruthy()
-    expect(container.querySelector('box-metric-card[heading="Active deployment"]')?.getAttribute('message')).toBe('Choose a solution')
+    expect(container.querySelector('.overview-current')).toBeNull()
+    expect(container.querySelector('box-metric-card[heading="Active deployment"]')?.hasAttribute('message')).toBe(false)
     expect(screen.queryByText('CLM deployment')).toBeNull()
     expect(screen.queryByText('Your deployment plan and connections are ready.')).toBeNull()
     expect(container.querySelector('.overview-current [data-provider-logo]')).toBeNull()
@@ -69,29 +69,23 @@ describe('OverviewPage', () => {
   })
 
   it('moves a completed deployment out of the active deployment state', () => {
-    const onViewHistory = vi.fn()
     const { container } = render(<OverviewPage
       plan={{ ...plan, exists: true, name: 'Experience Cloud E2E' }}
       connections={connections}
       deployments={[]}
       run={{ id: 'deploy-complete', deployment: 'Experience Cloud E2E', action: 'deploy', status: 'completed', providers: [{ name: 'box', status: 'present', remainingCount: 0, manualItemCount: 0 }, { name: 'salesforce', status: 'present', remainingCount: 0, manualItemCount: 0 }] }}
-      onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={onViewHistory}
+      onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()}
     />)
 
-    expect(within(container).getByText('No deployment in progress')).toBeTruthy()
+    expect(container.querySelector('.overview-current')).toBeNull()
     expect(within(container).queryByText('Saved deployment')).toBeNull()
     expect(container.querySelector('box-button[label="Continue deployment"]')).toBeNull()
     const activeMetric = container.querySelector<HTMLElement>('.overview-metric:first-child')!
     expect(activeMetric.getAttribute('heading')).toBe('Active deployment')
     expect(activeMetric.getAttribute('value')).toBe('None')
-    const currentDeployment = container.querySelector<HTMLElement>('.overview-current')!
-    expect(currentDeployment.querySelector('box-badge[label="Complete"]')).toBeNull()
-    expect(currentDeployment.textContent).toContain('The latest deployment, Experience Cloud E2E, completed successfully and is available in history.')
     const latestMetric = container.querySelector<HTMLElement>('.overview-metric:last-child')!
     expect(latestMetric.getAttribute('heading')).toBe('Latest deployment')
-    const historyButton = container.querySelector<HTMLElement>('box-button[label="View history"]')
-    fireEvent.click(historyButton!)
-    expect(onViewHistory).toHaveBeenCalledOnce()
+    expect(container.querySelector('box-button[label="View history"]')).toBeNull()
   })
 
   it('keeps a deployment with unfinished work active and reports the latest outcome accurately', () => {
@@ -121,8 +115,7 @@ describe('OverviewPage', () => {
       onNewDeployment={vi.fn()} onContinue={vi.fn()} onBoxConnection={vi.fn()} onSalesforceConnection={vi.fn()} onOpenProvider={vi.fn()} onViewHistory={vi.fn()}
     />)
 
-    expect(within(container).getByText('No deployment is currently in progress.')).toBeTruthy()
-    expect(within(container).getByText('No deployment in progress')).toBeTruthy()
+    expect(container.querySelector('.overview-current')).toBeNull()
     expect(container.querySelector('box-button[label="Continue deployment"]')).toBeNull()
     expect(container.querySelector<HTMLElement>('.overview-metric:first-child')?.getAttribute('value')).toBe('None')
   })

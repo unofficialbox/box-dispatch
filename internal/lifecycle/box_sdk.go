@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ type boxAPI interface {
 	uploadFile(context.Context, string, string) (string, error)
 	// uploadFileVersion replaces an existing same-named file with a new version.
 	uploadFileVersion(context.Context, string, string) (string, error)
-	metadataTemplateDisplayNames(context.Context) (map[string]string, error)
+	metadataTemplates(context.Context) (map[string]boxMetadataTemplate, error)
 	applyMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
 	createDocgenTemplate(context.Context, string) error
@@ -270,32 +271,50 @@ func resolveUploadedFileID(ctx context.Context, files *schemas.Files, name strin
 	return "", fmt.Errorf("%w; follow-up lookup did not find the uploaded file", responseErr)
 }
 
-func (sdk *boxSDK) metadataTemplateDisplayNames(ctx context.Context) (map[string]string, error) {
-	templates := map[string]string{}
+func (sdk *boxSDK) metadataTemplates(ctx context.Context) (map[string]boxMetadataTemplate, error) {
+	templates := map[string]boxMetadataTemplate{}
 	for template, err := range sdk.client.MetadataTemplates.ListEnterprise(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
 		if template.TemplateKey != nil {
-			templates[*template.TemplateKey] = firstNonEmpty(pointerString(template.DisplayName), *template.TemplateKey)
+			normalized := boxMetadataTemplate{
+				TemplateKey:            *template.TemplateKey,
+				DisplayName:            firstNonEmpty(pointerString(template.DisplayName), *template.TemplateKey),
+				Hidden:                 boolValue(template.Hidden),
+				CopyInstanceOnItemCopy: boolValue(template.CopyInstanceOnItemCopy),
+				Fields:                 make([]boxMetadataField, 0, len(template.Fields)),
+			}
+			for _, field := range template.Fields {
+				options := make([]string, 0, len(field.Options))
+				for _, option := range field.Options {
+					options = append(options, option.Key)
+				}
+				normalized.Fields = append(normalized.Fields, boxMetadataField{
+					Type: string(field.Type), Key: field.Key, DisplayName: field.DisplayName,
+					Description: pointerString(field.Description), Hidden: boolValue(field.Hidden), Options: options,
+				})
+			}
+			templates[normalized.TemplateKey] = normalized
 		}
 	}
 	return templates, nil
 }
 
 func (sdk *boxSDK) applyMetadataTemplate(ctx context.Context, template boxMetadataTemplate) error {
-	existing, err := sdk.metadataTemplateDisplayNames(ctx)
+	existing, err := sdk.metadataTemplates(ctx)
 	if err != nil {
 		return err
 	}
-	if displayName, found := existing[template.TemplateKey]; found {
-		if displayName == template.DisplayName {
+	if current, found := existing[template.TemplateKey]; found {
+		if metadataTemplatesEqual(template, current) {
 			return nil
 		}
-		_, err = sdk.client.MetadataTemplates.UpdateSchema(ctx, schemas.GetFileIdMetadataIdScopeEnterprise, template.TemplateKey, []schemas.UpdateSchemaRequest{{
-			Op:   schemas.PutIdSchemaOpEditTemplate,
-			Data: map[string]any{"displayName": template.DisplayName},
-		}})
+		operations, updateErr := metadataTemplateUpdateOperations(template, current)
+		if updateErr != nil {
+			return updateErr
+		}
+		_, err = sdk.client.MetadataTemplates.UpdateSchema(ctx, schemas.GetFileIdMetadataIdScopeEnterprise, template.TemplateKey, operations)
 		return err
 	}
 
@@ -311,12 +330,151 @@ func (sdk *boxSDK) applyMetadataTemplate(ctx context.Context, template boxMetada
 		for _, option := range field.Options {
 			options = append(options, schemas.FieldsOptions{Key: option})
 		}
-		fields = append(fields, schemas.PostSchemaFields{Type: fieldType, Key: field.Key, DisplayName: field.DisplayName, Options: options})
+		description := field.Description
+		hidden := field.Hidden
+		fields = append(fields, schemas.PostSchemaFields{
+			Type: fieldType, Key: field.Key, DisplayName: field.DisplayName, Description: &description,
+			Hidden: &hidden, Options: options,
+		})
 	}
+	hidden := template.Hidden
+	copyInstanceOnItemCopy := template.CopyInstanceOnItemCopy
 	_, err = sdk.client.MetadataTemplates.CreateSchema(ctx, &schemas.CreateSchemaRequest{
-		Scope: "enterprise", TemplateKey: &template.TemplateKey, DisplayName: template.DisplayName, Fields: fields,
+		Scope: "enterprise", TemplateKey: &template.TemplateKey, DisplayName: template.DisplayName,
+		Hidden: &hidden, CopyInstanceOnItemCopy: &copyInstanceOnItemCopy, Fields: fields,
 	})
 	return err
+}
+
+func metadataTemplatesEqual(left, right boxMetadataTemplate) bool {
+	if left.TemplateKey != right.TemplateKey || left.DisplayName != right.DisplayName || left.Hidden != right.Hidden || left.CopyInstanceOnItemCopy != right.CopyInstanceOnItemCopy || len(left.Fields) != len(right.Fields) {
+		return false
+	}
+	for index := range left.Fields {
+		leftField, rightField := left.Fields[index], right.Fields[index]
+		if leftField.Type != rightField.Type || leftField.Key != rightField.Key || leftField.DisplayName != rightField.DisplayName || leftField.Description != rightField.Description || leftField.Hidden != rightField.Hidden || !slices.Equal(leftField.Options, rightField.Options) {
+			return false
+		}
+	}
+	return true
+}
+
+func metadataTemplateUpdateOperations(desired, current boxMetadataTemplate) ([]schemas.UpdateSchemaRequest, error) {
+	desiredFields := make(map[string]boxMetadataField, len(desired.Fields))
+	for _, field := range desired.Fields {
+		desiredFields[field.Key] = field
+	}
+	currentFields := make(map[string]boxMetadataField, len(current.Fields))
+	for _, field := range current.Fields {
+		currentFields[field.Key] = field
+		desiredField, found := desiredFields[field.Key]
+		if !found {
+			return nil, fmt.Errorf("metadata template %q cannot remove destination-only field %q", desired.TemplateKey, field.Key)
+		}
+		if desiredField.Type != field.Type {
+			return nil, fmt.Errorf("metadata template %q cannot change field %q from %s to %s", desired.TemplateKey, field.Key, field.Type, desiredField.Type)
+		}
+		for _, option := range field.Options {
+			if !slices.Contains(desiredField.Options, option) {
+				return nil, fmt.Errorf("metadata template %q cannot remove destination-only option %q from field %q", desired.TemplateKey, option, field.Key)
+			}
+		}
+	}
+
+	operations := make([]schemas.UpdateSchemaRequest, 0)
+	templateData := map[string]any{}
+	if desired.DisplayName != current.DisplayName {
+		templateData["displayName"] = desired.DisplayName
+	}
+	if desired.Hidden != current.Hidden {
+		templateData["hidden"] = desired.Hidden
+	}
+	if desired.CopyInstanceOnItemCopy != current.CopyInstanceOnItemCopy {
+		templateData["copyInstanceOnItemCopy"] = desired.CopyInstanceOnItemCopy
+	}
+	if len(templateData) > 0 {
+		operations = append(operations, schemas.UpdateSchemaRequest{Op: schemas.PutIdSchemaOpEditTemplate, Data: templateData})
+	}
+
+	for _, desiredField := range desired.Fields {
+		currentField, found := currentFields[desiredField.Key]
+		if !found {
+			fieldKey := desiredField.Key
+			operations = append(operations, schemas.UpdateSchemaRequest{
+				Op: schemas.PutIdSchemaOpAddField, FieldKey: &fieldKey, Data: metadataFieldData(desiredField, true),
+			})
+			continue
+		}
+		fieldData := map[string]any{}
+		if desiredField.DisplayName != currentField.DisplayName {
+			fieldData["displayName"] = desiredField.DisplayName
+		}
+		if desiredField.Description != currentField.Description {
+			fieldData["description"] = desiredField.Description
+		}
+		if desiredField.Hidden != currentField.Hidden {
+			fieldData["hidden"] = desiredField.Hidden
+		}
+		if len(fieldData) > 0 {
+			fieldKey := desiredField.Key
+			operations = append(operations, schemas.UpdateSchemaRequest{Op: schemas.PutIdSchemaOpEditField, FieldKey: &fieldKey, Data: fieldData})
+		}
+		for _, option := range desiredField.Options {
+			if slices.Contains(currentField.Options, option) {
+				continue
+			}
+			fieldKey := desiredField.Key
+			operation := schemas.PutIdSchemaOpAddEnumOption
+			if desiredField.Type == "multiSelect" {
+				operation = schemas.PutIdSchemaOpAddMultiSelectOption
+			}
+			operations = append(operations, schemas.UpdateSchemaRequest{Op: operation, FieldKey: &fieldKey, Data: map[string]any{"key": option}})
+		}
+		if len(desiredField.Options) > 0 && !slices.Equal(desiredField.Options, currentField.Options) {
+			fieldKey := desiredField.Key
+			if desiredField.Type == "multiSelect" {
+				operations = append(operations, schemas.UpdateSchemaRequest{Op: schemas.PutIdSchemaOpReorderMultiSelectOptions, FieldKey: &fieldKey, MultiSelectOptionKeys: append([]string(nil), desiredField.Options...)})
+			} else {
+				operations = append(operations, schemas.UpdateSchemaRequest{Op: schemas.PutIdSchemaOpReorderEnumOptions, FieldKey: &fieldKey, EnumOptionKeys: append([]string(nil), desiredField.Options...)})
+			}
+		}
+	}
+
+	desiredOrder := make([]string, 0, len(desired.Fields))
+	currentOrder := make([]string, 0, len(current.Fields))
+	for _, field := range desired.Fields {
+		desiredOrder = append(desiredOrder, field.Key)
+	}
+	for _, field := range current.Fields {
+		currentOrder = append(currentOrder, field.Key)
+	}
+	if !slices.Equal(desiredOrder, currentOrder) {
+		operations = append(operations, schemas.UpdateSchemaRequest{Op: schemas.PutIdSchemaOpReorderFields, FieldKeys: desiredOrder})
+	}
+	return operations, nil
+}
+
+func metadataFieldData(field boxMetadataField, includeType bool) map[string]any {
+	data := map[string]any{
+		"displayName": field.DisplayName,
+		"description": field.Description,
+		"hidden":      field.Hidden,
+	}
+	if includeType {
+		data["type"] = field.Type
+	}
+	if len(field.Options) > 0 {
+		options := make([]map[string]any, 0, len(field.Options))
+		for _, option := range field.Options {
+			options = append(options, map[string]any{"key": option})
+		}
+		data["options"] = options
+	}
+	return data
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func pointerString(value *string) string {

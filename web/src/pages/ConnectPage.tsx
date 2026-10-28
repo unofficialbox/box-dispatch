@@ -10,13 +10,13 @@ export function ConnectPage({ plan, connections, refreshing = false, notice, onB
   const selectedConnection = connections.find((connection) => connection.name.toLowerCase() === selected?.id)
   const openConnection = (id: string) => { if (id === 'box') onBoxConnection(); else onSalesforceConnection() }
   return <section className="connect-stage" aria-label="Connect systems">
-    <header className="task-heading"><div><h2>Confirm connections</h2><p>Use a verified connection for every selected system.</p></div></header>
+    <header className="task-heading"><h2>Confirm connections</h2></header>
     <box-split-view className="connect-workspace" label="System connections and selected connection details" ratio={0.64}>
       <div slot="primary" className="connection-list" role="group" aria-label="Selected system connections">{plan.components.map((component) => {
         const connection = connections.find((candidate) => candidate.name.toLowerCase() === component.id)
         const statusLabel = refreshing ? 'Checking' : component.ready ? 'Ready' : 'Needs attention'
         const statusTone = refreshing ? 'info' : component.ready ? 'success' : 'error'
-        const connectionMeta = refreshing ? 'Refreshing live connection status' : component.ready ? [connection?.selection, connection?.authType, 'Verified and ready'].filter(Boolean).join(' · ') : 'Connect and verify this system before validation'
+        const connectionMeta = refreshing ? '' : component.ready ? [connection?.selection, connection?.authType].filter(Boolean).join(' · ') : ''
         const actions = <div className="connection-buttons">{component.ready && connection?.launchUrl ? <box-button label="Open" aria-label={`Open ${component.name}`} tone="neutral" onClick={() => onOpenProvider(component.id)}></box-button> : null}<box-button label={component.ready ? 'Manage' : 'Connect'} tone="neutral" onClick={() => openConnection(component.id)}></box-button></div>
         return <SelectableResourceRow key={component.id} className="connection-resource-row" label={component.name} meta={connectionMeta} value={component.id} selected={component.id === selectedID} icon={<ProviderLogo provider={component.id}/>} status={<box-badge label={statusLabel} tone={statusTone}></box-badge>} actions={actions} onSelect={setSelectedID}/>
       })}</div>

@@ -9,6 +9,46 @@ The examples use providers and deployments because they make the decisions concr
 but the principles apply to any system that connects environments, validates changes,
 runs long-lived work, and preserves an audit trail.
 
+## Core philosophy: comprehension before copy
+
+Do not use labels, descriptions, instructions, or helper text to rescue an unclear
+layout. The interface must first communicate where to look, what can be acted on, and
+what happens next through its visual structure.
+
+This rule applies to every application surface: dashboards, workflows, settings,
+history, comparison tools, drawers, empty states, completion views, and responsive
+layouts. Do not create text-dependent exceptions for a page that has not yet received
+the same visual-design attention.
+
+Design in this order:
+
+1. Spatial grouping and sequence.
+2. Shape, contrast, state, and affordance.
+3. Familiar icons and direct manipulation.
+4. Concise labels that confirm an already-visible meaning and provide an accessible name.
+5. Explanatory copy only for exceptions, risk, irreversible consequences, or failure.
+
+A useful test is to temporarily hide nonessential copy. A user should still be able to
+identify the current context, the primary action, selectable objects, selected state,
+and the next step. If the workflow stops making sense, improve the composition before
+adding the words back.
+
+### Visual hierarchy is functional
+
+- Position actions beside the objects they affect.
+- Use containment only when it clarifies ownership; avoid nested cards and repeated borders.
+- Make selection visible across the whole selectable object, not with a decorative edge.
+- Use whitespace to separate stages and density to indicate related controls.
+- Give one surface visual priority. Supporting lists, filters, and summaries should recede.
+- Prefer familiar icon actions for compact, repeated operations; always retain an
+  accessible name and tooltip when needed.
+- Remove repeated titles, counts, statuses, and identifiers when the same fact is already
+  visible nearby.
+
+Copy remains valuable when it communicates something the layout cannot: a destructive
+consequence, provider limitation, unusual scope boundary, stale state, or recovery path.
+It should not be the primary navigation system.
+
 ## 1. Start with the operator's mental model
 
 Organize the product around the questions an operator is trying to answer:
@@ -487,6 +527,8 @@ Do not let one kind of evidence stand in for another.
 
 ### Actions and components
 
+- [ ] Confirm the workflow remains understandable after hiding nonessential helper copy.
+- [ ] Establish hierarchy, grouping, selection, and primary action visually before labels.
 - [ ] Attach actions to the card, row, or section they affect.
 - [ ] Use short action labels and keep IDs in supporting details.
 - [ ] Reuse the design system before creating custom primitives.
@@ -524,6 +566,9 @@ Do not let one kind of evidence stand in for another.
 
 ## 16. Common anti-patterns
 
+- Explaining an ambiguous layout instead of fixing its hierarchy and affordances.
+- Repeating the same object name, status, or count in adjacent panels.
+- Nesting bordered cards until every surface has equal visual weight.
 - Showing a completed operation as active because its draft still exists.
 - Using opaque IDs as the primary connection identity.
 - Putting provider-specific actions in one unrelated global toolbar.
@@ -542,6 +587,7 @@ Do not let one kind of evidence stand in for another.
 
 A workflow feature is complete when:
 
+- The primary flow is understandable from composition and state before reading helper copy.
 - The state model is correct across reloads and failure paths.
 - The operator can identify the selected environment quickly.
 - Primary and secondary actions are attached to the correct object.
