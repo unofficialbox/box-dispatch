@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -134,6 +135,35 @@ func TestWriteBCLRoundTripsNestedResourceConfig(t *testing.T) {
 	questions := agents[0].Configuration["ask"].(map[string]any)["suggested_questions"].([]any)
 	if len(questions) != 1 || questions[0] != "What is the term?" {
 		t.Fatalf("suggested questions = %#v", questions)
+	}
+}
+
+func TestWriteBCLRoundTripsStringSlices(t *testing.T) {
+	doc := NewDocument("promotion", "generic", "test", "2026-10-28T12:00:00Z", nil)
+	doc.Resources = []BCLResource{{
+		Name: "templates", Type: "config_file", Provider: "generic",
+		Config: map[string]any{"fields": []any{
+			map[string]any{"key": "status", "options": []string{"Draft", "Final"}},
+			map[string]any{"key": "summary", "options": []string{}},
+		}},
+	}}
+	path := filepath.Join(t.TempDir(), "templates.bcl")
+	if err := WriteBCL(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	object, err := ConfigObject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields []struct {
+		Key     string   `json:"key"`
+		Options []string `json:"options"`
+	}
+	if err := json.Unmarshal(object["fields"], &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 2 || !reflect.DeepEqual(fields[0].Options, []string{"Draft", "Final"}) || len(fields[1].Options) != 0 {
+		t.Fatalf("fields = %#v", fields)
 	}
 }
 
