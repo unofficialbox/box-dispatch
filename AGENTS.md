@@ -94,6 +94,21 @@ The checker looks for: a Box OAuth login saved by Dispatch (requires
 - Delete/teardown work, when added, must operate **by recorded resource ID only** (never
   name-matching) and must refuse Box folder ID `"0"`. See the plan referenced in the current
   `HANDOFF_*.md`.
+
+### Design workflow
+
+- Read [`design.md`](design.md) before auditing, designing, or changing browser UI.
+- Treat it as the canonical interaction, visual, accessibility, responsive, and evidence
+  contract. Supplementary design documents may add implementation detail but must not
+  override it silently.
+- Start UI work with rendered evidence and the operator's state model. Do not use labels or
+  helper copy to compensate for unclear hierarchy or affordance.
+- Reuse Box Open Elements before creating product-specific primitives. Record genuine gaps
+  in the component-gap documentation and upstream issue tracker.
+- Validate changed UI in a real browser at desktop and narrow widths, including relevant
+  light/dark, keyboard, reduced-motion, loading, empty, failure, and long-content states.
+- Keep implementation, browser, live-provider, commit, PR, and merge evidence distinct.
+
 ## Handoffs
 
 The latest `HANDOFF_*.md` at the repo root carries current branch state, recent fixes, and

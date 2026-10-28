@@ -1,5 +1,9 @@
 # Product design best practices for operational web applications
 
+> [`design.md`](../design.md) is Dispatch's canonical design contract. This document is
+> supplementary long-form guidance and examples; when wording diverges, update both and
+> treat `design.md` as authoritative.
+
 This guide captures the reusable product, interaction, and visual design practices
 developed while building a local-first deployment application. It is intended as a
 starting point for new dashboards, administration tools, deployment consoles, and
