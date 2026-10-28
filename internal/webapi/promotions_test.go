@@ -133,12 +133,19 @@ func TestSelectPromotionTemplatesAcceptsPortableChangedAndSourceOnlyTemplates(t 
 }
 
 func TestSelectPromotionTemplatesRejectsEnterpriseSpecificTemplates(t *testing.T) {
-	taxonomy := boxdiff.MetadataTemplate{Key: "taxonomy", Fields: []boxdiff.MetadataTemplateField{{Key: "class", Type: "taxonomy", TaxonomyKey: "enterprise-specific"}}}
-	comparison := boxdiff.Comparison{Templates: []boxdiff.MetadataTemplateDiff{
-		{Key: taxonomy.Key, Status: "left_only", Left: &taxonomy},
-	}}
-	if _, err := selectPromotionTemplates(comparison, []string{"taxonomy"}); err == nil {
-		t.Fatal("enterprise-specific metadata template was accepted")
+	for name, field := range map[string]boxdiff.MetadataTemplateField{
+		"taxonomy key":      {Key: "class", Type: "string", TaxonomyKey: "enterprise-specific"},
+		"selectable levels": {Key: "class", Type: "string", SelectableLevels: []int64{1, 2}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			taxonomy := boxdiff.MetadataTemplate{Key: "taxonomy", Fields: []boxdiff.MetadataTemplateField{field}}
+			comparison := boxdiff.Comparison{Templates: []boxdiff.MetadataTemplateDiff{
+				{Key: taxonomy.Key, Status: "left_only", Left: &taxonomy},
+			}}
+			if _, err := selectPromotionTemplates(comparison, []string{"taxonomy"}); err == nil {
+				t.Fatal("enterprise-specific metadata template was accepted")
+			}
+		})
 	}
 }
 

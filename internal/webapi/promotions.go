@@ -184,6 +184,9 @@ func supportedMetadataTemplateDiffPromotion(diff boxdiff.MetadataTemplateDiff) b
 
 func supportedMetadataTemplatePromotion(template boxdiff.MetadataTemplate) bool {
 	for _, field := range template.Fields {
+		if field.TaxonomyKey != "" || len(field.SelectableLevels) > 0 {
+			return false
+		}
 		switch field.Type {
 		case "string", "float", "date", "enum", "multiSelect":
 		default:
