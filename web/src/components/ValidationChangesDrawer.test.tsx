@@ -23,6 +23,27 @@ describe('ValidationChangesDrawer', () => {
     expect(table.rows[1]).toMatchObject({ detail: 'uiBundles/clmreactapp/archive.zip' })
     fireEvent(table, new CustomEvent('selection-changed', { detail: { selectedIds: ['UIBundle:clmreactapp:uiBundles/clmreactapp/archive.zip'] } }))
     expect(screen.getByText('Preview unavailable')).toBeTruthy()
+    expect(screen.getByText(/No text snapshot was recorded/)).toBeTruthy()
+  })
+
+  it('presents a metadata-template JSON change without clipping its resource type', () => {
+    const { container } = render(<ValidationChangesDrawer stage="deployment" loading={false} error="" onClose={vi.fn()} files={[
+      { component: 'Box:metadata_template', path: 'metadata-templates/clmClause.json', kind: 'add', before: '', after: '{\n  "templateKey": "clmClause"\n}', previewable: true },
+    ]}/>)
+
+    const table = container.querySelector('box-table.validation-change-table') as HTMLElement & { rows: TableRow[] }
+    expect(table.rows[0]).toMatchObject({ cells: { item: 'clmClause.json' } })
+    expect(container.querySelector('[slot$="-item"]')?.textContent).toBe('clmClause.jsonmetadata template')
+    expect(container.querySelector('box-diff-viewer')?.getAttribute('after-text')).toBe('{\n  "templateKey": "clmClause"\n}')
+    expect(container.textContent).not.toContain('Preview unavailable')
+  })
+
+  it('separates component type and resource name in the file list', () => {
+    const { container } = render(<ValidationChangesDrawer loading={false} error="" onClose={vi.fn()} files={[
+      { component: 'Metadata Template:Contract Document', path: 'metadata-templates/clmDocument.json', kind: 'add', before: '', after: '{}', previewable: true },
+    ]}/>)
+
+    expect(container.querySelector('[slot$="-item"]')?.textContent).toBe('clmDocument.jsonMetadata Template · Contract Document')
   })
 
   it('uses recorded before and after labels for a completed deployment', () => {

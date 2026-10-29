@@ -259,6 +259,23 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('.connection-resource-row img[data-provider-logo]')).toHaveCount(2)
   expect(await page.locator('.connection-buttons box-button[aria-label^="Open "]').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('label')))).toEqual(['Open', 'Open'])
   expect(await page.locator('button button, button box-button, button box-switch').count()).toBe(0)
+  await page.setViewportSize({ width: 1024, height: 768 })
+  const narrowConnectionLayout = await page.evaluate(() => {
+    const primary = document.querySelector<HTMLElement>('.connect-workspace [slot="primary"]')!.getBoundingClientRect()
+    const rail = document.querySelector<HTMLElement>('.connect-workspace .details-rail')!.getBoundingClientRect()
+    const actions = [...document.querySelectorAll<HTMLElement>('.connect-workspace .connection-buttons box-button')].map((button) => button.getBoundingClientRect())
+    const breadcrumbLinks = [...document.querySelector('box-breadcrumb')!.shadowRoot!.querySelectorAll<HTMLElement>('[part="link"]')]
+    const stages = [...document.querySelector('box-path')!.shadowRoot!.querySelectorAll<HTMLElement>('[part="stage"]')]
+    const path = document.querySelector('box-path')!.getBoundingClientRect()
+    return {
+      railBelowPrimary: rail.top >= primary.bottom - 1,
+      actionsInsidePrimary: actions.every((action) => action.left >= primary.left - 1 && action.right <= primary.right + 1),
+      breadcrumbClipped: breadcrumbLinks.some((link) => link.scrollWidth > link.clientWidth + 1),
+      stageClipped: stages.some((stage) => stage.getBoundingClientRect().left < path.left - 1 || stage.getBoundingClientRect().right > path.right + 1),
+    }
+  })
+  expect(narrowConnectionLayout).toEqual({ railBelowPrimary: true, actionsInsidePrimary: true, breadcrumbClipped: false, stageClipped: false })
+  await page.setViewportSize({ width: 1280, height: 720 })
   await expectSharedAccessibilityInBothThemes(page, ['box-resource-row', 'box-badge', ['box-path', '[part="stage-label"]']])
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
@@ -335,6 +352,14 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     hasCurrent: viewer.getAttribute('before-text')?.includes('false'),
     hasPackaged: viewer.getAttribute('after-text')?.includes('true'),
   }))).toEqual({ before: 'Current state', after: 'Validated package', mode: 'split', hasCurrent: true, hasPackaged: true })
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await expect(page.locator('box-diff-viewer')).toHaveAttribute('mode', 'inline')
+  expect(await page.locator('box-diff-viewer').evaluate((viewer) => {
+    const scroller = viewer.shadowRoot!.querySelector<HTMLElement>('[part="scroller"]')!
+    return scroller.scrollWidth - scroller.clientWidth
+  })).toBeLessThanOrEqual(1)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expect(page.locator('box-diff-viewer')).toHaveAttribute('mode', 'split')
   await page.locator('box-table.validation-change-table').locator('[part="row"][data-index="1"]').click()
   await expect(page.locator('box-table.validation-change-table').getByRole('grid')).toBeVisible()
   await expect(page.locator('box-table.validation-change-table').getByRole('row', { selected: true })).toHaveCount(1)
@@ -485,6 +510,11 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     }
   }
   await page.setViewportSize({ width: 390, height: 844 })
+  const mobileHistoryTable = page.locator('box-table.deployment-history-table')
+  expect(await mobileHistoryTable.evaluate((element) => {
+    const shell = element.shadowRoot!.querySelector<HTMLElement>('[part="shell"]')!
+    return shell.scrollWidth - shell.clientWidth
+  })).toBeLessThanOrEqual(1)
   await page.getByRole('link', { name: 'Northstar CLM rollout' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Deployment actions' })).toBeVisible()
@@ -508,13 +538,16 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   const lifecycleScroll = page.getByRole('region', { name: 'Deployment lifecycle stages' })
   await lifecycleScroll.focus()
   await expect(lifecycleScroll).toBeFocused()
-  await page.keyboard.press('ArrowRight')
-  await expect.poll(() => lifecycleScroll.evaluate((region) => region.scrollLeft)).toBeGreaterThan(0)
-  expect(await lifecycleScroll.evaluate((region) => ({
-    outlineStyle: getComputedStyle(region).outlineStyle,
-    outlineWidth: getComputedStyle(region).outlineWidth,
-  }))).toEqual({ outlineStyle: 'solid', outlineWidth: '2px' })
-  await lifecycleScroll.evaluate((region) => { region.scrollLeft = 0 })
+  expect(await lifecycleScroll.evaluate((region) => {
+    const path = region.querySelector('box-path')!.getBoundingClientRect()
+    return {
+      overflow: region.scrollWidth - region.clientWidth,
+      clipped: [...region.querySelector('box-path')!.shadowRoot!.querySelectorAll<HTMLElement>('[part="stage"]')].some((stage) => {
+        const bounds = stage.getBoundingClientRect()
+        return bounds.left < path.left - 1 || bounds.right > path.right + 1
+      }),
+    }
+  })).toEqual({ overflow: 0, clipped: false })
   await expectAccessible(page, ['.workflow-path-scroll'], ['scrollable-region-focusable'])
   const mobileProviderAlignment = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('[data-system-provider]')].map((provider) => {
     const logo = provider.querySelector<HTMLElement>('.provider-logo')!.getBoundingClientRect()
