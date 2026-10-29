@@ -30,25 +30,29 @@ const reviewCopy = {
 
 const changeColumns: TableColumn[] = [
   { key: 'change', label: 'Change' },
-  { key: 'file', label: 'File' },
-  { key: 'component', label: 'Component' },
+  { key: 'item', label: 'File', rowHeader: true, hostContent: true },
 ]
 
 const EMPTY_FILES: ValidationFileChange[] = []
 
 const fileID = (file: ValidationFileChange) => `${file.component}:${file.path}`
+const componentLabel = (component: string) => component
+  .replace(/^Box:/, '')
+  .replaceAll('_', ' ')
+  .replace(':', ' · ')
 
 export function ValidationChangesDrawer({ files, loading, error, stage = 'validation', onClose }: { files: ValidationFileChange[] | null | undefined; loading: boolean; error: string; stage?: ChangeReviewStage; onClose: () => void }) {
   const drawerRef = useRef<HTMLElementTagNameMap['box-drawer']>(null)
+  const previewRef = useRef<HTMLElement>(null)
   const [selectedFileID, setSelectedFileID] = useState('')
+  const [diffMode, setDiffMode] = useState<'split' | 'inline'>('split')
   const safeFiles = files ?? EMPTY_FILES
   const selected = useMemo(() => safeFiles.find((file) => fileID(file) === selectedFileID) ?? safeFiles[0], [safeFiles, selectedFileID])
   const rows = useMemo<TableRow[]>(() => safeFiles.map((file) => ({
     id: fileID(file),
     cells: {
       change: { kind: 'badge', text: file.kind === 'add' ? 'Add' : 'Update', tone: file.kind === 'add' ? 'success' : 'brand' },
-      file: file.path.split('/').at(-1) ?? file.path,
-      component: file.component,
+      item: file.path.split('/').at(-1) ?? file.path,
     },
     detail: file.path,
   })), [safeFiles])
@@ -57,6 +61,16 @@ export function ValidationChangesDrawer({ files, loading, error, stage = 'valida
   useEffect(() => {
     void import('@unofficialbox/box-open-elements/diff-viewer')
   }, [])
+
+  useEffect(() => {
+    const preview = previewRef.current
+    if (!preview || typeof ResizeObserver === 'undefined') return
+    const updateMode = () => setDiffMode(preview.clientWidth > 0 && preview.clientWidth < 720 ? 'inline' : 'split')
+    updateMode()
+    const observer = new ResizeObserver(updateMode)
+    observer.observe(preview)
+    return () => observer.disconnect()
+  }, [safeFiles.length])
 
   useEffect(() => {
     const drawer = drawerRef.current
@@ -75,12 +89,14 @@ export function ValidationChangesDrawer({ files, loading, error, stage = 'valida
       {safeFiles.length > 0 && <div className="validation-change-browser">
         <section className="validation-change-files" aria-label="Files with changes">
           <header><span>{safeFiles.length} {safeFiles.length === 1 ? 'file' : 'files'}</span><strong>{copy.direction}</strong></header>
-          <BoeTable className="validation-change-table" columns={changeColumns} rows={rows} label="Files with changes" emptyText={copy.emptyDescription} selectionMode="single" selectedIds={selected ? [fileID(selected)] : []} onSelectionChange={(selectedIDs) => setSelectedFileID(selectedIDs[0] ?? '')}/>
+          <BoeTable className="validation-change-table" columns={changeColumns} rows={rows} label="Files with changes" emptyText={copy.emptyDescription} selectionMode="single" selectedIds={selected ? [fileID(selected)] : []} onSelectionChange={(selectedIDs) => setSelectedFileID(selectedIDs[0] ?? '')}>
+            {safeFiles.map((file) => <span className="validation-change-item" slot={`cell-${fileID(file)}-item`} key={fileID(file)} onClick={() => setSelectedFileID(fileID(file))}><strong>{file.path.split('/').at(-1) ?? file.path}</strong><small>{componentLabel(file.component)}</small></span>)}
+          </BoeTable>
         </section>
-        <section className="validation-change-preview" aria-live="polite">
+        <section ref={previewRef} className="validation-change-preview" aria-live="polite">
           {selected?.previewable
-            ? <box-diff-viewer heading={selected.path} before-label={copy.beforeLabel} after-label={copy.afterLabel} before-text={selected.before ?? ''} after-text={selected.after ?? ''} mode="split"></box-diff-viewer>
-            : <div className="validation-changes-empty"><h3>Preview unavailable</h3><p>{selected?.path} is binary or too large for an inline text comparison. It will still be included in deployment.</p></div>}
+            ? <box-diff-viewer heading={selected.path} before-label={copy.beforeLabel} after-label={copy.afterLabel} before-text={selected.before ?? ''} after-text={selected.after ?? ''} mode={diffMode}></box-diff-viewer>
+            : <div className="validation-changes-empty"><h3>Preview unavailable</h3><p>No text snapshot was recorded for {selected?.path}. The change remains part of the deployment record.</p></div>}
         </section>
       </div>}
     </section>

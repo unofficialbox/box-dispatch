@@ -38,6 +38,13 @@ describe('Sidebar', () => {
     }
   })
 
+  it('places Compare directly after Overview', () => {
+    const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
+    expect([...container.querySelectorAll('.nav-route')].map((route) => route.getAttribute('aria-label'))).toEqual([
+      'Overview', 'Compare Box environments', 'Deployments', 'Deployment history', 'Settings',
+    ])
+  })
+
   it('persists the compact preference while keeping the library toggle reachable', () => {
     const { container } = render(<Sidebar activeView="overview" {...callbacks}/>)
     const sidebar = container.querySelector('box-nav-sidebar')

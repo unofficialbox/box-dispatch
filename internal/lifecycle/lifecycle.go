@@ -468,6 +468,11 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			if updateErr != nil {
 				report.step("Cannot update Box metadata template " + template.TemplateKey + ": " + updateErr.Error())
 			}
+			if deployable {
+				if previewErr := appendBoxMetadataTemplateChange(&item, component, template, current, found); previewErr != nil {
+					return item, previewErr
+				}
+			}
 			classifyBoxComponent(&item, component, present, deployable)
 			report.component(component, ProgressCompleted, validationResultMessage(present, deployable), componentIndex(components, component)+1, len(components))
 		}
@@ -607,6 +612,36 @@ func metadataTemplateValidation(desired, current boxMetadataTemplate, found bool
 		return false, false, err
 	}
 	return false, true, nil
+}
+
+func appendBoxMetadataTemplateChange(item *Item, component string, desired, current boxMetadataTemplate, found bool) error {
+	encode := func(template boxMetadataTemplate) (string, error) {
+		data, err := json.MarshalIndent(template, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+
+	after, err := encode(desired)
+	if err != nil {
+		return fmt.Errorf("prepare %s change preview: %w", component, err)
+	}
+	before := ""
+	kind := "add"
+	if found {
+		before, err = encode(current)
+		if err != nil {
+			return fmt.Errorf("prepare %s change preview: %w", component, err)
+		}
+		kind = "update"
+	}
+	item.Changes = append(item.Changes, salesforceapi.MetadataFileDiff{
+		Component: component,
+		Path:      filepath.ToSlash(filepath.Join("metadata-templates", desired.TemplateKey+".json")),
+		Kind:      kind, Before: before, After: after, Previewable: true,
+	})
+	return nil
 }
 
 func classifyBoxComponent(item *Item, component string, present, deployable bool) {

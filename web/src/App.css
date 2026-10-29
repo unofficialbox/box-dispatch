@@ -60,7 +60,7 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .review-layout-single .action-row { border-top: 0; }
 .validation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; border-bottom: 1px solid var(--dispatch-rule); }.validation-heading p { margin: 8px 0 0; color: var(--dispatch-muted); }
 
-@media (max-width: 900px) { .workspace { padding: 26px 28px 42px; }.workflow-path-scroll { overflow-x: auto; overscroll-behavior-inline: contain; }.workflow-path::part(path) { min-width: 680px; }.validation-surface { padding: 26px; } }
+@media (max-width: 900px) { .workspace { padding: 26px 28px 42px; }.workflow-path-scroll { overflow-x: auto; overscroll-behavior-inline: contain; }.workflow-path::part(path) { min-width: 0; }.validation-surface { padding: 26px; } }
 
 /* Fidelity pass: Box Open Elements owns the shell and navigation behavior while
    Dispatch keeps the approved flat operational geometry through public parts. */
@@ -84,7 +84,7 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .sidebar[collapsed] .sidebar-toggle { position: absolute; left: 50%; transform: translateX(-50%); z-index: 10; opacity: 1; pointer-events: auto; }
 .sidebar-toggle::part(button) { border-color: rgba(146, 192, 255, .32); background: rgba(255, 255, 255, .08); color: #fff; }.nav-help { margin-top: auto; }
 .workspace { width: 100%; min-width: 0; }
-.deployment-header { padding: 0 0 18px; border-bottom: 1px solid var(--dispatch-rule); }.deployment-breadcrumb { display: block; margin-bottom: 9px; }.deployment-breadcrumb::part(link) { color: var(--dispatch-accent); font-size: 13px; }.environment { align-items: center; justify-content: space-between; gap: 24px; border-color: var(--dispatch-border); border-radius: 6px; box-shadow: none; }
+.deployment-header { padding: 0 0 18px; border-bottom: 1px solid var(--dispatch-rule); }.deployment-breadcrumb { display: block; margin-bottom: 9px; }.deployment-breadcrumb::part(link) { max-width: none; overflow: visible; color: var(--dispatch-accent); font-size: 13px; text-overflow: clip; white-space: normal; }.environment { align-items: center; justify-content: space-between; gap: 24px; border-color: var(--dispatch-border); border-radius: 6px; box-shadow: none; }
 .validation-surface { max-width: none; margin: 0; border-bottom: 1px solid var(--dispatch-rule); }.validation-heading { border: 0; }.validation-surface .notice, .validation-surface .action-row { margin-top: 12px; }.validation-surface .notice { color: var(--dispatch-muted); font-size: 12px; }.validation-surface .action-row { padding: 0; border: 0; }
 @media (min-width: 761px) {
   .app-shell::part(nav) { background: linear-gradient(180deg, #151917 0%, #090b0a 100%); }
@@ -258,8 +258,6 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 /* Stage 2 uses a selectable master/detail pattern. */
 .connect-workspace { display: block; }
 .connect-workspace::part(split-view), .configure-workspace::part(split-view) { align-items: start; }
-@media (max-width: 900px) { .connect-workspace::part(split-view), .configure-workspace::part(split-view) { grid-template-columns: 1fr !important; } }
-
 /* Consistent stage detail rails keep the workflow readable without decorative space. */
 .brand { border: 0; background: transparent; cursor: pointer; font: inherit; }
 .details-rail { align-self: start; }
@@ -547,8 +545,8 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 /* Summary is a deliberate final state, not an extra card appended to a live run. */
 .summary-workspace { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(280px, .78fr); gap: 0; max-width: var(--dispatch-content-max); margin: 28px auto 0; }
 .summary-surface { display: block; min-height: 430px; }
-.summary-surface::part(card) { min-height: 430px; padding: 58px 48px 48px 0; border: 0; border-radius: 0; box-shadow: none; }
-.summary-status-icon { display: inline-flex; margin: 10px 0 2px 6px; }
+.summary-surface::part(card) { min-height: 430px; padding: 58px 30px 48px; border: 0; border-radius: 0; box-shadow: none; }
+.summary-status-icon { display: inline-flex; margin: 10px 0 2px; }
 .summary-status-icon::part(glyph) { display: inline-flex; transform: scale(1.75); transform-origin: center; }
 .summary-surface h2 { margin: 7px 0 0; color: var(--dispatch-navy); font-size: clamp(30px, 3vw, 42px); letter-spacing: -1.2px; }
 .summary-lede { max-width: 620px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 16px; line-height: 1.55; }
@@ -638,16 +636,20 @@ box-drawer::part(close) { box-sizing: border-box; }
 .validation-changes-drawer::part(meta) { min-width: 0; }
 .validation-changes-drawer::part(close) { flex: 0 0 auto; }
 .validation-changes-content { min-height: 0; }
-.validation-change-browser { display: grid; grid-template-columns: 310px minmax(0, 1fr); min-height: min(680px, calc(100vh - 190px)); overflow: hidden; border: 1px solid #d7e0ec; border-radius: 12px; }
+.validation-change-browser { display: grid; grid-template-columns: minmax(350px, 380px) minmax(0, 1fr); min-height: min(680px, calc(100vh - 190px)); overflow: hidden; border: 1px solid #d7e0ec; border-radius: 12px; }
 .validation-change-files { overflow-y: auto; border-right: 1px solid #d7e0ec; }
 .validation-change-files header { display: grid; gap: 3px; padding: 16px; border-bottom: 1px solid var(--dispatch-border); color: var(--dispatch-muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 .validation-change-files header strong { color: var(--dispatch-ink); font-size: 13px; letter-spacing: 0; text-transform: none; }
 .validation-change-table { display: block; min-width: 0; }
 .validation-change-table::part(shell) { border: 0; border-radius: 0; }
-.validation-change-table::part(table) { font-size: 11px; }
+.validation-change-table::part(table) { width: 100%; font-size: 11px; }
 .validation-change-table::part(cell-badge) { font-size: 9px; }
+.validation-change-item { display: grid; gap: 2px; min-width: 0; }
+.validation-change-item strong, .validation-change-item small { overflow-wrap: anywhere; }
+.validation-change-item strong { color: var(--dispatch-ink); font-size: 11px; font-weight: 650; }
+.validation-change-item small { color: var(--dispatch-ink); font-size: 10px; line-height: 1.25; }
 .validation-change-preview { min-width: 0; padding: 18px; overflow: auto; }
-.validation-change-preview box-diff-viewer { min-width: 640px; }
+.validation-change-preview box-diff-viewer { display: block; min-width: 0; }
 .validation-changes-empty { display: grid; place-content: center; min-height: 320px; padding: 32px; text-align: center; }
 .validation-changes-empty h3, .validation-changes-empty p { margin: 0; }
 .validation-changes-empty p { max-width: 520px; margin-top: 8px; color: #63748e; line-height: 1.5; }
@@ -701,8 +703,9 @@ box-drawer::part(close) { box-sizing: border-box; }
 
 /* Connect: selectable rows and the detail rail share edges instead of becoming nested cards. */
 .connect-stage { max-width: var(--dispatch-content-max); }
-.connect-workspace { margin-top: 0; }
+.connect-workspace { margin-top: 18px; }
 .connect-workspace::part(split-view), .configure-workspace::part(split-view) { grid-template-columns: minmax(0, 2.05fr) minmax(280px, .78fr) !important; gap: 0; }
+.connect-workspace [slot="primary"], .configure-workspace [slot="primary"] { padding-right: 30px; }
 .connection-list { gap: 0; margin-top: 0; border-top: 1px solid var(--dispatch-rule); }
 .connect-footnote { margin-top: 18px; padding-top: 17px; border-top-color: var(--dispatch-rule); }
 
@@ -1134,4 +1137,26 @@ html[data-theme='dark'] .overview-connection-copy {
   .compare-template-detail { padding: 14px; }
   .compare-list-controls { grid-template-columns: 1fr; }
   .compare-list-controls > p { grid-column: auto; }
+}
+
+/* The persistent navigation reduces the workflow's usable width before the
+   viewport reaches tablet sizes. Collapse master/detail stages at that real
+   content boundary so controls never cross into the details rail. */
+@media (max-width: 1200px) {
+  .connect-workspace::part(split-view), .configure-workspace::part(split-view) { grid-template-columns: 1fr !important; }
+  .connect-workspace [slot="primary"], .configure-workspace [slot="primary"] { padding-right: 0; }
+  .connect-workspace .details-rail, .configure-workspace .details-rail { margin-top: 24px; padding: 24px 0 0; border-top: 1px solid var(--dispatch-rule); border-left: 0; }
+  .workflow-path::part(stage) { box-sizing: border-box; min-inline-size: 0; padding-inline: .7em; }
+  .overview-dashboard { grid-template-columns: 1fr; }
+  .overview-primary { padding-right: 0; }
+  .overview-secondary { padding-left: 0; border-top: 1px solid var(--dispatch-rule); border-left: 0; }
+}
+
+@media (max-width: 640px) {
+  .workflow-path::part(stage) { padding-inline: .25em; font-size: .68rem; }
+  .workflow-path::part(stage-marker) { margin-inline-end: .1rem; }
+  .deployment-history-table::part(table) { table-layout: fixed; font-size: 10px; }
+  .deployment-history-table::part(sortable) { white-space: normal; }
+  .deployment-history-table::part(sort-button) { padding: 7px 4px; overflow-wrap: anywhere; white-space: normal; font-size: 9px; letter-spacing: .02em; }
+  .deployment-history-table::part(cell-link) { overflow-wrap: anywhere; }
 }

@@ -75,6 +75,46 @@ func TestMetadataTemplateValidationAcceptsCompatibleUpdates(t *testing.T) {
 	}
 }
 
+func TestAppendBoxMetadataTemplateChangeRecordsValidJSON(t *testing.T) {
+	item := Item{Provider: "box"}
+	desired := boxMetadataTemplate{
+		TemplateKey: "contracts", DisplayName: "Contracts", CopyInstanceOnItemCopy: true,
+		Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "Status", Options: []string{"Draft", "Approved"}}},
+	}
+	current := boxMetadataTemplate{
+		TemplateKey: "contracts", DisplayName: "Contract records",
+		Fields: []boxMetadataField{{Type: "enum", Key: "status", DisplayName: "State", Options: []string{"Draft"}}},
+	}
+	if err := appendBoxMetadataTemplateChange(&item, "Metadata Template:Contracts", desired, current, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Changes) != 1 {
+		t.Fatalf("changes = %#v", item.Changes)
+	}
+	change := item.Changes[0]
+	if change.Component != "Metadata Template:Contracts" || change.Path != "metadata-templates/contracts.json" || change.Kind != "update" || !change.Previewable {
+		t.Fatalf("change = %#v", change)
+	}
+	if !json.Valid([]byte(change.Before)) || !json.Valid([]byte(change.After)) {
+		t.Fatalf("preview is not valid JSON: before=%s after=%s", change.Before, change.After)
+	}
+	if !strings.Contains(change.After, `"Approved"`) || strings.Contains(change.After, `\n`) {
+		t.Fatalf("preview is not readable semantic JSON: %s", change.After)
+	}
+}
+
+func TestAppendBoxMetadataTemplateChangeRecordsAddition(t *testing.T) {
+	item := Item{Provider: "box"}
+	desired := boxMetadataTemplate{TemplateKey: "clmClause", DisplayName: "CLM Clause"}
+	if err := appendBoxMetadataTemplateChange(&item, "Metadata Template:CLM Clause", desired, boxMetadataTemplate{}, false); err != nil {
+		t.Fatal(err)
+	}
+	change := item.Changes[0]
+	if change.Kind != "add" || change.Before != "" || !json.Valid([]byte(change.After)) {
+		t.Fatalf("change = %#v", change)
+	}
+}
+
 // TestReadBoxConfigObjectPrefersBCL confirms the migrated BCL artifact wins over
 // a legacy JSON file of the same stem, and that its envelope fields are stripped.
 func TestReadBoxConfigObjectPrefersBCL(t *testing.T) {
