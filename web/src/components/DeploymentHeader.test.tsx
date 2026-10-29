@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DeploymentHeader } from './DeploymentHeader'
 import type { DeploymentPlan, DispatchRun } from '../types'
 
@@ -25,6 +25,8 @@ const failedValidation: DispatchRun = {
 }
 
 describe('DeploymentHeader', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('keeps read-only stages inside a named keyboard scroll region', () => {
     const { container } = render(<DeploymentHeader plan={plan} activePhase="Choose" run={null} />)
     const region = within(container).getByRole('region', { name: 'Deployment lifecycle stages' })
@@ -45,6 +47,19 @@ describe('DeploymentHeader', () => {
       { label: 'Deployments', href: '#workspace', value: 'deployments' },
       { label: 'Northstar CLM rollout', value: 'current' },
     ])
+  })
+
+  it('uses the readable base path on narrow viewports', () => {
+    const addEventListener = vi.fn()
+    const removeEventListener = vi.fn()
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener, removeEventListener })))
+
+    const { container, unmount } = render(<DeploymentHeader plan={plan} activePhase="Choose" run={null} />)
+
+    expect(container.querySelector('box-path')?.getAttribute('variant')).toBe('base')
+    expect(addEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+    unmount()
+    expect(removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
   })
 
   it('maps failed validation into the BOE path error state', () => {
