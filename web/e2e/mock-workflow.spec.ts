@@ -192,6 +192,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
   const workflow = page.locator('box-path')
   await expect(workflow).toHaveAttribute('current', 'Choose')
+  await expect(workflow).toHaveAttribute('variant', 'chevron')
   await expect(workflow.locator('[part="stage"][data-stage-id="Deploy"]')).toHaveAttribute('data-state', 'upcoming')
   await expect(workflow.locator('[part="stage"][data-stage-id="Summary"]')).toHaveAttribute('data-state', 'upcoming')
   const solutionGroup = page.locator('box-tile-group.solution-list')
@@ -538,6 +539,7 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   const lifecycleScroll = page.getByRole('region', { name: 'Deployment lifecycle stages' })
   await lifecycleScroll.focus()
   await expect(lifecycleScroll).toBeFocused()
+  await expect(lifecycleScroll.locator('box-path')).toHaveAttribute('variant', 'base')
   expect(await lifecycleScroll.evaluate((region) => {
     const path = region.querySelector('box-path')!.getBoundingClientRect()
     return {
@@ -546,8 +548,9 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
         const bounds = stage.getBoundingClientRect()
         return bounds.left < path.left - 1 || bounds.right > path.right + 1
       }),
+      labelOverflow: [...region.querySelector('box-path')!.shadowRoot!.querySelectorAll<HTMLElement>('[part="stage-label"]')].some((label) => label.scrollWidth > label.clientWidth + 1),
     }
-  })).toEqual({ overflow: 0, clipped: false })
+  })).toEqual({ overflow: 0, clipped: false, labelOverflow: false })
   await expectAccessible(page, ['.workflow-path-scroll'], ['scrollable-region-focusable'])
   const mobileProviderAlignment = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('[data-system-provider]')].map((provider) => {
     const logo = provider.querySelector<HTMLElement>('.provider-logo')!.getBoundingClientRect()

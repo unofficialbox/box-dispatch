@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import '@unofficialbox/box-open-elements/breadcrumb'
 import '@unofficialbox/box-open-elements/path'
 import type { BreadcrumbItem } from '@unofficialbox/box-open-elements/breadcrumb'
@@ -33,6 +33,7 @@ const stages: PathStage[] = [
 
 function WorkflowPath({ activePhase, run }: { activePhase: Phase; run: DispatchRun | null }) {
   const pathRef = useRef<HTMLElementTagNameMap['box-path'] | null>(null)
+  const [pathVariant, setPathVariant] = useState<'chevron' | 'base'>(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches ? 'base' : 'chevron')
   const currentPhase = activePhase === 'Deploy' && run?.action !== 'deploy' ? 'Review' : activePhase
   const hasIncompleteDeployment = activePhase === 'Summary' && run?.action === 'deploy' && run.status === 'completed' && deploymentOutcome(run).label !== 'Complete'
   const hasError = run?.status === 'failed' && (activePhase === 'Review' || activePhase === 'Deploy') || hasIncompleteDeployment
@@ -40,5 +41,14 @@ function WorkflowPath({ activePhase, run }: { activePhase: Phase; run: DispatchR
     if (pathRef.current) pathRef.current.stages = stages
   }, [])
 
-  return <div className="workflow-path-scroll" role="region" aria-label="Deployment lifecycle stages" tabIndex={0}><box-path ref={pathRef} className="workflow-path" label="Deployment lifecycle" current={currentPhase} hasError={hasError}></box-path></div>
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const media = window.matchMedia('(max-width: 640px)')
+    const updateVariant = () => setPathVariant(media.matches ? 'base' : 'chevron')
+    updateVariant()
+    media.addEventListener('change', updateVariant)
+    return () => media.removeEventListener('change', updateVariant)
+  }, [])
+
+  return <div className="workflow-path-scroll" role="region" aria-label="Deployment lifecycle stages" tabIndex={0}><box-path ref={pathRef} className="workflow-path" label="Deployment lifecycle" current={currentPhase} hasError={hasError} variant={pathVariant}></box-path></div>
 }
