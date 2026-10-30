@@ -1140,6 +1140,7 @@ html[data-theme='dark'] .overview-connection-copy {
   .compare-template-detail { padding: 14px; }
   .compare-list-controls { grid-template-columns: 1fr; }
   .compare-list-controls > p { grid-column: auto; }
+  .compare-diff-scroll box-diff-viewer { min-width: 0; }
 }
 
 /* The persistent navigation reduces the workflow's usable width before the

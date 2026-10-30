@@ -60,6 +60,22 @@ const compareByAttention = <T extends { status: ComparisonStatus }>(left: T, rig
 
 const comparisonText = (value?: BoxMetadataTemplate | BoxFolder | BoxAIAgent) => value ? JSON.stringify(value, null, 2) : ''
 const selectableConnections = (connections: ConnectionSummary[]) => connections.find((connection) => connection.name === 'Box')?.connections?.filter((connection): connection is BoxConnectionOption & { id: string } => Boolean(connection.id)) ?? []
+const mobileDiffQuery = '(max-width: 760px)'
+
+function useDiffMode() {
+  const [mode, setMode] = useState<'split' | 'inline'>(() => typeof window !== 'undefined' && window.matchMedia?.(mobileDiffQuery).matches ? 'inline' : 'split')
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const media = window.matchMedia(mobileDiffQuery)
+    const updateMode = () => setMode(media.matches ? 'inline' : 'split')
+    updateMode()
+    media.addEventListener('change', updateMode)
+    return () => media.removeEventListener('change', updateMode)
+  }, [])
+
+  return mode
+}
 
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null
@@ -384,7 +400,8 @@ function AIAgentDiffView({ agent, comparison }: { agent: BoxAIAgentDiff; compari
 }
 
 function DiffViewer({ heading, left, right, comparison }: { heading: string; left?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; right?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; comparison: Pick<BoxComparison, 'left' | 'right'> }) {
-  return <div className="compare-diff-scroll"><box-diff-viewer heading={heading} before-label={comparison.left.alias} after-label={comparison.right.alias} before-text={comparisonText(left)} after-text={comparisonText(right)} mode="split"></box-diff-viewer></div>
+  const mode = useDiffMode()
+  return <div className="compare-diff-scroll"><box-diff-viewer heading={heading} before-label={comparison.left.alias} after-label={comparison.right.alias} before-text={comparisonText(left)} after-text={comparisonText(right)} mode={mode}></box-diff-viewer></div>
 }
 
 function ComparisonEmpty({ title, message }: { title: string; message: string }) {
