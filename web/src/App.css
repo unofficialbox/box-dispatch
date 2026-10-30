@@ -546,8 +546,8 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .summary-workspace { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(280px, .78fr); gap: 0; max-width: var(--dispatch-content-max); margin: 28px auto 0; }
 .summary-surface { display: block; min-height: 430px; }
 .summary-surface::part(card) { min-height: 430px; padding: 58px 30px 48px; border: 0; border-radius: 0; box-shadow: none; }
-.summary-status-icon { display: inline-flex; margin: 10px 0 2px; }
-.summary-status-icon::part(glyph) { display: inline-flex; transform: scale(1.75); transform-origin: center; }
+.summary-status-icon { align-items: flex-start; display: inline-flex; width: 28px; height: 28px; margin: 4px 0 -4px; }
+.summary-status-icon::part(glyph) { display: inline-flex; flex: none; width: 16px; height: 16px; line-height: 0; transform: scale(1.75); transform-origin: top left; }
 .summary-surface h2 { margin: 7px 0 0; color: var(--dispatch-navy); font-size: clamp(30px, 3vw, 42px); letter-spacing: -1.2px; }
 .summary-lede { max-width: 620px; margin: 14px 0 0; color: var(--dispatch-muted); font-size: 16px; line-height: 1.55; }
 .summary-targets, .summary-destinations { max-width: 720px; margin-top: 34px; }
@@ -568,7 +568,7 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .summary-destination-link::part(link):hover { border-color: var(--boe-token-surface-surface-brand-hover, #066348); color: var(--boe-token-text-text-on-brand, #fff); background: var(--boe-token-surface-surface-brand-hover, #066348); }
 .summary-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 @media (max-width: 1000px) { .summary-workspace { grid-template-columns: 1fr; }.summary-surface::part(card) { min-height: 0; padding-right: 0; }.summary-workspace .details-rail { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--dispatch-rule); border-left: 0; } }
-@media (max-width: 640px) { .summary-surface::part(card) { padding: 34px 0 16px; }.summary-targets li, .summary-destinations li { align-items: flex-start; flex-direction: column; gap: 12px; }.summary-targets box-button, .summary-destination-link, .summary-destinations box-button { width: 100%; }.summary-actions { align-items: stretch; flex-direction: column; }.summary-actions box-button { width: 100%; } }
+@media (max-width: 640px) { .summary-surface::part(card) { padding: 34px 16px 16px; }.summary-targets li, .summary-destinations li { align-items: flex-start; flex-direction: column; gap: 12px; }.summary-targets box-button, .summary-destination-link, .summary-destinations box-button { width: 100%; }.summary-actions { align-items: stretch; flex-direction: column; }.summary-actions box-button { width: 100%; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
@@ -797,6 +797,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 @media (max-width: 1000px) {
   .connect-workspace::part(split-view), .configure-workspace::part(split-view), .review-layout.review-layout-single, .deploy-workspace { grid-template-columns: 1fr !important; }
   .details-rail { margin-top: 24px; padding: 24px 0 0; border-top: 1px solid var(--dispatch-rule); border-left: 0; }
+  .review-layout-single .review-surface { min-height: 0; }
   .review-layout-single .review-surface, .deploy-workspace .validation-surface { padding-right: 0; }
   .overview-dashboard { grid-template-columns: 1fr; }
   .overview-primary { padding-right: 0; }
@@ -1143,9 +1144,12 @@ html[data-theme='dark'] .overview-connection-copy {
    viewport reaches tablet sizes. Collapse master/detail stages at that real
    content boundary so controls never cross into the details rail. */
 @media (max-width: 1200px) {
-  .connect-workspace::part(split-view), .configure-workspace::part(split-view) { grid-template-columns: 1fr !important; }
+  .connect-workspace::part(split-view), .configure-workspace::part(split-view), .review-layout.review-layout-single, .deploy-workspace, .summary-workspace { grid-template-columns: 1fr !important; }
   .connect-workspace [slot="primary"], .configure-workspace [slot="primary"] { padding-right: 0; }
-  .connect-workspace .details-rail, .configure-workspace .details-rail { margin-top: 24px; padding: 24px 0 0; border-top: 1px solid var(--dispatch-rule); border-left: 0; }
+  .review-layout-single .review-surface { min-height: 0; }
+  .review-layout-single .review-surface, .deploy-workspace .validation-surface { padding-right: 0; }
+  .summary-surface::part(card) { min-height: 0; padding-right: 0; }
+  .connect-workspace .details-rail, .configure-workspace .details-rail, .review-layout-single .details-rail, .deploy-workspace .details-rail, .summary-workspace .details-rail { margin-top: 24px; padding: 24px 0 0; border-top: 1px solid var(--dispatch-rule); border-left: 0; }
   .workflow-path::part(stage) { box-sizing: border-box; min-inline-size: 0; padding-inline: .7em; }
   .overview-dashboard { grid-template-columns: 1fr; }
   .overview-primary { padding-right: 0; }
