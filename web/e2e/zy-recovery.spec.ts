@@ -62,6 +62,32 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
       await page.screenshot({ path: info.outputPath(`long-actions-${viewportWidth}.png`), fullPage: true })
     }
     await page.setViewportSize({ width, height: 1000 })
+    for (const provider of ['Box', 'Salesforce'] as const) {
+      const panel = page.getByRole('region', { name: provider === 'Box' ? 'Box connections' : 'Salesforce environments', exact: true })
+      await panel.getByRole('button', { name: 'Manage', exact: true }).click()
+      const drawer = page.locator('box-drawer.connection-drawer')
+      const drawerRows = drawer.locator('box-resource-row.connection-option-row')
+      await expect(drawerRows.first()).toBeVisible()
+      const drawerBounds = await drawerRows.evaluateAll((rows) => rows.map((row) => {
+        const host = row.getBoundingClientRect()
+        const trailing = row.shadowRoot!.querySelector<HTMLElement>('[part="trailing"]')!.getBoundingClientRect()
+        const actions = row.querySelector<HTMLElement>('[slot="actions"]')!.getBoundingClientRect()
+        return {
+          fits: trailing.left >= host.left && trailing.right <= host.right && actions.left >= host.left && actions.right <= host.right && actions.right <= document.documentElement.clientWidth,
+          hostLeft: host.left,
+          hostRight: host.right,
+          trailingLeft: trailing.left,
+          trailingRight: trailing.right,
+          actionsLeft: actions.left,
+          actionsRight: actions.right,
+          viewport: document.documentElement.clientWidth,
+        }
+      }))
+      expect(drawerBounds.length).toBeGreaterThan(0)
+      expect(drawerBounds.filter((bound) => !bound.fits)).toEqual([])
+      await page.screenshot({ path: info.outputPath(`${provider.toLowerCase()}-drawer-actions.png`), fullPage: true })
+      await drawer.getByRole('button', { name: 'Close', exact: true }).click()
+    }
     await page.getByRole('link', { name: 'Help', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Help', exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Help', exact: true })).toHaveAttribute('aria-current', 'page')

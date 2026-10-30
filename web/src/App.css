@@ -889,6 +889,7 @@ box-drawer::part(close) { box-sizing: border-box; }
 .connection-option-row::part(row) { padding: 10px 8px 10px 12px; border: 0; border-radius: 0; }
 .connection-option-row[selected]::part(row) { background: var(--dispatch-surface-selected); }
 .connection-option-row::part(meta) { max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-option-row::part(trailing) { flex-shrink: 0; }
 .connection-option-row .resource-row-actions { margin-left: 2px; }
 
 .connection-mode-picker { display: block; }
@@ -910,6 +911,8 @@ box-drawer::part(close) { box-sizing: border-box; }
 
 @media (max-width: 560px) {
   .connection-mode-picker::part(group) { grid-template-columns: 1fr; }
+  .connection-option-row::part(row) { align-items: stretch; flex-wrap: wrap; }
+  .connection-option-row::part(trailing) { box-sizing: border-box; width: 100%; justify-content: flex-end; padding-left: 28px; }
 }
 
 /* System theme: Box Open Elements owns the source tokens; Dispatch aliases only
