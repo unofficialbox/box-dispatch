@@ -79,6 +79,27 @@ async function expectDiffGutterContrast(page: Page) {
   }
 }
 
+async function expectStackedWorkspaceRail(page: Page, workspaceSelector: string, primarySelector: string, expectFlexiblePrimary = false) {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  const layout = await page.locator(workspaceSelector).evaluate((workspace, selector) => {
+    const primary = workspace.querySelector<HTMLElement>(selector)!.getBoundingClientRect()
+    const rail = workspace.querySelector<HTMLElement>('.details-rail')!.getBoundingClientRect()
+    return {
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      railBelowPrimary: rail.top >= primary.bottom - 1,
+      leftEdgeDelta: Math.abs(rail.left - primary.left),
+      rightEdgeDelta: Math.abs(rail.right - primary.right),
+      primaryMinHeight: getComputedStyle(workspace.querySelector<HTMLElement>(selector)!).minHeight,
+    }
+  }, primarySelector)
+  expect(layout.pageOverflow).toBeLessThanOrEqual(1)
+  expect(layout.railBelowPrimary).toBe(true)
+  expect(layout.leftEdgeDelta).toBeLessThan(1)
+  expect(layout.rightEdgeDelta).toBeLessThan(1)
+  if (expectFlexiblePrimary) expect(layout.primaryMinHeight).toBe('0px')
+  await page.setViewportSize({ width: 1280, height: 720 })
+}
+
 test('follows the system color preference across primary pages', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.goto('/')
@@ -281,6 +302,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Continue to configure' }).click()
 
   await expect(page.getByRole('heading', { name: 'Configure deployment' })).toBeVisible()
+  await expectStackedWorkspaceRail(page, '.configure-workspace', '[slot="primary"]')
   const requiredSwitch = page.locator('box-switch[description="Required"]').getByRole('switch')
   const optionalSwitch = page.locator('box-switch[description="Optional"]').getByRole('switch')
   await expect(requiredSwitch).toHaveAccessibleName('Included')
@@ -311,6 +333,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Review plan' }).click()
 
   await expect(page.getByRole('heading', { name: 'Review and validate' })).toBeVisible()
+  await expectStackedWorkspaceRail(page, '.review-layout.review-layout-single', '.review-surface', true)
   await page.getByRole('button', { name: 'Validate deployment' }).click()
   await expect(page.locator('box-run-trace.dispatch-run-trace').locator('[part="step"][data-step-id="salesforce"]')).toHaveAttribute('data-status', 'running')
   await expect(page.locator('box-run-trace.dispatch-run-trace').locator('[part="step"][data-step-id="salesforce"] [part="status"]')).toHaveText('Running')
@@ -332,6 +355,7 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(page.locator('box-path')).toHaveAttribute('current', 'Review')
   await expect(page.getByRole('button', { name: 'Continue to deployment' })).toBeVisible()
   await expect(page.getByText('Validation results restored. Review changes or continue to deployment.')).toBeVisible()
+  await expectStackedWorkspaceRail(page, '.deploy-workspace', '.validation-surface')
   const runSummary = page.locator('box-run-summary.dispatch-run-summary')
   await expect(runSummary).toBeVisible()
   const runSummaryState = await runSummary.evaluate((element) => ({ open: (element as HTMLElement & { open: boolean }).open, steps: (element as HTMLElement & { turn: { steps: unknown[] } }).turn.steps.length }))
@@ -435,8 +459,44 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await page.getByRole('button', { name: 'Start deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Northstar CLM rollout is ready' })).toBeVisible()
+  await expectStackedWorkspaceRail(page, '.summary-workspace', '.summary-surface')
   await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('kind', 'done')
   await expect(page.locator('box-status-icon.summary-status-icon')).toHaveAttribute('label', 'Complete')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.locator('box-status-icon.summary-status-icon').evaluate((icon) => {
+    const svg = icon.shadowRoot!.querySelector<SVGSVGElement>('svg')!
+    return svg.getAnimations({ subtree: true }).every((animation) => animation.playState === 'finished')
+  })).toBe(true)
+  const summaryIconBounds = await page.locator('box-status-icon.summary-status-icon').evaluate((icon) => {
+    const host = icon.getBoundingClientRect()
+    const glyph = icon.shadowRoot!.querySelector<HTMLElement>('[part="glyph"]')!.getBoundingClientRect()
+    const svg = icon.shadowRoot!.querySelector<SVGSVGElement>('svg')!
+    const svgBounds = svg.getBoundingClientRect()
+    const cardElement = icon.closest('box-card')!.shadowRoot!.querySelector<HTMLElement>('[part="card"]')!
+    const card = cardElement.getBoundingClientRect()
+    const cardStyle = getComputedStyle(cardElement)
+    const heading = icon.parentElement!.querySelector<HTMLElement>('h2')!.getBoundingClientRect()
+    return {
+      host: { left: host.left, right: host.right, top: host.top, bottom: host.bottom },
+      glyph: { left: glyph.left, right: glyph.right, top: glyph.top, bottom: glyph.bottom },
+      svg: { left: svgBounds.left, right: svgBounds.right, top: svgBounds.top, bottom: svgBounds.bottom },
+      cardLeft: card.left,
+      cardPaddingLeft: Number.parseFloat(cardStyle.paddingLeft),
+      cardPaddingRight: Number.parseFloat(cardStyle.paddingRight),
+      headingLeft: heading.left,
+      contentInset: heading.left - card.left,
+    }
+  })
+  expect(summaryIconBounds.glyph.left).toBeGreaterThanOrEqual(summaryIconBounds.host.left - 0.01)
+  expect(summaryIconBounds.glyph.right).toBeLessThanOrEqual(summaryIconBounds.host.right + 0.01)
+  expect(summaryIconBounds.glyph.top).toBeGreaterThanOrEqual(summaryIconBounds.host.top - 0.01)
+  expect(summaryIconBounds.glyph.bottom).toBeLessThanOrEqual(summaryIconBounds.host.bottom + 0.01)
+  expect(summaryIconBounds.svg).toEqual(summaryIconBounds.host)
+  expect(Math.abs(summaryIconBounds.host.left - summaryIconBounds.headingLeft)).toBeLessThan(0.01)
+  expect(summaryIconBounds.cardPaddingLeft).toBeGreaterThanOrEqual(16)
+  expect(summaryIconBounds.cardPaddingRight).toBeGreaterThanOrEqual(16)
+  expect(summaryIconBounds.contentInset).toBeGreaterThanOrEqual(16)
+  await page.setViewportSize({ width: 1280, height: 720 })
   await expect(page.getByText('Every selected system finished successfully. Open a destination to review the deployed experience.')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Deployment targets' })).toBeVisible()
   await expect(page.getByText('acme.app.box.com')).toBeVisible()
