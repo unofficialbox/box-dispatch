@@ -30,7 +30,8 @@ The classifications match the
 ## Verification baseline
 
 The current Dispatch web package uses verified published core and React adapter
-versions 0.39.0.
+versions 0.42.3. The October 30 Drawer audit also checked the published 0.44.0
+core artifact before recording the viewport-sizing gap below.
 For each evaluated element, intake must inspect the published element's
 `observedAttributes`, public properties, methods, and emitted events rather than
 inferring capability from a screenshot or tag name. Upstream and maintainer-reported
@@ -94,7 +95,7 @@ Dispatch imports the package's generated `react-jsx` and `native-types` declarat
 | --- | --- | --- | --- |
 | Components | `box-progress-steps` | Published 0.27.0 provides controlled navigation and per-step complete, current, pending, blocked, failed, and disabled states, keyboard navigation, public parts, and `value-changed`. | Available for editable setup tasks. Dispatch now uses the read-only `box-path` because workflow navigation remains in the Back/Continue controls and the header only reports lifecycle position. |
 | Components | `box-table` | Escaped text, badge, and link cells plus expansion, loading, empty, error, sorting, and selection are supported. | Adopted for all current Dispatch data surfaces. Deployment history intentionally uses concise provider names rather than logos, so its cells fit the safe published descriptors. |
-| Components | `box-drawer` | Controlled state, focus behavior, sticky footer, size presets, busy state, mobile presentation, cancelable dismissal, and `hide-close-button` are present. | Adopted for connection and diagnostics workflows. Connection drawers use the public close-affordance API instead of a CSS part override. |
+| Components | `box-drawer` | Controlled state, focus behavior, sticky footer, size presets, busy state, mobile presentation, cancelable dismissal, and `hide-close-button` are present. | Adopted for connection and diagnostics workflows. Connection drawers use the public close-affordance API; a tracked public-part sizing workaround keeps long mobile drawers inside the viewport until [#611](https://github.com/unofficialbox/box-open-elements/issues/611) ships. |
 | Components | `box-text-field` | Shared field contract, autocomplete, password reveal, loading, and valid states are present. | Adopted for connection forms. |
 | Components | `box-select` | Shared field contract, loading and empty states, options, single/multiple values, and `value-changed` are present. | Adopted for authenticated-org and subject selection. |
 | Components | `box-split-view` | Controlled ratio, optional resizing, and `ratio-changed` are present. | Adopted as the Connect and Configure layout primitive. Selection and detail behavior remain application composition. |
@@ -138,6 +139,7 @@ explicit baseline evidence; no global conformance claim is made.
 
 | Priority | Category | Component or area | Accepted need | Dispatch action until release |
 | --- | --- | --- | --- | --- |
+| P1 | Components | Drawer viewport sizing ([#611](https://github.com/unofficialbox/box-open-elements/issues/611)) | Side drawers with long body content and a slotted footer must stay within the dynamic viewport so the body scrolls while the header and footer remain fixed. | Constrain the public `drawer` part to `100dvh` with border-box sizing and retain desktop/mobile geometry and scroll regressions; remove the override after adopting a verified release. |
 | P1 | Components | Accessible folder tree ([#596](https://github.com/unofficialbox/box-open-elements/issues/596)) | A provider-neutral, controlled hierarchy for folders and files with lazy loading, conventional tree keyboard behavior, stable focus, and responsive light/dark presentation. | Keep the live folder inventory provider-owned and render its normalized relative paths in the existing table; do not build a Dispatch-only tree widget. |
 | P1 | Patterns | Folder tree diff ([#597](https://github.com/unofficialbox/box-open-elements/issues/597)) | A read-only unified/side-by-side structural diff for added, removed, changed, equal, moved, and partial folder/file nodes without reading file contents. | Keep host-owned matching and the temporary flat results table plus JSON diff viewer. Adopt the published tree diff when its data and accessibility contracts ship. |
 | P2 | Patterns | `box-timeline` live-tail composition | A bounded, keyboard-focusable scroll host remains application composition; the component owns semantic events while Dispatch owns the 12-event policy and auto-follow behavior. | Keep the small focusable host rule around `box-timeline`; no upstream enhancement is required by the current contract. |

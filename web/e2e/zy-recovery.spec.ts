@@ -68,6 +68,34 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
       const drawer = page.locator('box-drawer.connection-drawer')
       const drawerRows = drawer.locator('box-resource-row.connection-option-row')
       await expect(drawerRows.first()).toBeVisible()
+      const drawerLayout = await drawer.evaluate((element) => {
+        const drawerPart = element.shadowRoot!.querySelector<HTMLElement>('[part="drawer"]')!
+        const bodyPart = element.shadowRoot!.querySelector<HTMLElement>('[part="body"]')!
+        const footerPart = element.shadowRoot!.querySelector<HTMLElement>('[part="footer"]')!
+        const closeButton = element.querySelector<HTMLElement>('[slot="footer"] box-button')!
+        const drawerBounds = drawerPart.getBoundingClientRect()
+        const footerBounds = footerPart.getBoundingClientRect()
+        const closeBounds = closeButton.getBoundingClientRect()
+        return {
+          viewportHeight: window.innerHeight,
+          drawerTop: drawerBounds.top,
+          drawerBottom: drawerBounds.bottom,
+          bodyClientHeight: bodyPart.clientHeight,
+          bodyScrollHeight: bodyPart.scrollHeight,
+          footerTop: footerBounds.top,
+          footerBottom: footerBounds.bottom,
+          closeTop: closeBounds.top,
+          closeBottom: closeBounds.bottom,
+        }
+      })
+      expect(drawerLayout.drawerTop).toBeGreaterThanOrEqual(-1)
+      expect(drawerLayout.drawerBottom).toBeLessThanOrEqual(drawerLayout.viewportHeight + 1)
+      expect(drawerLayout.footerBottom).toBeLessThanOrEqual(drawerLayout.viewportHeight + 1)
+      expect(drawerLayout.closeTop).toBeGreaterThanOrEqual(0)
+      expect(drawerLayout.closeBottom).toBeLessThanOrEqual(drawerLayout.viewportHeight + 1)
+      if (width === 390) {
+        expect(drawerLayout.bodyScrollHeight).toBeGreaterThan(drawerLayout.bodyClientHeight)
+      }
       const drawerBounds = await drawerRows.evaluateAll((rows) => rows.map((row) => {
         const host = row.getBoundingClientRect()
         const trailing = row.shadowRoot!.querySelector<HTMLElement>('[part="trailing"]')!.getBoundingClientRect()
@@ -85,7 +113,22 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
       }))
       expect(drawerBounds.length).toBeGreaterThan(0)
       expect(drawerBounds.filter((bound) => !bound.fits)).toEqual([])
-      await page.screenshot({ path: info.outputPath(`${provider.toLowerCase()}-drawer-actions.png`), fullPage: true })
+      await page.screenshot({ path: info.outputPath(`${provider.toLowerCase()}-drawer-actions.png`) })
+      if (width === 390) {
+        await drawer.evaluate((element) => {
+          const bodyPart = element.shadowRoot!.querySelector<HTMLElement>('[part="body"]')!
+          bodyPart.scrollTop = bodyPart.scrollHeight
+        })
+        const scrolledLayout = await drawer.evaluate((element) => {
+          const bodyPart = element.shadowRoot!.querySelector<HTMLElement>('[part="body"]')!
+          const footerBounds = element.shadowRoot!.querySelector<HTMLElement>('[part="footer"]')!.getBoundingClientRect()
+          return { bodyScrollTop: bodyPart.scrollTop, footerTop: footerBounds.top, footerBottom: footerBounds.bottom }
+        })
+        expect(scrolledLayout.bodyScrollTop).toBeGreaterThan(0)
+        expect(Math.abs(scrolledLayout.footerTop - drawerLayout.footerTop)).toBeLessThanOrEqual(1)
+        expect(scrolledLayout.footerBottom).toBeLessThanOrEqual(drawerLayout.viewportHeight + 1)
+        await page.screenshot({ path: info.outputPath(`${provider.toLowerCase()}-drawer-scroll-end.png`) })
+      }
       await drawer.getByRole('button', { name: 'Close', exact: true }).click()
     }
     await page.getByRole('link', { name: 'Help', exact: true }).click()
