@@ -103,7 +103,10 @@ const preparedMetadataPlan: DeploymentPlan = {
   repository: 'box://enterprise/EID-prod/metadata-templates',
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('ComparePage', () => {
   it('requires two saved Box connections', () => {
@@ -133,6 +136,21 @@ describe('ComparePage', () => {
     expect(viewer.getAttribute('after-text')).toContain('"Approved"')
     expect(screen.queryByText('fields.status.options')).toBeNull()
     expect(container.querySelector('box-icon-button[label="Add Contracts to deployment plan"]')).toBeNull()
+  })
+
+  it('uses the unified diff mode on narrow viewports', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(comparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const { container } = render(<ComparePage connections={connections}/>)
+
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+
+    await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="contracts.json"]')).toBeTruthy())
+    expect(container.querySelector('box-diff-viewer')?.getAttribute('mode')).toBe('inline')
   })
 
   it('switches to a bounded live folder comparison', async () => {

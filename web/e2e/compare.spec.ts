@@ -142,8 +142,22 @@ test('compares two Box enterprises live without changing the deployment selectio
   expect(mobileShellGeometry.workspace).toEqual(mobileShellGeometry.frame)
   expect(mobileShellGeometry.leftInset).toBeGreaterThanOrEqual(16)
   expect(Math.abs(mobileShellGeometry.leftInset - mobileShellGeometry.rightInset)).toBeLessThan(0.01)
+  await expect(comparisonAgentDiff).toHaveAttribute('mode', 'inline')
+  const mobileDiffGeometry = await comparisonAgentDiff.evaluate((viewer) => {
+    const wrapper = viewer.parentElement!.getBoundingClientRect()
+    const bounds = viewer.getBoundingClientRect()
+    return {
+      wrapperWidth: wrapper.width,
+      viewerWidth: bounds.width,
+      viewerRight: bounds.right,
+      viewportWidth: window.innerWidth,
+    }
+  })
+  expect(mobileDiffGeometry.viewerWidth).toBeLessThanOrEqual(mobileDiffGeometry.wrapperWidth + 1)
+  expect(mobileDiffGeometry.viewerRight).toBeLessThanOrEqual(mobileDiffGeometry.viewportWidth)
 
   await page.setViewportSize({ width: 1440, height: 1000 })
+  await expect(comparisonAgentDiff).toHaveAttribute('mode', 'split')
   await expect(page.getByText('0 of 1 selected')).toBeVisible()
   await expect(page.locator('box-button[label="Prepare deployment"]')).toHaveAttribute('disabled', '')
   await page.locator('box-icon-button[icon="plus"][label="Add Legal Assistant to deployment plan"]').click()
