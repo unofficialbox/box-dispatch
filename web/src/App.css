@@ -137,8 +137,6 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 
 @media (max-width: 360px) {
   .app-shell::part(main), .workspace { width: 100vw; max-width: 100vw; }
-  .settings-connection-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .settings-connection-actions { width: 100%; justify-content: flex-end; }
 }
 
 /* Reusable stage navigation keeps every pre-deployment handoff predictable. */
@@ -381,7 +379,7 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .settings-connection-row:last-child { border-bottom: 0; }
 .settings-connection-copy { flex: 1 1 0; min-width: 0; }
 .settings-connection-row strong, .settings-connection-row small { display: block; }
-.settings-connection-row strong { overflow: hidden; color: var(--dispatch-navy); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-connection-row strong { overflow-wrap: anywhere; color: var(--dispatch-navy); font-size: 13px; line-height: 1.35; }
 .settings-connection-row small { overflow-wrap: anywhere; margin-top: 3px; color: var(--dispatch-muted); font-size: 11px; line-height: 1.35; }
 .settings-connection-status { display: flex; flex: none; align-items: center; gap: 7px; }
 .settings-connection-actions { display: flex; flex: none; align-items: center; gap: 9px; }
@@ -437,6 +435,12 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
   .settings-default-systems > div { align-items: flex-start; flex-direction: column; gap: 10px; }
   .settings-default-systems box-switch { min-width: 0; }
   .settings-defaults-editor > footer { align-items: stretch; flex-direction: column-reverse; }
+}
+
+@media (max-width: 360px) {
+  .settings-connection-row { align-items: stretch; flex-direction: column; }
+  .settings-connection-copy { align-self: stretch; width: auto; }
+  .settings-connection-actions { align-self: stretch; width: auto; justify-content: flex-end; }
 }
 
 .dispatch-run-trace {
