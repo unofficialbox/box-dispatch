@@ -55,10 +55,27 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
       const bounds = await page.locator('.settings-connection-row').evaluateAll((rows) => rows.map((row) => {
         const card = row.closest('.settings-provider')!.getBoundingClientRect()
         const actions = row.querySelector('.settings-connection-actions')!.getBoundingClientRect()
-        return { fits: actions.left >= card.left && actions.right <= card.right && actions.right <= document.documentElement.clientWidth, width: actions.width, cardLeft: card.left, cardRight: card.right, actionsLeft: actions.left, actionsRight: actions.right, viewport: document.documentElement.clientWidth }
+        const identity = row.querySelector<HTMLElement>('strong')!
+        const identityBounds = identity.getBoundingClientRect()
+        const identityStyle = getComputedStyle(identity)
+        return {
+          fits: actions.left >= card.left && actions.right <= card.right && actions.right <= document.documentElement.clientWidth,
+          identityFits: identityBounds.left >= card.left && identityBounds.right <= card.right && identityBounds.bottom <= row.getBoundingClientRect().bottom,
+          identityUnclipped: identity.scrollWidth <= identity.clientWidth + 1 && identityStyle.textOverflow !== 'ellipsis' && identityStyle.whiteSpace !== 'nowrap',
+          width: actions.width,
+          cardLeft: card.left,
+          cardRight: card.right,
+          actionsLeft: actions.left,
+          actionsRight: actions.right,
+          identityLeft: identityBounds.left,
+          identityRight: identityBounds.right,
+          identityBottom: identityBounds.bottom,
+          rowBottom: row.getBoundingClientRect().bottom,
+          viewport: document.documentElement.clientWidth,
+        }
       }))
       expect(bounds.length).toBeGreaterThan(0)
-      expect(bounds.filter((bound) => !bound.fits || bound.width <= 0)).toEqual([])
+      expect(bounds.filter((bound) => !bound.fits || !bound.identityFits || !bound.identityUnclipped || bound.width <= 0)).toEqual([])
       await page.screenshot({ path: info.outputPath(`long-actions-${viewportWidth}.png`), fullPage: true })
     }
     await page.setViewportSize({ width, height: 1000 })
