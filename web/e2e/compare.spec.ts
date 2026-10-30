@@ -115,6 +115,33 @@ test('compares two Box enterprises live without changing the deployment selectio
 
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+  const mobileShellGeometry = await page.locator('box-app-shell').evaluate((shell) => {
+    const bounds = (element: Element) => {
+      const rect = element.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, width: rect.width }
+    }
+    const frame = shell.shadowRoot!.querySelector<HTMLElement>('[part="frame"]')!
+    const navigation = shell.shadowRoot!.querySelector<HTMLElement>('[part="nav"]')!
+    const main = shell.shadowRoot!.querySelector<HTMLElement>('[part="main"]')!
+    const workspace = shell.querySelector<HTMLElement>('.workspace')!
+    const pageContent = shell.querySelector<HTMLElement>('.compare-page')!
+    const content = bounds(pageContent)
+    return {
+      viewportWidth: window.innerWidth,
+      frame: bounds(frame),
+      navigation: bounds(navigation),
+      main: bounds(main),
+      workspace: bounds(workspace),
+      leftInset: content.left,
+      rightInset: window.innerWidth - content.right,
+    }
+  })
+  expect(mobileShellGeometry.frame).toEqual({ left: 0, right: 390, width: 390 })
+  expect(mobileShellGeometry.navigation).toEqual(mobileShellGeometry.frame)
+  expect(mobileShellGeometry.main).toEqual(mobileShellGeometry.frame)
+  expect(mobileShellGeometry.workspace).toEqual(mobileShellGeometry.frame)
+  expect(mobileShellGeometry.leftInset).toBeGreaterThanOrEqual(16)
+  expect(Math.abs(mobileShellGeometry.leftInset - mobileShellGeometry.rightInset)).toBeLessThan(0.01)
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   await expect(page.getByText('0 of 1 selected')).toBeVisible()

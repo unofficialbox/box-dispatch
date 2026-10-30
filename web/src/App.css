@@ -897,6 +897,8 @@ box-drawer::part(close) { box-sizing: border-box; }
 .connection-mode-picker::part(tile) { min-height: 88px; border-radius: 10px; }
 
 @media (max-width: 760px) {
+  .app-shell::part(frame) { inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; }
+  .app-shell::part(nav), .app-shell::part(main) { min-inline-size: 0; max-inline-size: 100%; }
   .sidebar::part(sidebar), .sidebar[collapsed]::part(sidebar) { inline-size: 100%; flex-direction: row; align-items: center; padding: 9px 16px; }
   .sidebar::part(header) { flex: none; min-height: 44px; padding: 0; }
   .brand { margin: 0; }
