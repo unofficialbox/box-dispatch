@@ -572,10 +572,24 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   }
   await page.setViewportSize({ width: 390, height: 844 })
   const mobileHistoryTable = page.locator('box-table.deployment-history-table')
-  expect(await mobileHistoryTable.evaluate((element) => {
+  const mobileHistoryGeometry = await mobileHistoryTable.evaluate((element) => {
     const shell = element.shadowRoot!.querySelector<HTMLElement>('[part="shell"]')!
-    return shell.scrollWidth - shell.clientWidth
-  })).toBeLessThanOrEqual(1)
+    const table = element.shadowRoot!.querySelector<HTMLElement>('[part="table"]')!
+    const headers = [...element.shadowRoot!.querySelectorAll<HTMLElement>('[part="sort-button"]')]
+    return {
+      overflow: shell.scrollWidth - shell.clientWidth,
+      tableWidth: table.getBoundingClientRect().width,
+      headersWrap: headers.some((header) => header.scrollHeight > header.clientHeight + 1),
+    }
+  })
+  expect(mobileHistoryGeometry.overflow).toBeGreaterThan(200)
+  expect(mobileHistoryGeometry.tableWidth).toBeGreaterThanOrEqual(680)
+  expect(mobileHistoryGeometry.headersWrap).toBe(false)
+  await mobileHistoryTable.evaluate((element) => {
+    const shell = element.shadowRoot!.querySelector<HTMLElement>('[part="shell"]')!
+    shell.scrollLeft = shell.scrollWidth
+  })
+  await expect.poll(() => mobileHistoryTable.evaluate((element) => element.shadowRoot!.querySelector<HTMLElement>('[part="shell"]')!.scrollLeft)).toBeGreaterThan(200)
   await page.getByRole('link', { name: 'Northstar CLM rollout' }).click()
   await expect(page.getByRole('heading', { name: 'Deployment details' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Deployment actions' })).toBeVisible()

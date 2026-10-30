@@ -1163,8 +1163,9 @@ html[data-theme='dark'] .overview-connection-copy {
   .summary-surface::part(card) { padding-right: 16px; }
   .workflow-path::part(stage) { padding-inline: .25em; font-size: .68rem; }
   .workflow-path::part(stage-marker) { margin-inline-end: .1rem; }
-  .deployment-history-table::part(table) { table-layout: fixed; font-size: 10px; }
-  .deployment-history-table::part(sortable) { white-space: normal; }
-  .deployment-history-table::part(sort-button) { padding: 7px 4px; overflow-wrap: anywhere; white-space: normal; font-size: 9px; letter-spacing: .02em; }
-  .deployment-history-table::part(cell-link) { overflow-wrap: anywhere; }
+  .deployment-history-table::part(shell) { overflow-x: auto; overscroll-behavior-inline: contain; }
+  .deployment-history-table::part(table) { min-width: 680px; table-layout: auto; font-size: 12px; }
+  .deployment-history-table::part(sortable) { white-space: nowrap; }
+  .deployment-history-table::part(sort-button) { padding: 9px 12px; overflow-wrap: normal; white-space: nowrap; font-size: 11px; letter-spacing: .04em; }
+  .deployment-history-table::part(cell-link) { overflow-wrap: normal; }
 }
