@@ -472,13 +472,17 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
     const glyph = icon.shadowRoot!.querySelector<HTMLElement>('[part="glyph"]')!.getBoundingClientRect()
     const svg = icon.shadowRoot!.querySelector<SVGSVGElement>('svg')!
     const svgBounds = svg.getBoundingClientRect()
-    const card = icon.closest('box-card')!.shadowRoot!.querySelector<HTMLElement>('[part="card"]')!.getBoundingClientRect()
+    const cardElement = icon.closest('box-card')!.shadowRoot!.querySelector<HTMLElement>('[part="card"]')!
+    const card = cardElement.getBoundingClientRect()
+    const cardStyle = getComputedStyle(cardElement)
     const heading = icon.parentElement!.querySelector<HTMLElement>('h2')!.getBoundingClientRect()
     return {
       host: { left: host.left, right: host.right, top: host.top, bottom: host.bottom },
       glyph: { left: glyph.left, right: glyph.right, top: glyph.top, bottom: glyph.bottom },
       svg: { left: svgBounds.left, right: svgBounds.right, top: svgBounds.top, bottom: svgBounds.bottom },
       cardLeft: card.left,
+      cardPaddingLeft: Number.parseFloat(cardStyle.paddingLeft),
+      cardPaddingRight: Number.parseFloat(cardStyle.paddingRight),
       headingLeft: heading.left,
       contentInset: heading.left - card.left,
     }
@@ -489,6 +493,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(summaryIconBounds.glyph.bottom).toBeLessThanOrEqual(summaryIconBounds.host.bottom + 0.01)
   expect(summaryIconBounds.svg).toEqual(summaryIconBounds.host)
   expect(Math.abs(summaryIconBounds.host.left - summaryIconBounds.headingLeft)).toBeLessThan(0.01)
+  expect(summaryIconBounds.cardPaddingLeft).toBeGreaterThanOrEqual(16)
+  expect(summaryIconBounds.cardPaddingRight).toBeGreaterThanOrEqual(16)
   expect(summaryIconBounds.contentInset).toBeGreaterThanOrEqual(16)
   await page.setViewportSize({ width: 1280, height: 720 })
   await expect(page.getByText('Every selected system finished successfully. Open a destination to review the deployed experience.')).toHaveCount(0)
