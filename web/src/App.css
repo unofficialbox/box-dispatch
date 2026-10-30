@@ -27,7 +27,7 @@ h1, h2, h3, p { margin-top: 0; } h1 { margin-bottom: 0; line-height: 1.04; } h2 
 .scratch-job { color: var(--dispatch-text) !important; }
 .scratch-job-active { border-color: #14854f; background: #edf9f2; }
 .scratch-job-failed { border-color: #d33b32; background: #fff1f0; }
-.drawer-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 28px; padding-top: 20px; border-top: 1px solid #e4eaf2; }
+.drawer-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .scratch-org-alias { max-width: 18rem; }
 .scratch-org-alias::part(control) { overflow: visible; }
 .scratch-org-alias::part(input) { padding-block: 7px; padding-inline: 16px; }
@@ -620,6 +620,7 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .drawer-button-row box-button, .saved-connection-actions box-button, .drawer-actions box-button { flex: 0 0 auto; }
 .scratch-org-section > box-button { justify-self: start; width: max-content; }
 box-drawer::part(close) { box-sizing: border-box; }
+.connection-drawer::part(drawer) { box-sizing: border-box; height: 100dvh; max-height: 100dvh; }
 
 /* 7. Long labels remain readable instead of clipping at responsive breakpoints. */
 .details-rail { min-width: 0; }
