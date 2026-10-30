@@ -914,6 +914,11 @@ box-drawer::part(close) { box-sizing: border-box; }
   .connection-resource-row::part(trailing), .configuration-resource-row::part(trailing) { width: 100%; justify-content: space-between; padding-left: 56px; }
 }
 
+@media (max-width: 360px) {
+  .sidebar::part(sidebar), .sidebar[collapsed]::part(sidebar) { padding-inline: 8px; }
+  .sidebar::part(body) { gap: 3px; }
+}
+
 @media (max-width: 560px) {
   .connection-mode-picker::part(group) { grid-template-columns: 1fr; }
   .connection-option-row::part(row) { align-items: stretch; flex-wrap: wrap; }

@@ -607,6 +607,37 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
   await expect(page.getByRole('link', { name: 'Compare Box environments', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Deployment history', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+    const navigationGeometry = await page.locator('box-nav-sidebar.sidebar').evaluate((sidebar) => {
+      const viewportWidth = document.documentElement.clientWidth
+      return [...sidebar.querySelectorAll<HTMLElement>('.nav-route')].map((route) => {
+        const control = route.getBoundingClientRect()
+        const graphics = [...route.querySelectorAll<SVGGraphicsElement>('svg, svg *')]
+          .map((graphic) => graphic.getBoundingClientRect())
+          .filter((bounds) => bounds.width > 0 && bounds.height > 0)
+        const painted = {
+          left: Math.min(...graphics.map((bounds) => bounds.left)),
+          top: Math.min(...graphics.map((bounds) => bounds.top)),
+          right: Math.max(...graphics.map((bounds) => bounds.right)),
+          bottom: Math.max(...graphics.map((bounds) => bounds.bottom)),
+        }
+        return {
+          label: route.getAttribute('aria-label'),
+          controlFits: control.left >= -0.5 && control.right <= viewportWidth + 0.5,
+          paintedFitsControl: painted.left >= control.left - 0.5 && painted.right <= control.right + 0.5 && painted.top >= control.top - 0.5 && painted.bottom <= control.bottom + 0.5,
+          paintedFitsViewport: painted.left >= -0.5 && painted.right <= viewportWidth + 0.5,
+        }
+      })
+    })
+    expect(navigationGeometry.filter((route) => !route.controlFits || !route.paintedFitsControl || !route.paintedFitsViewport)).toEqual([])
+    await page.screenshot({ path: test.info().outputPath(`mobile-navigation-${width}.png`) })
+    await page.getByRole('link', { name: 'Overview', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible()
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'New deployment' }).click()
 
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
