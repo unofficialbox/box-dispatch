@@ -447,6 +447,20 @@ func TestScratchCreateUsesConfirmedDevHubInsteadOfSelectedOrg(t *testing.T) {
 	}
 }
 
+func TestScratchLatestReturnsNoContentBeforeARequestStarts(t *testing.T) {
+	handler := NewHandlerWithOptions(ServerOptions{})
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/salesforce/scratch-orgs/latest", nil))
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("latest = %d %s", response.Code, response.Body.String())
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("latest returned a body: %s", response.Body.String())
+	}
+}
+
 func TestScratchCreatePreparesManagedPackageWhenRequested(t *testing.T) {
 	settings := config.ConnectionSettings{SalesforceDevHubURL: "https://devhub.example.com", SalesforceDevHubToken: "hub-token"}
 	prepared := make(chan struct{}, 1)
