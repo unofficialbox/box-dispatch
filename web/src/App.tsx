@@ -24,6 +24,7 @@ import type { BoxOAuthJob, ConnectionSummary, DeploymentDefaults, DeploymentPlan
 import { refreshProviderReadiness } from './connectionReadiness'
 import { markConnectionsChecking, markPlanConnectionsChecking, refreshPlanReadiness, revalidateConnections } from './connectionRefresh'
 import { watchLoginJob } from './loginPolling'
+import { fetchJSON, fetchOptionalJSON } from './jsonFetch'
 import { scratchOrgRequest } from './scratchOrg'
 import { connectionsReadyForPlan, guardedWorkflowPhase, resumeWorkflowPhase } from './workflowResume'
 
@@ -160,7 +161,7 @@ function App() {
     // oxlint-disable-next-line react/set-state-in-effect
     setInitialDataLoaded(false)
     if (viewFromHash() === 'workflow') workflowResumeRequested.current = true
-    void Promise.allSettled([fetchJSON<DeploymentPlan>('/api/plan', controller.signal), fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal), fetchJSON<DeploymentDefaults>('/api/defaults', controller.signal), fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal), fetchJSON<DispatchRun[]>('/api/runs', controller.signal), fetchJSON<ScratchOrgJob>('/api/salesforce/scratch-orgs/latest', controller.signal)]).then(([planResult, templatesResult, defaultsResult, deploymentsResult, runsResult, scratchResult]) => {
+    void Promise.allSettled([fetchJSON<DeploymentPlan>('/api/plan', controller.signal), fetchJSON<SolutionTemplate[]>('/api/templates', controller.signal), fetchJSON<DeploymentDefaults>('/api/defaults', controller.signal), fetchJSON<DeploymentSummary[]>('/api/deployments', controller.signal), fetchJSON<DispatchRun[]>('/api/runs', controller.signal), fetchOptionalJSON<ScratchOrgJob>('/api/salesforce/scratch-orgs/latest', controller.signal)]).then(([planResult, templatesResult, defaultsResult, deploymentsResult, runsResult, scratchResult]) => {
       if (controller.signal.aborted) return
       const failed: Record<string, string> = {}
       for (const [key, label, result] of [
@@ -910,12 +911,6 @@ function App() {
     : waitingForData ? <section className="task-surface overview-skeleton" role="status" aria-label="Loading workspace data" style={{ padding: '34px 44px' }}><box-skeleton variant="line" lines={2} style={{ marginBottom: '32px', maxWidth: '600px' }}></box-skeleton><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '32px' }}><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton><box-skeleton variant="line" lines={3} style={{ minHeight: '120px' }}></box-skeleton></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '32px' }}><div style={{ display: 'grid', gap: '24px' }}><box-skeleton variant="line" lines={5} style={{ minHeight: '180px' }}></box-skeleton><box-skeleton variant="line" lines={6} style={{ minHeight: '200px' }}></box-skeleton></div><box-skeleton variant="line" lines={8} style={{ minHeight: '400px' }}></box-skeleton></div></section> : content
 
   return <box-app-shell className="app-shell" heading="Box Dispatch" nav-label="Application navigation"><Sidebar activeView={screen} onOverview={() => navigateTo('overview')} onNewDeployment={beginNewDeployment} onCompare={() => navigateTo('compare')} onHistory={() => navigateTo('history')} onSettings={() => navigateTo('settings')}/><div id="workspace" className="workspace">{streamNotice && <p className="notice" role="status">{streamNotice}</p>}{visibleContent}</div>{diagnosticRunID && <DiagnosticsDrawer diagnostic={diagnostic} loading={diagnosticLoading} error={diagnosticError} onRetry={() => setDiagnosticRetry((current) => current + 1)} onClose={() => setDiagnosticRunID(null)}/>} {changeReview && <ValidationChangesDrawer files={validationChanges} loading={validationChangesLoading} error={validationChangesError} stage={changeReview.stage} onClose={() => setChangeReview(null)}/>} {connectionDrawerOpen && <SalesforceConnectionDrawer connection={connections.find((connection) => connection.name === 'Salesforce')} loading={connectionsLoading} error={salesforceConnectionError} oauthJob={oauthJob} scratchJob={scratchJob} onLogin={startSalesforceOAuth} onSelect={selectSalesforceOrg} onRemove={removeSalesforceOrg} onOpen={() => openProvider('salesforce')} onCreateScratch={createScratchOrg} onClose={closeSalesforceConnection}/>} {boxConnectionDrawerOpen && <BoxConnectionDrawer connection={connections.find((connection) => connection.name === 'Box')} loading={boxConnectionLoading} error={boxConnectionError} oauthJob={boxOauthJob} onLogin={startBoxOAuth} onSelect={selectBoxConnection} onRemove={removeBoxConnection} onOpen={() => openProvider('box')} onClose={closeBoxConnection}/>} {deploymentConfirmationOpen && <DeploymentConfirmationDialog plan={plan} packagePreparing={Boolean(packagePreparing)} packageMessage={scratchJob?.packageMessage} onCancel={() => setDeploymentConfirmationOpen(false)} onConfirm={applyDeployment}/>} {toastNotice}</box-app-shell>
-}
-
-async function fetchJSON<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal })
-  if (!response.ok) throw new Error(`${path} is unavailable.`)
-  return (await response.json()) as T
 }
 
 async function responseError(response: Response, fallback: string): Promise<string> {

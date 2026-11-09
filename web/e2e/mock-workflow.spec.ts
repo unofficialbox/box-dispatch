@@ -100,6 +100,21 @@ async function expectStackedWorkspaceRail(page: Page, workspaceSelector: string,
   await page.setViewportSize({ width: 1280, height: 720 })
 }
 
+test('loads an empty scratch-org state without failed startup responses', async ({ page }) => {
+  const failedResponses: { status: number; url: string }[] = []
+  const pageErrors: string[] = []
+  page.on('response', (response) => {
+    if (response.status() >= 400) failedResponses.push({ status: response.status(), url: response.url() })
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible()
+
+  expect(failedResponses).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('follows the system color preference across primary pages', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.goto('/')

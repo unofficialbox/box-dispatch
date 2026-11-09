@@ -836,7 +836,7 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	mux.HandleFunc("GET /api/salesforce/scratch-orgs/latest", func(w http.ResponseWriter, _ *http.Request) {
 		job, ok := scratchJobs.latest()
 		if !ok {
-			writeError(w, http.StatusNotFound, "scratch-org request was not found")
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		writeJSON(w, http.StatusOK, job)
