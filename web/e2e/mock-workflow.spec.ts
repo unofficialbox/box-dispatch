@@ -233,8 +233,8 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   await expect(workflow.locator('[part="stage"][data-stage-id="Summary"]')).toHaveAttribute('data-state', 'upcoming')
   const solutionGroup = page.locator('box-tile-group.solution-list')
   const selectedSolutionBorder = await solutionGroup.evaluate((group) => {
-    const selected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')!
-    const unselected = group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="false"]')!
+    const selected = group.shadowRoot!.querySelector<HTMLElement>('[part~="tile"][data-selected="true"]')!
+    const unselected = group.shadowRoot!.querySelector<HTMLElement>('[part~="tile"][data-selected="false"]')!
     const selectedStyle = getComputedStyle(selected)
     const unselectedStyle = getComputedStyle(unselected)
     return {
@@ -247,10 +247,10 @@ test('configures, validates, and deploys against the mock backend', async ({ pag
   expect(selectedSolutionBorder.selectedWidths).toEqual(['1px', '1px', '1px', '1px'])
   expect(new Set(selectedSolutionBorder.selectedColors).size).toBe(1)
   expect(selectedSolutionBorder.selectedColors[0]).not.toBe(selectedSolutionBorder.unselectedColor)
-  await solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLInputElement>('[part="tile"][data-selected="false"] [part="control"]')!.click())
-  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).not.toBe(selectedSolutionBorder.selectedID)
-  await solutionGroup.evaluate((group, selectedID) => group.shadowRoot!.querySelector<HTMLInputElement>(`[part="tile"][data-option-id="${selectedID}"] [part="control"]`)!.click(), selectedSolutionBorder.selectedID)
-  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part="tile"][data-selected="true"]')?.dataset.optionId)).toBe(selectedSolutionBorder.selectedID)
+  await solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLInputElement>('[part~="tile"][data-selected="false"] [part="control"]')!.click())
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part~="tile"][data-selected="true"]')?.dataset.optionId)).not.toBe(selectedSolutionBorder.selectedID)
+  await solutionGroup.evaluate((group, selectedID) => group.shadowRoot!.querySelector<HTMLInputElement>(`[part~="tile"][data-option-id="${selectedID}"] [part="control"]`)!.click(), selectedSolutionBorder.selectedID)
+  await expect.poll(() => solutionGroup.evaluate((group) => group.shadowRoot!.querySelector<HTMLElement>('[part~="tile"][data-selected="true"]')?.dataset.optionId)).toBe(selectedSolutionBorder.selectedID)
   const nameFieldLayout = await page.evaluate(() => {
     const section = document.querySelector('.deployment-name-field')!.getBoundingClientRect()
     const field = document.querySelector('.deployment-name-field box-text-field')!.getBoundingClientRect()
@@ -687,7 +687,7 @@ test('keeps the primary workflow usable on a mobile viewport', async ({ page }) 
     const status = rect(document.querySelector('.meta-status')!)
     const solutionGroup = document.querySelector<HTMLElement>('box-tile-group.solution-list')!
     const group = rect(solutionGroup)
-    const options = [...solutionGroup.shadowRoot!.querySelectorAll<HTMLElement>('[part="tile"]')].map((option) => {
+    const options = [...solutionGroup.shadowRoot!.querySelectorAll<HTMLElement>('[part~="tile"]')].map((option) => {
       const row = rect(option)
       return {
         inset: row.left - group.left,
@@ -744,7 +744,7 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
   await expect(defaults.locator('box-tile-group.settings-default-solution-list').getByText('Coming soon', { exact: true })).toHaveCount(3)
   await expect(defaults.getByText('Source', { exact: true })).toBeVisible()
   await expect(defaults.getByRole('link', { name: 'https://github.com/unofficialbox/box-bedrock-for-clm' })).toBeVisible()
-  await defaults.locator('box-tile-group.strategy-picker').locator('[part="tile"][data-option-id="create_new"]').click()
+  await defaults.locator('box-tile-group.strategy-picker').locator('[part~="tile"][data-option-id="create_new"]').click()
   await defaults.locator('box-switch[label="Salesforce"]').evaluate((control) => {
     control.dispatchEvent(new CustomEvent('checked-changed', { detail: { checked: false } }))
   })
@@ -763,7 +763,7 @@ test('edits workspace defaults and applies them to a new deployment', async ({ p
 
   await page.getByRole('link', { name: 'Deployments' }).click()
   await expect(page.getByRole('heading', { name: 'Choose a solution' })).toBeVisible()
-  await expect(page.locator('box-tile-group.solution-list').locator('[part="tile"][data-selected="true"]')).toContainText('Contract Lifecycle Management')
+  await expect(page.locator('box-tile-group.solution-list').locator('[part~="tile"][data-selected="true"]')).toContainText('Contract Lifecycle Management')
   await expect(page.locator('box-switch[label="Salesforce"]')).not.toHaveAttribute('checked')
 
   await page.request.put('/api/defaults', { data: { templateId: 'clm', strategy: 'reuse', components: ['box', 'salesforce'] } })

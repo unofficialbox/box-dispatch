@@ -11,7 +11,7 @@ This plan is based on:
 - the Dispatch React implementation on `codex/history-deployment-summaries`;
 - the original `@unofficialbox/box-open-elements` and React adapter baseline at
   `0.12.0`; and
-- the Box Open Elements packages at version `0.40.0`, reviewed on October 11, 2026.
+- the Box Open Elements packages at version `0.46.0`, reviewed on November 10, 2026.
 
 Phase 0 upgraded both packages to 0.27.0. The 0.28.1 follow-up upgrades core and
 React packages in lockstep and adopts the component contracts released in 0.28.0.
@@ -79,6 +79,13 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   results and inherited accessibility limits are recorded in
   `docs/BOE_0_40_UPGRADE.md`. The adoption PR requires independent review and
   separate merge approval.
+- **0.46.0 maintenance update:** core and React are pinned together to the published
+  release. Dispatch removes its temporary connection-drawer viewport override because
+  the component now constrains long drawers to the dynamic viewport. Table casing and
+  host font-size inheritance preserve Dispatch's supplied labels and type scale; the
+  new Tile Group chip layout and Metric Card emphasis modes are additive and unused.
+  The Folder Tree and Folder Tree Diff shipped in 0.43.0 are now available for a
+  focused Compare migration; this version update does not change that workflow yet.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer
