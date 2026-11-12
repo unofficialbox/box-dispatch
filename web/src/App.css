@@ -624,7 +624,6 @@ h1 { color: var(--dispatch-ink); font-size: clamp(31px, 3vw, 43px); letter-spaci
 .drawer-button-row box-button, .saved-connection-actions box-button, .drawer-actions box-button { flex: 0 0 auto; }
 .scratch-org-section > box-button { justify-self: start; width: max-content; }
 box-drawer::part(close) { box-sizing: border-box; }
-.connection-drawer::part(drawer) { box-sizing: border-box; height: 100dvh; max-height: 100dvh; }
 
 /* 7. Long labels remain readable instead of clipping at responsive breakpoints. */
 .details-rail { min-width: 0; }
