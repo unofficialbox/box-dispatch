@@ -344,6 +344,71 @@ func TestMetadataTemplatePromotionRechecksLiveStateAndSelectsDestination(t *test
 	}
 }
 
+func TestFolderPromotionRechecksLiveStateAndSelectsDestination(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	promotion := boxdiff.FolderPromotion{
+		Comparison: boxdiff.FolderComparison{
+			Left:  boxdiff.Environment{ConnectionID: "left", EnterpriseID: "EID-source"},
+			Right: boxdiff.Environment{ConnectionID: "right", EnterpriseID: "EID-destination"},
+		},
+		Items: []boxdiff.FolderPromotionItem{{Path: "/QA/file.txt", Type: "file", Content: []byte("live")}},
+	}
+	prepareCalls := 0
+	var savedPlan config.SolutionPlan
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(next config.ConnectionSettings) error { settings = next; return nil },
+		BoxFolderPromotion: func(_ context.Context, left, right, leftRoot, rightRoot string, nodes []boxdiff.FolderPromotionSelection) (boxdiff.FolderPromotion, error) {
+			prepareCalls++
+			if left != "left" || right != "right" || leftRoot != "source-root" || rightRoot != "destination-root" || len(nodes) != 1 || nodes[0].Path != "/QA/file.txt" {
+				t.Fatalf("folder promotion request = %q %q %q %q %#v", left, right, leftRoot, rightRoot, nodes)
+			}
+			return promotion, nil
+		},
+		FolderPromotionAssembler: func(name, destinationRoot string, got boxdiff.FolderPromotion, _ time.Time) (config.SolutionPlan, error) {
+			if name != "QA folder promotion" || destinationRoot != "destination-root" || len(got.Items) != 1 {
+				t.Fatalf("assembler input = %q %q %#v", name, destinationRoot, got)
+			}
+			return config.SolutionPlan{Name: name, TemplateID: folderPromotionTemplateID, Template: "Folder promotion", Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/tmp/package"}, nil
+		},
+		PlanSaver: func(plan config.SolutionPlan) error { savedPlan = plan; return nil },
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/folders", strings.NewReader(`{"name":"QA folder promotion","leftConnectionId":"left","rightConnectionId":"right","leftRootId":"source-root","rightRootId":"destination-root","nodes":[{"path":"/QA/file.txt","type":"file"}]}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	if prepareCalls != 1 || settings.BoxSelectedConnectionID != "right" || savedPlan.TemplateID != folderPromotionTemplateID {
+		t.Fatalf("calls=%d selected=%q plan=%#v", prepareCalls, settings.BoxSelectedConnectionID, savedPlan)
+	}
+}
+
+func TestFolderPromotionRejectsStaleSelection(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)
+	assembled := false
+	handler := NewHandlerWithOptions(ServerOptions{
+		Runs:            newRunManagerWithExecutors(nil, nil, time.Now),
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		ConnectionSaver: func(config.ConnectionSettings) error { return nil },
+		BoxFolderPromotion: func(context.Context, string, string, string, string, []boxdiff.FolderPromotionSelection) (boxdiff.FolderPromotion, error) {
+			return boxdiff.FolderPromotion{}, errors.New("file is no longer eligible for promotion; rerun the live comparison")
+		},
+		FolderPromotionAssembler: func(string, string, boxdiff.FolderPromotion, time.Time) (config.SolutionPlan, error) {
+			assembled = true
+			return config.SolutionPlan{}, nil
+		},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/promotions/folders", strings.NewReader(`{"name":"QA folder promotion","leftConnectionId":"left","rightConnectionId":"right","nodes":[{"path":"/QA/file.txt","type":"file"}]}`)))
+	if response.Code != http.StatusConflict || assembled {
+		t.Fatalf("status=%d assembled=%t body=%s", response.Code, assembled, response.Body.String())
+	}
+}
+
 func TestAIAgentPromotionRejectsAgentThatChangedSinceComparison(t *testing.T) {
 	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Source"}, true)
 	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Destination"}, false)

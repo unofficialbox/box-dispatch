@@ -42,6 +42,7 @@ type FolderItemCounts struct {
 // Folder is a provider-ID-free view of a folder beneath the connected user's
 // All Files root. Path is the stable comparison key across enterprises.
 type Folder struct {
+	ID    string           `json:"-"`
 	Path  string           `json:"path"`
 	Name  string           `json:"name"`
 	Depth int              `json:"depth"`
@@ -52,9 +53,33 @@ type Folder struct {
 // user's All Files root. File contents, hashes, versions, URLs, and Box IDs are
 // deliberately excluded from structural comparison.
 type FolderEntry struct {
+	ID   string `json:"-"`
 	Path string `json:"path"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+// FolderPromotionSelection is the provider-neutral node identity the browser
+// sends back when preparing a deployment. Provider IDs never cross the browser
+// boundary; the server resolves them again from a fresh live comparison.
+type FolderPromotionSelection struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+// FolderPromotionItem is the complete server-side payload needed to assemble
+// a portable folder package. Content and URLs are deliberately omitted from
+// comparison responses.
+type FolderPromotionItem struct {
+	Path    string
+	Type    string
+	Content []byte
+	URL     string
+}
+
+type FolderPromotion struct {
+	Comparison FolderComparison
+	Items      []FolderPromotionItem
 }
 
 type FolderSnapshot struct {

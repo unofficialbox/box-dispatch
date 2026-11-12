@@ -62,6 +62,10 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				component = "AI Agent:Legal Assistant"
 				changes = mockAIAgentPromotionChanges()
 			}
+			if plan.TemplateID == folderPromotionTemplateID && provider == "box" {
+				component = "Folder:/Legal"
+				changes = []salesforceapi.MetadataFileDiff{{Component: component, Path: "folder-promotion/Legal.json", Kind: "add", After: "{\n  \"path\": \"/Legal\",\n  \"type\": \"folder\"\n}", Previewable: true}}
+			}
 			emit(provider, lifecycle.ProgressUpdate{Message: "Inspecting mock " + provider + " configuration", Component: component, State: lifecycle.ProgressRunning, Total: 1})
 			time.Sleep(500 * time.Millisecond)
 			emit(provider, lifecycle.ProgressUpdate{Message: "Ready to deploy", Component: component, State: lifecycle.ProgressCompleted, Current: 1, Total: 1})
@@ -87,6 +91,12 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			provider := result[index].Provider
 			component := mockProviderComponent(provider)
+			if plan.TemplateID == aiAgentPromotionTemplateID && provider == "box" {
+				component = "AI Agent:Legal Assistant"
+			}
+			if plan.TemplateID == folderPromotionTemplateID && provider == "box" {
+				component = "Folder:/Legal"
+			}
 			emit(provider, lifecycle.ProgressUpdate{Message: "Applying mock " + provider + " configuration", State: lifecycle.ProgressRunning})
 			if provider == "salesforce" {
 				const availability = "Salesforce org availability"
@@ -108,6 +118,9 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			result[index].Missing = nil
 			result[index].DeployableComponents = nil
 			result[index].Deployable = false
+			if plan.TemplateID == folderPromotionTemplateID && provider == "box" {
+				result[index].Resources = []lifecycle.ResourceReference{{Provider: "box", Component: component, Kind: "folder", Name: "Legal", ID: "folder-mock-created", URL: "https://app.box.com/folder/folder-mock-created"}}
+			}
 			time.Sleep(30 * time.Millisecond)
 		}
 		completedAt := time.Now().UTC()
@@ -252,6 +265,30 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			return boxdiff.CompareFolderSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
 		},
+		BoxFolderPromotion: func(_ context.Context, left, right, leftRoot, rightRoot string, nodes []boxdiff.FolderPromotionSelection) (boxdiff.FolderPromotion, error) {
+			if len(nodes) == 0 {
+				return boxdiff.FolderPromotion{}, errors.New("select at least one folder item")
+			}
+			items := make([]boxdiff.FolderPromotionItem, 0, len(nodes))
+			for _, node := range nodes {
+				item := boxdiff.FolderPromotionItem{Path: node.Path, Type: node.Type}
+				if node.Type == "file" {
+					item.Content = []byte("mock promoted file\n")
+				}
+				if node.Type == "web_link" {
+					item.URL = "https://example.test/reference"
+				}
+				items = append(items, item)
+			}
+			return boxdiff.FolderPromotion{
+				Comparison: boxdiff.FolderComparison{
+					Left:  boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", EnterpriseID: "EID-mock"},
+					Right: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", EnterpriseID: "EID-sandbox"},
+					Scope: boxdiff.FolderScope{LeftRootLabel: leftRoot, RightRootLabel: rightRoot},
+				},
+				Items: items,
+			}, nil
+		},
 		BoxFolderChildren: func(_ context.Context, connectionID, parentID string) (boxdiff.FolderChildren, error) {
 			children := boxdiff.FolderChildren{ParentID: parentID, Folders: []boxdiff.FolderChoice{}}
 			switch connectionID + ":" + parentID {
@@ -316,6 +353,16 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				Name: name, TemplateID: metadataTemplatePromotionTemplateID, Template: "Metadata template promotion",
 				Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/metadata-templates",
 				Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/mock/metadata-template-promotion",
+			}, nil
+		},
+		FolderPromotionAssembler: func(name, _ string, promotion boxdiff.FolderPromotion, _ time.Time) (config.SolutionPlan, error) {
+			if len(promotion.Items) == 0 {
+				return config.SolutionPlan{}, errors.New("select at least one folder item")
+			}
+			return config.SolutionPlan{
+				Name: name, TemplateID: folderPromotionTemplateID, Template: "Folder promotion",
+				Repository: "box://enterprise/" + promotion.Comparison.Left.EnterpriseID + "/folders",
+				Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: "/mock/folder-promotion",
 			}, nil
 		},
 		SalesforceCheck: func(context.Context, salesforceapi.Credential) (salesforceapi.OrgStatus, error) {

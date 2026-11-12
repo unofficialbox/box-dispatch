@@ -3,6 +3,7 @@ package webapi
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,10 +18,12 @@ import (
 const (
 	aiAgentPromotionTemplateID          = "ai-agent-promotion"
 	metadataTemplatePromotionTemplateID = "metadata-template-promotion"
+	folderPromotionTemplateID           = "folder-promotion"
 )
 
 type aiAgentPromotionAssembler func(string, boxdiff.AIAgentComparison, []boxdiff.AIAgent, time.Time) (config.SolutionPlan, error)
 type metadataTemplatePromotionAssembler func(string, boxdiff.Comparison, []boxdiff.MetadataTemplate, time.Time) (config.SolutionPlan, error)
+type folderPromotionAssembler func(string, string, boxdiff.FolderPromotion, time.Time) (config.SolutionPlan, error)
 
 type aiAgentPromotionRequest struct {
 	Name              string   `json:"name"`
@@ -34,6 +37,75 @@ type metadataTemplatePromotionRequest struct {
 	LeftConnectionID  string   `json:"leftConnectionId"`
 	RightConnectionID string   `json:"rightConnectionId"`
 	TemplateKeys      []string `json:"templateKeys"`
+}
+
+type folderPromotionRequest struct {
+	Name              string                             `json:"name"`
+	LeftConnectionID  string                             `json:"leftConnectionId"`
+	RightConnectionID string                             `json:"rightConnectionId"`
+	LeftRootID        string                             `json:"leftRootId"`
+	RightRootID       string                             `json:"rightRootId"`
+	Nodes             []boxdiff.FolderPromotionSelection `json:"nodes"`
+}
+
+func (r folderPromotionRequest) normalized() folderPromotionRequest {
+	r.Name = normalizeDeploymentName(r.Name)
+	r.LeftConnectionID = strings.TrimSpace(r.LeftConnectionID)
+	r.RightConnectionID = strings.TrimSpace(r.RightConnectionID)
+	r.LeftRootID = strings.TrimSpace(r.LeftRootID)
+	r.RightRootID = strings.TrimSpace(r.RightRootID)
+	if r.LeftRootID == "" {
+		r.LeftRootID = "0"
+	}
+	if r.RightRootID == "" {
+		r.RightRootID = "0"
+	}
+	for index := range r.Nodes {
+		r.Nodes[index].Path = strings.TrimSpace(r.Nodes[index].Path)
+		r.Nodes[index].Type = strings.TrimSpace(r.Nodes[index].Type)
+	}
+	return r
+}
+
+func (r folderPromotionRequest) validate() error {
+	if r.Name == "" {
+		return fmt.Errorf("enter a deployment name")
+	}
+	if utf8.RuneCountInString(r.Name) > 80 {
+		return fmt.Errorf("deployment name must be 80 characters or fewer")
+	}
+	if r.LeftConnectionID == "" || r.RightConnectionID == "" {
+		return fmt.Errorf("select two saved Box connections")
+	}
+	if r.LeftConnectionID == r.RightConnectionID {
+		return fmt.Errorf("select two different Box connections")
+	}
+	if len(r.Nodes) == 0 {
+		return fmt.Errorf("select at least one missing folder, file, or web link")
+	}
+	if len(r.Nodes) > boxdiff.FolderComparisonMaxEntries+boxdiff.FolderComparisonMaxFolders {
+		return fmt.Errorf("too many folder comparison nodes were selected")
+	}
+	seen := map[string]bool{}
+	for _, node := range r.Nodes {
+		if node.Path == "" || !strings.HasPrefix(node.Path, "/") {
+			return fmt.Errorf("folder promotion paths must be relative to the selected source root")
+		}
+		if _, err := portablePromotionPath(node.Path); err != nil {
+			return err
+		}
+		switch node.Type {
+		case "folder", "file", "web_link":
+		default:
+			return fmt.Errorf("unsupported folder promotion type %q", node.Type)
+		}
+		key := node.Type + ":" + node.Path
+		if seen[key] {
+			return fmt.Errorf("folder promotion node %q is selected more than once", node.Path)
+		}
+		seen[key] = true
+	}
+	return nil
 }
 
 func (r metadataTemplatePromotionRequest) normalized() metadataTemplatePromotionRequest {
@@ -368,4 +440,97 @@ func assembleMetadataTemplatePromotion(name string, comparison boxdiff.Compariso
 		Repository: "box://enterprise/" + comparison.Left.EnterpriseID + "/metadata-templates",
 		Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: destination,
 	}, nil
+}
+
+func assembleFolderPromotion(name, destinationRootID string, promotion boxdiff.FolderPromotion, now time.Time) (plan config.SolutionPlan, err error) {
+	stamp := now.UTC().Format("20060102-150405.000000000")
+	destination := filepath.Join(config.Paths().Root, ".box-dispatch", "web-packages", folderPromotionTemplateID+"-"+stamp)
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return config.SolutionPlan{}, fmt.Errorf("create folder promotion package: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(destination)
+		}
+	}()
+
+	enabled := true
+	manifest := solution.Manifest{
+		SchemaVersion: "1.0", TemplateID: folderPromotionTemplateID, DeploymentConfig: ".dispatch/deployment.bcl",
+		Box: solution.BoxManifest{
+			DeploymentDefaults: solution.DefaultDeploymentSettings().Box,
+			ComponentOrder:     []string{"Folder", "File", "Web Link"},
+			Capabilities: []solution.Capability{{
+				ID: "folder_promotion", ComponentType: "Folder Promotion", EnabledByDefault: &enabled,
+				API: "public", Handler: "box.folder-promotion", Operations: []string{"validate", "deploy"},
+			}},
+		},
+	}
+	if err := solution.WriteManifest(destination, manifest); err != nil {
+		return config.SolutionPlan{}, err
+	}
+	if err := solution.WriteDeploymentSettings(destination, manifest.DeploymentConfig, solution.DefaultDeploymentSettings()); err != nil {
+		return config.SolutionPlan{}, err
+	}
+
+	payload := make([]any, 0, len(promotion.Items))
+	for _, item := range promotion.Items {
+		relative, pathErr := portablePromotionPath(item.Path)
+		if pathErr != nil {
+			return config.SolutionPlan{}, pathErr
+		}
+		entry := map[string]any{"path": "/" + relative, "type": item.Type}
+		switch item.Type {
+		case "folder":
+		case "file":
+			source := path.Join("content", relative)
+			local := filepath.Join(destination, filepath.FromSlash(source))
+			if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+				return config.SolutionPlan{}, err
+			}
+			if err := os.WriteFile(local, item.Content, 0o600); err != nil {
+				return config.SolutionPlan{}, fmt.Errorf("write promoted file %s: %w", item.Path, err)
+			}
+			entry["source"] = source
+		case "web_link":
+			entry["url"] = item.URL
+		default:
+			return config.SolutionPlan{}, fmt.Errorf("unsupported folder promotion type %q", item.Type)
+		}
+		payload = append(payload, entry)
+	}
+
+	doc := bcl.NewDocument(folderPromotionTemplateID, "generic", "box-folder-promotion", now.UTC().Format(time.RFC3339), map[string]any{
+		"sourceEnterpriseId": promotion.Comparison.Left.EnterpriseID, "destinationEnterpriseId": promotion.Comparison.Right.EnterpriseID,
+	})
+	doc.Resources = []bcl.BCLResource{{
+		Name: "config_box_folder-promotion", Type: "config_file", TerraformType: "null_resource", Provider: "generic",
+		Config: map[string]any{
+			"artifact_name": "folder-promotion", "artifact_type": "config", "provider": "generic",
+			"provider_object_id": "box/folder-promotion", "enterprise_id": promotion.Comparison.Left.EnterpriseID,
+			"created_at": now.UTC().Format(time.RFC3339), "destination_root_id": strings.TrimSpace(destinationRootID), "items": payload,
+		},
+		Metadata: map[string]any{
+			"artifactName": "folder-promotion", "artifactType": "config_file", "provider": "generic",
+			"providerObjectId": "box/folder-promotion", "enterpriseId": promotion.Comparison.Left.EnterpriseID,
+			"scenario": folderPromotionTemplateID, "createdAt": now.UTC().Format(time.RFC3339),
+		},
+	}}
+	if err := bcl.WriteBCL(filepath.Join(destination, "config", "box", "folder-promotion.bcl"), doc); err != nil {
+		return config.SolutionPlan{}, err
+	}
+	return config.SolutionPlan{
+		Name: name, TemplateID: folderPromotionTemplateID, Template: "Folder promotion",
+		Repository: "box://enterprise/" + promotion.Comparison.Left.EnterpriseID + "/folders/" + strings.TrimSpace(promotion.Comparison.Scope.LeftRootLabel),
+		Components: []string{"box"}, Strategy: solution.StrategyReuse, PackagePath: destination,
+	}, nil
+}
+
+func portablePromotionPath(value string) (string, error) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "/")
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
+		return "", fmt.Errorf("folder promotion path %q is not portable", value)
+	}
+	return clean, nil
 }

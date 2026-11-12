@@ -313,6 +313,13 @@ func boxComponentEntries(root string, manifest solution.Manifest, selection solu
 			entries = append(entries, spec.componentType+":"+name)
 		}
 	}
+	if manifest.CapabilityEnabled("Folder Promotion", selection) {
+		promotionEntries, err := folderPromotionComponents(filepath.Dir(filepath.Dir(root)))
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, promotionEntries...)
+	}
 	if manifest.CapabilityEnabled("Doc Gen Template", selection) {
 		for _, file := range manifest.Box.SampleContent {
 			if strings.EqualFold(filepath.Ext(file.Source), ".docx") {
@@ -515,6 +522,12 @@ func validateBox(root string, item Item, components []string, report Reporter) (
 			}
 			classifyBoxComponent(&item, component, present, !present)
 			report.component(component, ProgressCompleted, validationResultMessage(present, !present), componentIndex(components, component)+1, len(components))
+		}
+	}
+	if manifest.CapabilityEnabled("Folder Promotion", selection) {
+		if promotionErr := validateFolderPromotion(ctx, root, api, &item, report, components); promotionErr != nil {
+			item.Status, item.Detail = StatusFailed, promotionErr.Error()
+			return item, nil
 		}
 	}
 	if publicErr := validateBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, &item, report, components); publicErr != nil {
@@ -1030,6 +1043,15 @@ func deployBoxFoundation(root string, item Item, report Reporter) Item {
 		if found {
 			addResource(&item, "Sample Content:"+filepath.Base(file.Source), "file", filepath.Base(file.Source), fileID, "https://app.box.com/file/"+fileID)
 		}
+	}
+	if manifest.CapabilityEnabled("Folder Promotion", selection) {
+		promotionDeployed, promotionResources, promotionErr := deployFolderPromotion(ctx, root, api, item.DeployableComponents, report)
+		if promotionErr != nil {
+			item.Status, item.Detail = StatusFailed, promotionErr.Error()
+			return item
+		}
+		deployed = append(deployed, promotionDeployed...)
+		item.Resources = append(item.Resources, promotionResources...)
 	}
 	publicDeployed, publicResources, publicErr := deployBoxPublicAdapters(ctx, root, manifest, selection, api, workspaceID, item.DeployableComponents, report)
 	if publicErr != nil {

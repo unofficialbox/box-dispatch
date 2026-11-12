@@ -63,6 +63,7 @@ var teardownKindOrder = []string{
 	"ai_agent",
 	"hub",
 	"metadata_template",
+	"web_link",
 	"file",
 	"folder",
 }
@@ -197,6 +198,8 @@ func deleteBoxResource(box boxContext, resource ResourceReference) TeardownOutco
 		err = box.api.deleteFolder(box.ctx, id)
 	case "file":
 		err = box.api.deleteFile(box.ctx, id)
+	case "web_link":
+		err = box.api.deleteWebLink(box.ctx, id)
 	case "metadata_template":
 		err = box.api.deleteMetadataTemplate(box.ctx, id)
 	case "docgen_template":

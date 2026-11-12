@@ -132,6 +132,54 @@ func TestSelectPromotionTemplatesAcceptsPortableChangedAndSourceOnlyTemplates(t 
 	}
 }
 
+func TestAssembleFolderPromotionKeepsContentServerSide(t *testing.T) {
+	t.Chdir(t.TempDir())
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	promotion := boxdiff.FolderPromotion{
+		Comparison: boxdiff.FolderComparison{
+			Left:  boxdiff.Environment{EnterpriseID: "5105484"},
+			Right: boxdiff.Environment{EnterpriseID: "1509916197"},
+			Scope: boxdiff.FolderScope{LeftRootLabel: "QA Source", RightRootLabel: "QA Destination"},
+		},
+		Items: []boxdiff.FolderPromotionItem{
+			{Path: "/Contracts", Type: "folder"},
+			{Path: "/Contracts/agreement.txt", Type: "file", Content: []byte("contract body\n")},
+			{Path: "/Contracts/reference", Type: "web_link", URL: "https://example.test/reference"},
+		},
+	}
+	plan, err := assembleFolderPromotion("Contract folders", "destination-root", promotion, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TemplateID != folderPromotionTemplateID || plan.Strategy != solution.StrategyReuse {
+		t.Fatalf("plan = %#v", plan)
+	}
+	object, err := bcl.ConfigObject(filepath.Join(plan.PackagePath, "config", "box", "folder-promotion.bcl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var destinationRoot string
+	if err := json.Unmarshal(object["destination_root_id"], &destinationRoot); err != nil || destinationRoot != "destination-root" {
+		t.Fatalf("destination root = %q, err=%v", destinationRoot, err)
+	}
+	var items []struct {
+		Path, Type, Source, URL string
+	}
+	if err := json.Unmarshal(object["items"], &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[1].Source != "content/Contracts/agreement.txt" || items[2].URL != "https://example.test/reference" {
+		t.Fatalf("packaged items = %#v", items)
+	}
+	content, err := os.ReadFile(filepath.Join(plan.PackagePath, filepath.FromSlash(items[1].Source)))
+	if err != nil || string(content) != "contract body\n" {
+		t.Fatalf("content = %q, err=%v", content, err)
+	}
+	if info, err := os.Stat(filepath.Join(plan.PackagePath, filepath.FromSlash(items[1].Source))); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("content permissions = %v, err=%v", info.Mode().Perm(), err)
+	}
+}
+
 func TestSelectPromotionTemplatesRejectsEnterpriseSpecificTemplates(t *testing.T) {
 	for name, field := range map[string]boxdiff.MetadataTemplateField{
 		"taxonomy key":      {Key: "class", Type: "string", TaxonomyKey: "enterprise-specific"},

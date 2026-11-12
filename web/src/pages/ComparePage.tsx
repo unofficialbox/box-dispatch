@@ -113,6 +113,19 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
     onPromotionPrepared?.(prepared)
   }
 
+  const prepareFolderPromotion = async (comparison: BoxFolderComparison, name: string, nodes: { path: string; type: 'folder' | 'file' | 'web_link' }[]) => {
+    const response = await fetch('/api/box/promotions/folders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, leftConnectionId: comparison.left.connectionId, rightConnectionId: comparison.right.connectionId,
+        leftRootId: leftRoot.id, rightRootId: rightRoot.id, nodes,
+      }),
+    })
+    if (!response.ok) throw new Error(await responseMessage(response))
+    const prepared = await response.json() as DeploymentPlan
+    onPromotionPrepared?.(prepared)
+  }
+
   useEffect(() => {
     void import('@unofficialbox/box-open-elements/diff-viewer')
   }, [])
@@ -225,7 +238,7 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
         <EnvironmentSummary label="Destination" environment={comparison.right}/>
       </section>
       <SummaryMetrics summary={comparison.summary}/>
-      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareAIAgentPromotion}/> : <MetadataResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareMetadataPromotion}/>}
+      {result.type === 'folders' ? <FolderResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareFolderPromotion}/> : result.type === 'ai_agents' ? <AIAgentResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareAIAgentPromotion}/> : <MetadataResults key={result.value.completedAt} comparison={result.value} onPrepare={prepareMetadataPromotion}/>}
     </> : null}
   </section>
 }
@@ -294,15 +307,53 @@ function MetadataResults({ comparison, onPrepare }: { comparison: BoxComparison;
   </section>
 }
 
-function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
+function FolderResults({ comparison, onPrepare }: { comparison: BoxFolderComparison; onPrepare: (comparison: BoxFolderComparison, name: string, nodes: { path: string; type: 'folder' | 'file' | 'web_link' }[]) => Promise<void> }) {
   const [query, setQuery] = useState('')
   const truncated = comparison.scope.leftTruncated || comparison.scope.rightTruncated || comparison.scope.leftEntriesTruncated || comparison.scope.rightEntriesTruncated
   const mode = useDiffMode() === 'inline' ? 'unified' : 'side-by-side'
+  const [plannedIds, setPlannedIds] = useState<string[]>([])
+  const [deploymentName, setDeploymentName] = useState(`Folder items to ${comparison.right.alias}`)
+  const [preparing, setPreparing] = useState(false)
+  const [promotionError, setPromotionError] = useState('')
+  const eligibleIds = useMemo(() => {
+    if (truncated) return new Set<string>()
+    const ids = new Set<string>()
+    for (const folder of comparison.folders) {
+      if (folder.status === 'left_only') ids.add(`folder:${folder.path}`)
+      if (folder.status === 'changed') {
+        const prefix = `${folder.path}/`
+        if (comparison.folders.some((candidate) => candidate.status === 'left_only' && candidate.path.startsWith(prefix)) || comparison.entries.some((candidate) => candidate.status === 'left_only' && candidate.path.startsWith(prefix))) ids.add(`folder:${folder.path}`)
+      }
+    }
+    for (const entry of comparison.entries) if (entry.status === 'left_only') ids.add(`entry:${entry.path}`)
+    return ids
+  }, [comparison.entries, comparison.folders, truncated])
+  const prepare = async () => {
+    if (!deploymentName.trim() || plannedIds.length === 0 || preparing) return
+    const entryTypes = new Map(comparison.entries.map((entry) => [entry.path, entry.type]))
+    const nodes = plannedIds.flatMap<{ path: string; type: 'folder' | 'file' | 'web_link' }>((id) => {
+      if (id.startsWith('folder:')) return [{ path: id.slice('folder:'.length), type: 'folder' as const }]
+      const path = id.slice('entry:'.length)
+      const type = entryTypes.get(path)
+      return type ? [{ path, type }] : []
+    })
+    setPreparing(true)
+    setPromotionError('')
+    try {
+      await onPrepare(comparison, deploymentName.trim(), nodes)
+    } catch (caught) {
+      setPromotionError(caught instanceof Error ? caught.message : 'The folder deployment plan could not be prepared.')
+    } finally {
+      setPreparing(false)
+    }
+  }
 
   return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><h2 id="comparison-results-title">Folders</h2><p className="compare-scope-route">{comparison.scope.leftRootLabel} → {comparison.scope.rightRootLabel}</p></header>
     {truncated ? <Alert className="compare-scope-alert" heading="Partial folder comparison" message={`The selected roots reached a safety limit: depth ${comparison.scope.maxDepth}, ${comparison.scope.maxFolders} folders, or ${comparison.scope.maxEntries} files and web links per side. Items beyond that boundary are not represented.`} tone="warning" open/> : null}
+    {eligibleIds.size > 0 ? <><PromotionPlan count={plannedIds.length} available={eligibleIds.size} deploymentName={deploymentName} preparing={preparing} onNameChange={setDeploymentName} onPrepare={() => void prepare()}/><p className="compare-portability-rule">Select missing items. A changed folder includes only its missing descendants; existing items and type conflicts remain review only.</p></> : !truncated ? <Alert className="compare-scope-alert" heading="No portable folder changes" message="This comparison has no source-only folders, files, or web links that Dispatch can create safely." tone="info" open/> : null}
+    {promotionError ? <Alert className="compare-error" heading="Deployment plan could not be prepared" message={promotionError} tone="error" open/> : null}
     <div className="compare-folder-tree-controls"><TextField label="Filter folders and files" value={query} placeholder="Search by name" onValueChanged={(event) => setQuery(event.detail.value)}/></div>
-    <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} filter={query} mode={mode}/></div>
+    <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} filter={query} mode={mode} eligibleIds={eligibleIds} selectedIds={plannedIds} onSelectedIdsChange={(ids) => { setPlannedIds(ids); setPromotionError('') }}/></div>
   </section>
 }
 

@@ -2,14 +2,62 @@ package boxdiff
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
 )
+
+func TestFolderComparisonJSONDoesNotExposeProviderIDs(t *testing.T) {
+	comparison, err := CompareFolderSnapshots(time.Now(), FolderSnapshot{
+		Environment: Environment{EnterpriseID: "left"},
+		Folders:     []Folder{{ID: "secret-folder-id", Path: "/Contracts", Name: "Contracts"}},
+		Entries:     []FolderEntry{{ID: "secret-file-id", Path: "/Contracts/file.txt", Name: "file.txt", Type: "file"}},
+	}, FolderSnapshot{Environment: Environment{EnterpriseID: "right"}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(comparison)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret-folder-id") || strings.Contains(string(encoded), "secret-file-id") {
+		t.Fatalf("comparison leaked provider IDs: %s", encoded)
+	}
+}
+
+func TestSelectFolderPromotionItemsExpandsChangedFolderToMissingDescendants(t *testing.T) {
+	leftFolder := Folder{ID: "left-contracts", Path: "/Contracts", Name: "Contracts"}
+	missingFolder := Folder{ID: "left-archive", Path: "/Contracts/Archive", Name: "Archive"}
+	missingFile := FolderEntry{ID: "left-file", Path: "/Contracts/Archive/agreement.txt", Name: "agreement.txt", Type: "file"}
+	comparison := FolderComparison{
+		Folders: []FolderDiff{
+			{Path: leftFolder.Path, Status: "changed", Left: &leftFolder, Right: &leftFolder},
+			{Path: missingFolder.Path, Status: "left_only", Left: &missingFolder},
+		},
+		Entries: []FolderEntryDiff{{Path: missingFile.Path, Type: "file", Status: "left_only", Left: &missingFile}},
+	}
+	items, err := selectFolderPromotionItems(comparison, []FolderPromotionSelection{{Path: "/Contracts", Type: "folder"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Path != "/Contracts/Archive" || items[1].Path != "/Contracts/Archive/agreement.txt" {
+		t.Fatalf("selected items = %#v", items)
+	}
+}
+
+func TestSelectFolderPromotionItemsRejectsChangedFile(t *testing.T) {
+	entry := FolderEntry{ID: "left-file", Path: "/agreement", Name: "agreement", Type: "file"}
+	comparison := FolderComparison{Entries: []FolderEntryDiff{{Path: entry.Path, Type: "file", Status: "changed", Left: &entry, Right: &entry}}}
+	if _, err := selectFolderPromotionItems(comparison, []FolderPromotionSelection{{Path: entry.Path, Type: "file"}}); err == nil {
+		t.Fatal("changed file should not be promotable")
+	}
+}
 
 func TestCompareFolderSnapshotsMatchesRelativePathsAndCounts(t *testing.T) {
 	started := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)

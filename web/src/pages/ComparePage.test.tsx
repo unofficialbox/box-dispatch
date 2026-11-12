@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComparePage } from './ComparePage'
 import type { BoxAIAgentComparison, BoxComparison, BoxFolderComparison, ConnectionSummary, DeploymentPlan } from '../types'
@@ -108,6 +108,7 @@ const preparedMetadataPlan: DeploymentPlan = {
 }
 
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -222,6 +223,40 @@ describe('ComparePage', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ signal: expect.any(AbortSignal) })))
     await waitFor(() => expect(comparisonSignal?.aborted).toBe(true))
     await waitFor(() => expect(container.querySelector('box-alert[heading="Comparison stopped"]')?.getAttribute('message')).toBe('Comparison canceled. No provider changes were made.'))
+  })
+
+  it('selects portable folder nodes and prepares a deployment from a fresh server read', async () => {
+    const onPromotionPrepared = vi.fn()
+    const preparedFolderPlan: DeploymentPlan = {
+      ...preparedPlan, name: 'Folder items to Sandbox', templateId: 'folder-promotion', template: 'Folder promotion',
+      repository: 'box://enterprise/EID-prod/folders/Contracts',
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/box/folders/children')) return new Response(JSON.stringify({ parentId: '0', folders: [], partial: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.endsWith('/api/box/comparisons/folders')) return new Response(JSON.stringify(folderComparison), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.endsWith('/api/box/promotions/folders')) return new Response(JSON.stringify(preparedFolderPlan), { status: 201, headers: { 'Content-Type': 'application/json' } })
+      throw new Error(`unexpected request ${url} ${String(init?.body)}`)
+    })
+    const { container } = render(<ComparePage connections={connections} onPromotionPrepared={onPromotionPrepared}/>)
+    fireEvent(container.querySelector('box-select[label="Box object type"]')!, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'folders' } }))
+    await waitFor(() => expect(container.querySelectorAll('box-folder-tree')).toHaveLength(2))
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+    await waitFor(() => expect(container.querySelector('box-folder-tree-diff')).toBeTruthy())
+    const tree = container.querySelector('box-folder-tree-diff') as HTMLElementTagNameMap['box-folder-tree-diff']
+    await waitFor(() => expect(tree.nodes).toHaveLength(2))
+    expect(screen.getByText('0 of 2 selected')).toBeTruthy()
+    fireEvent(tree, new CustomEvent('selected-changed', { bubbles: true, detail: { id: 'entry:/Contracts/source-note.txt', node: tree.nodes[1], selectedIds: ['entry:/Contracts/source-note.txt'] } }))
+    await waitFor(() => expect(screen.getByText('1 of 2 selected')).toBeTruthy())
+    fireEvent.click(container.querySelector('box-button[label="Prepare deployment"]')!)
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/box/promotions/folders'))).toBe(true))
+    const request = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/box/promotions/folders'))!
+    expect(JSON.parse(String((request[1] as RequestInit).body))).toEqual({
+      name: 'Folder items to Sandbox', leftConnectionId: 'box-prod', rightConnectionId: 'box-test', leftRootId: '0', rightRootId: '0',
+      nodes: [{ path: '/Contracts/source-note.txt', type: 'file' }],
+    })
+    await waitFor(() => expect(onPromotionPrepared).toHaveBeenCalledWith(preparedFolderPlan))
   })
 
   it('compares live AI Studio custom agents without calling them Box Extract Agents', async () => {

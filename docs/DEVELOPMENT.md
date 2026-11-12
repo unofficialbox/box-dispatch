@@ -110,7 +110,11 @@ Folder comparison is bounded by contract rather than by browser memory:
 files in memory and verifies both caps and both partial flags. The Compare Playwright
 flow verifies lazy root loading, a live search result outside the visible branch,
 selected-root request IDs, cancellation, explicit partial presentation, recovery,
-and narrow-screen overflow. The deterministic mock roots are:
+and narrow-screen overflow. The folder-promotion Playwright flow selects a portable
+node, verifies the exact promotion request, and carries its safe path/type preview through
+validation, deployment summary, and history. Go tests cover stale selection rejection,
+server-only package payloads, stable created IDs, path confinement, and ID-only reset.
+The deterministic mock roots are:
 
 | Connection | Root folders | Nested folder |
 | --- | --- | --- |
@@ -121,6 +125,11 @@ For a live baseline, record the root-child response time, a selected-root compar
 duration, and cancellation behavior without changing either Box enterprise. Provider
 latency is not treated as a fixed SLA; payload bounds, explicit partial state, and prompt
 cancellation are the enforceable performance protections.
+
+Live promotion verification must use disposable QA folders created for the test. Re-run
+the live comparison immediately before preparation, validate before applying, confirm the
+audit record contains only created resource IDs, and use reset to remove those exact IDs.
+Never use a production folder or folder ID `0` as a teardown target.
 
 ## GitHub Actions CI
 
