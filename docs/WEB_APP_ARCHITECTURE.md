@@ -173,11 +173,14 @@ because a Box enterprise does not expose one global folder root. It follows
 marker pagination, stops after depth 4 or 500 folders per side, and reports when
 either boundary truncates the result. Folders match by provider-ID-free relative
 path; direct folder, file, web-link, and unknown-item counts reveal structural
-differences without reading file bodies. The browser receives capture timestamps
-and sanitized identity data so
+differences without reading file bodies. The browser maps those live paths into the
+Box Open Elements Folder Tree Diff, using an aligned source/destination hierarchy on
+wide screens and one unified hierarchy on narrow screens. It does not synthesize file
+nodes from aggregate counts. The browser receives capture timestamps and sanitized identity data so
 the operator can distinguish live evidence from a saved connection-status
 snapshot. The browser defaults the inventory to changed objects followed by objects
-missing from the destination, with explicit status and text filters. Portable changed or
+missing from the destination; folder results use the tree's changes-only toggle and
+change navigation while metadata templates and AI agents retain status and text filters. Portable changed or
 source-only metadata templates and source-only AI Studio custom agents with one Ask or Extract
 capability can enter a promotion workflow. Changed metadata templates are applied through
 Box's atomic schema-update operations, while source-only templates use schema creation.
