@@ -257,12 +257,14 @@ function MetadataResults({ comparison, onPrepare }: { comparison: BoxComparison;
 }
 
 function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
-  const truncated = comparison.scope.leftTruncated || comparison.scope.rightTruncated
+  const [query, setQuery] = useState('')
+  const truncated = comparison.scope.leftTruncated || comparison.scope.rightTruncated || comparison.scope.leftEntriesTruncated || comparison.scope.rightEntriesTruncated
   const mode = useDiffMode() === 'inline' ? 'unified' : 'side-by-side'
 
   return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><h2 id="comparison-results-title">Folders</h2></header>
-    {truncated ? <Alert className="compare-scope-alert" heading="Folder scope limit reached" message={`Results stop at depth ${comparison.scope.maxDepth} and ${comparison.scope.maxFolders} folders per side. Paths outside that boundary are not represented.`} tone="warning" open/> : null}
-    <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} mode={mode}/></div>
+    {truncated ? <Alert className="compare-scope-alert" heading="Folder scope limit reached" message={`Results stop at depth ${comparison.scope.maxDepth}, ${comparison.scope.maxFolders} folders, and ${comparison.scope.maxEntries} files or web links per side. Paths outside that boundary are not represented.`} tone="warning" open/> : null}
+    <div className="compare-folder-tree-controls"><TextField label="Filter folders and files" value={query} placeholder="Search by name" onValueChanged={(event) => setQuery(event.detail.value)}/></div>
+    <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} filter={query} mode={mode}/></div>
   </section>
 }
 

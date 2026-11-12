@@ -11,6 +11,7 @@ import (
 const (
 	FolderComparisonMaxDepth   = 4
 	FolderComparisonMaxFolders = 500
+	FolderComparisonMaxEntries = 1000
 )
 
 type FolderItemCounts struct {
@@ -29,18 +30,32 @@ type Folder struct {
 	Items FolderItemCounts `json:"items"`
 }
 
+// FolderEntry is a provider-ID-free file or web-link node beneath the connected
+// user's All Files root. File contents, hashes, versions, URLs, and Box IDs are
+// deliberately excluded from structural comparison.
+type FolderEntry struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 type FolderSnapshot struct {
-	Environment Environment `json:"environment"`
-	Folders     []Folder    `json:"folders"`
-	Truncated   bool        `json:"truncated"`
+	Environment      Environment   `json:"environment"`
+	Folders          []Folder      `json:"folders"`
+	Entries          []FolderEntry `json:"entries"`
+	Truncated        bool          `json:"truncated"`
+	EntriesTruncated bool          `json:"entriesTruncated"`
 }
 
 type FolderScope struct {
-	RootLabel      string `json:"rootLabel"`
-	MaxDepth       int    `json:"maxDepth"`
-	MaxFolders     int    `json:"maxFolders"`
-	LeftTruncated  bool   `json:"leftTruncated"`
-	RightTruncated bool   `json:"rightTruncated"`
+	RootLabel             string `json:"rootLabel"`
+	MaxDepth              int    `json:"maxDepth"`
+	MaxFolders            int    `json:"maxFolders"`
+	MaxEntries            int    `json:"maxEntries"`
+	LeftTruncated         bool   `json:"leftTruncated"`
+	RightTruncated        bool   `json:"rightTruncated"`
+	LeftEntriesTruncated  bool   `json:"leftEntriesTruncated"`
+	RightEntriesTruncated bool   `json:"rightEntriesTruncated"`
 }
 
 type FolderDiff struct {
@@ -52,14 +67,25 @@ type FolderDiff struct {
 	Right   *Folder  `json:"right,omitempty"`
 }
 
+type FolderEntryDiff struct {
+	Path    string       `json:"path"`
+	Name    string       `json:"name"`
+	Type    string       `json:"type"`
+	Status  string       `json:"status"`
+	Changes []Change     `json:"changes"`
+	Left    *FolderEntry `json:"left,omitempty"`
+	Right   *FolderEntry `json:"right,omitempty"`
+}
+
 type FolderComparison struct {
-	StartedAt   string       `json:"startedAt"`
-	CompletedAt string       `json:"completedAt"`
-	Left        Environment  `json:"left"`
-	Right       Environment  `json:"right"`
-	Scope       FolderScope  `json:"scope"`
-	Summary     Summary      `json:"summary"`
-	Folders     []FolderDiff `json:"folders"`
+	StartedAt   string            `json:"startedAt"`
+	CompletedAt string            `json:"completedAt"`
+	Left        Environment       `json:"left"`
+	Right       Environment       `json:"right"`
+	Scope       FolderScope       `json:"scope"`
+	Summary     Summary           `json:"summary"`
+	Folders     []FolderDiff      `json:"folders"`
+	Entries     []FolderEntryDiff `json:"entries"`
 }
 
 func CompareFolderSnapshots(startedAt time.Time, left, right FolderSnapshot, completedAt time.Time) (FolderComparison, error) {
@@ -72,7 +98,12 @@ func CompareFolderSnapshots(startedAt time.Time, left, right FolderSnapshot, com
 	comparison := FolderComparison{
 		StartedAt: startedAt.UTC().Format(time.RFC3339Nano), CompletedAt: completedAt.UTC().Format(time.RFC3339Nano),
 		Left: left.Environment, Right: right.Environment,
-		Scope: FolderScope{RootLabel: "All Files", MaxDepth: FolderComparisonMaxDepth, MaxFolders: FolderComparisonMaxFolders, LeftTruncated: left.Truncated, RightTruncated: right.Truncated},
+		Folders: []FolderDiff{}, Entries: []FolderEntryDiff{},
+		Scope: FolderScope{
+			RootLabel: "All Files", MaxDepth: FolderComparisonMaxDepth, MaxFolders: FolderComparisonMaxFolders, MaxEntries: FolderComparisonMaxEntries,
+			LeftTruncated: left.Truncated, RightTruncated: right.Truncated,
+			LeftEntriesTruncated: left.EntriesTruncated, RightEntriesTruncated: right.EntriesTruncated,
+		},
 	}
 	leftByPath := foldersByPath(left.Folders)
 	rightByPath := foldersByPath(right.Folders)
@@ -118,6 +149,45 @@ func CompareFolderSnapshots(startedAt time.Time, left, right FolderSnapshot, com
 		}
 		comparison.Folders = append(comparison.Folders, diff)
 	}
+	leftEntriesByPath := folderEntriesByPath(left.Entries)
+	rightEntriesByPath := folderEntriesByPath(right.Entries)
+	entryPaths := make([]string, 0, len(leftEntriesByPath)+len(rightEntriesByPath))
+	seen = map[string]bool{}
+	for path := range leftEntriesByPath {
+		entryPaths = append(entryPaths, path)
+		seen[path] = true
+	}
+	for path := range rightEntriesByPath {
+		if !seen[path] {
+			entryPaths = append(entryPaths, path)
+		}
+	}
+	sort.Strings(entryPaths)
+	for _, path := range entryPaths {
+		leftEntry, onLeft := leftEntriesByPath[path]
+		rightEntry, onRight := rightEntriesByPath[path]
+		diff := FolderEntryDiff{Path: path, Changes: []Change{}}
+		switch {
+		case !onRight:
+			diff.Name, diff.Type, diff.Status, diff.Left = leftEntry.Name, leftEntry.Type, "left_only", folderEntryPointer(leftEntry)
+			comparison.Summary.LeftOnly++
+		case !onLeft:
+			diff.Name, diff.Type, diff.Status, diff.Right = rightEntry.Name, rightEntry.Type, "right_only", folderEntryPointer(rightEntry)
+			comparison.Summary.RightOnly++
+		default:
+			diff.Name, diff.Type = firstNonEmpty(leftEntry.Name, rightEntry.Name), firstNonEmpty(leftEntry.Type, rightEntry.Type)
+			diff.Left, diff.Right = folderEntryPointer(leftEntry), folderEntryPointer(rightEntry)
+			if leftEntry.Type == rightEntry.Type {
+				diff.Status = "equal"
+				comparison.Summary.Equal++
+			} else {
+				diff.Status = "changed"
+				diff.Changes = append(diff.Changes, Change{Path: "type", Before: leftEntry.Type, After: rightEntry.Type})
+				comparison.Summary.Changed++
+			}
+		}
+		comparison.Entries = append(comparison.Entries, diff)
+	}
 	return comparison, nil
 }
 
@@ -155,4 +225,15 @@ func foldersByPath(folders []Folder) map[string]Folder {
 	return result
 }
 
-func folderPointer(folder Folder) *Folder { return &folder }
+func folderEntriesByPath(entries []FolderEntry) map[string]FolderEntry {
+	result := make(map[string]FolderEntry, len(entries))
+	for _, entry := range entries {
+		if entry.Path != "" {
+			result[entry.Path] = entry
+		}
+	}
+	return result
+}
+
+func folderPointer(folder Folder) *Folder               { return &folder }
+func folderEntryPointer(entry FolderEntry) *FolderEntry { return &entry }

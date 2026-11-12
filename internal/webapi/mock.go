@@ -207,6 +207,11 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 					{Path: "/Contracts/Archive", Name: "Archive", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 1}},
 					{Path: "/Legal", Name: "Legal", Depth: 1},
 				},
+				Entries: []boxdiff.FolderEntry{
+					{Path: "/Contracts/agreement.pdf", Name: "agreement.pdf", Type: "file"},
+					{Path: "/Contracts/Archive/legacy.txt", Name: "legacy.txt", Type: "file"},
+					{Path: "/Legal/Reference", Name: "Reference", Type: "web_link"},
+				},
 			}
 			rightSnapshot := boxdiff.FolderSnapshot{
 				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
@@ -214,6 +219,11 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 					{Path: "/Contracts", Name: "Contracts", Depth: 1, Items: boxdiff.FolderItemCounts{Folders: 1, Files: 3}},
 					{Path: "/Contracts/Templates", Name: "Templates", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 2}},
 					{Path: "/Operations", Name: "Operations", Depth: 1},
+				},
+				Entries: []boxdiff.FolderEntry{
+					{Path: "/Contracts/agreement.pdf", Name: "agreement.pdf", Type: "file"},
+					{Path: "/Contracts/Templates/template.docx", Name: "template.docx", Type: "file"},
+					{Path: "/Operations/Runbook", Name: "Runbook", Type: "web_link"},
 				},
 			}
 			return boxdiff.CompareFolderSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())

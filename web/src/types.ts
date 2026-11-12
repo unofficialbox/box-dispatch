@@ -247,14 +247,31 @@ export type BoxFolderDiff = {
   right?: BoxFolder
 }
 
+export type BoxFolderEntry = {
+  path: string
+  name: string
+  type: 'file' | 'web_link'
+}
+
+export type BoxFolderEntryDiff = {
+  path: string
+  name: string
+  type: BoxFolderEntry['type']
+  status: BoxMetadataTemplateDiff['status']
+  changes: BoxMetadataChange[]
+  left?: BoxFolderEntry
+  right?: BoxFolderEntry
+}
+
 export type BoxFolderComparison = {
   startedAt: string
   completedAt: string
   left: BoxComparisonEnvironment
   right: BoxComparisonEnvironment
-  scope: { rootLabel: string; maxDepth: number; maxFolders: number; leftTruncated: boolean; rightTruncated: boolean }
+  scope: { rootLabel: string; maxDepth: number; maxFolders: number; maxEntries: number; leftTruncated: boolean; rightTruncated: boolean; leftEntriesTruncated: boolean; rightEntriesTruncated: boolean }
   summary: BoxComparisonSummary
   folders: BoxFolderDiff[]
+  entries: BoxFolderEntryDiff[]
 }
 
 export type BoxAIAgent = {
