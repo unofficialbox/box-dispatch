@@ -56,9 +56,10 @@ Version 0.43.0 publishes the provider-neutral Folder Tree and structural Folder 
 Diff requested in [#596](https://github.com/unofficialbox/box-open-elements/issues/596)
 and [#597](https://github.com/unofficialbox/box-open-elements/issues/597). They are no
 longer component gaps. Dispatch uses Folder Tree Diff for live folder comparison,
-mapping provider-ID-free paths and direct item counts into the published hierarchy
-without inventing file nodes the bounded API does not return. Upstream manual
-screen-reader acceptance remains explicitly unfinished.
+mapping provider-ID-free folder, file, and web-link paths plus direct item counts
+into the published hierarchy. File contents, hashes, versions, URLs, and Box IDs stay
+outside the browser contract. Upstream manual screen-reader acceptance remains
+explicitly unfinished.
 
 ## Adopted in Dispatch
 

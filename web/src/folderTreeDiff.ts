@@ -1,5 +1,5 @@
 import type { FolderTreeDiffNode } from '@unofficialbox/box-open-elements/patterns/folder-tree'
-import type { BoxFolder, BoxFolderDiff } from './types'
+import type { BoxFolder, BoxFolderDiff, BoxFolderEntryDiff } from './types'
 
 const statusMap: Record<BoxFolderDiff['status'], FolderTreeDiffNode['status']> = {
   changed: 'changed',
@@ -50,31 +50,43 @@ function parentPath(path: string, knownPaths: Set<string>) {
   return undefined
 }
 
-export function buildFolderTreeDiffNodes(folders: BoxFolderDiff[]): FolderTreeDiffNode[] {
-  const ordered = [...folders].sort((left, right) => left.path.localeCompare(right.path))
-  const knownPaths = new Set(ordered.map((folder) => folder.path))
-  const parentByPath = new Map(ordered.map((folder) => [folder.path, parentPath(folder.path, knownPaths)]))
+const folderNodeID = (path: string) => `folder:${path}`
+const entryNodeID = (path: string) => `entry:${path}`
+
+export function buildFolderTreeDiffNodes(folders: BoxFolderDiff[], entries: BoxFolderEntryDiff[] = []): FolderTreeDiffNode[] {
+  const orderedFolders = [...folders].sort((left, right) => left.path.localeCompare(right.path))
+  const orderedEntries = [...entries].sort((left, right) => left.path.localeCompare(right.path))
+  const knownPaths = new Set(orderedFolders.map((folder) => folder.path))
+  const parentByPath = new Map(orderedFolders.map((folder) => [folder.path, parentPath(folder.path, knownPaths)]))
   const childCountByPath = new Map<string, number>()
 
   for (const parent of parentByPath.values()) {
     if (parent) childCountByPath.set(parent, (childCountByPath.get(parent) ?? 0) + 1)
   }
+  for (const entry of orderedEntries) {
+    const parent = parentPath(entry.path, knownPaths)
+    if (parent) childCountByPath.set(parent, (childCountByPath.get(parent) ?? 0) + 1)
+  }
 
   const changedAncestors = new Set<string>()
-  for (const folder of ordered) {
-    if (folder.status === 'equal') continue
-    let parent = parentByPath.get(folder.path)
+  const markChangedAncestors = (path: string) => {
+    let parent = parentPath(path, knownPaths)
     while (parent) {
       changedAncestors.add(parent)
       parent = parentByPath.get(parent)
     }
   }
+  for (const folder of orderedFolders) {
+    if (folder.status === 'equal') continue
+    markChangedAncestors(folder.path)
+  }
+  for (const entry of orderedEntries) if (entry.status !== 'equal') markChangedAncestors(entry.path)
 
-  return ordered.map((folder) => {
+  const nodes: FolderTreeDiffNode[] = orderedFolders.map((folder) => {
     const childCount = childCountByPath.get(folder.path) ?? 0
     return {
-      id: folder.path,
-      parentId: parentByPath.get(folder.path),
+      id: folderNodeID(folder.path),
+      parentId: parentByPath.get(folder.path) ? folderNodeID(parentByPath.get(folder.path)!) : undefined,
       name: folder.name,
       type: 'folder',
       path: folder.path,
@@ -88,4 +100,27 @@ export function buildFolderTreeDiffNodes(folders: BoxFolderDiff[]): FolderTreeDi
       hasChangedDescendants: changedAncestors.has(folder.path),
     }
   })
+
+  for (const entry of orderedEntries) {
+    const parent = parentPath(entry.path, knownPaths)
+    const type = entry.type === 'web_link' ? 'web_link' : 'file'
+    const typeChange = entry.status === 'changed' ? entry.changes.find((change) => change.path === 'type') : undefined
+    nodes.push({
+      id: entryNodeID(entry.path),
+      parentId: parent ? folderNodeID(parent) : undefined,
+      name: entry.name,
+      type,
+      path: entry.path,
+      status: statusMap[entry.status],
+      before: entry.left ? { name: entry.left.name, path: entry.left.path, metadata: { type: entry.left.type } } : undefined,
+      after: entry.right ? { name: entry.right.name, path: entry.right.path, metadata: { type: entry.right.type } } : undefined,
+      hasChildren: false,
+      childCount: 0,
+      metadata: typeChange ? `type ${String(typeChange.before).replace('_', ' ')} → ${String(typeChange.after).replace('_', ' ')}` : '',
+      loadState: 'loaded',
+      hasChangedDescendants: false,
+    })
+  }
+
+  return nodes.sort((left, right) => left.path.localeCompare(right.path) || (left.type === 'folder' ? -1 : 1))
 }

@@ -148,11 +148,11 @@ func captureFoldersLive(ctx context.Context, connectionID, alias string) (Folder
 	list := func(ctx context.Context, folderID string) iter.Seq2[*schemas.Item, error] {
 		return client.Folders.ListItems(ctx, folderID, options)
 	}
-	folders, truncated, err := crawlFolderTree(ctx, list, FolderComparisonMaxDepth, FolderComparisonMaxFolders)
+	folders, entries, truncated, entriesTruncated, err := crawlFolderTree(ctx, list, FolderComparisonMaxDepth, FolderComparisonMaxFolders, FolderComparisonMaxEntries)
 	if err != nil {
 		return FolderSnapshot{}, fmt.Errorf("list live folder tree: %w", err)
 	}
-	return FolderSnapshot{Environment: environment, Folders: folders, Truncated: truncated}, nil
+	return FolderSnapshot{Environment: environment, Folders: folders, Entries: entries, Truncated: truncated, EntriesTruncated: entriesTruncated}, nil
 }
 
 // CompareAIAgentsLive compares the current custom AI Studio agents visible to
@@ -270,7 +270,7 @@ func aiAgentResponseError(status int64, body []byte) error {
 
 type folderListFunc func(context.Context, string) iter.Seq2[*schemas.Item, error]
 
-func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFolders int) ([]Folder, bool, error) {
+func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFolders, maxEntries int) ([]Folder, []FolderEntry, bool, bool, error) {
 	type pendingFolder struct {
 		id, path string
 		depth    int
@@ -280,14 +280,17 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 	type listedFolder struct {
 		counts   FolderItemCounts
 		children []childFolder
+		entries  []FolderEntry
 		err      error
 	}
 	level := []pendingFolder{{id: "0", depth: 0, index: -1}}
 	folders := make([]Folder, 0)
+	entries := make([]FolderEntry, 0)
 	truncated := false
+	entriesTruncated := false
 	for len(level) > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, nil, false, false, err
 		}
 		results := make([]listedFolder, len(level))
 		semaphore := make(chan struct{}, 8)
@@ -321,8 +324,20 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 						results[index].children = append(results[index].children, childFolder{id: item.Folder.Id, name: name})
 					case item.File != nil:
 						results[index].counts.Files++
+						name := strings.TrimSpace(stringValue(item.File.Name))
+						if name == "" {
+							results[index].err = fmt.Errorf("folder listing returned an unnamed file")
+							return
+						}
+						results[index].entries = append(results[index].entries, FolderEntry{Path: current.path + "/" + name, Name: name, Type: "file"})
 					case item.WebLink != nil:
 						results[index].counts.WebLinks++
+						name := strings.TrimSpace(stringValue(item.WebLink.Name))
+						if name == "" {
+							results[index].err = fmt.Errorf("folder listing returned an unnamed web link")
+							return
+						}
+						results[index].entries = append(results[index].entries, FolderEntry{Path: current.path + "/" + name, Name: name, Type: "web_link"})
 					default:
 						results[index].counts.Other++
 					}
@@ -335,10 +350,18 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 		for index, current := range level {
 			result := results[index]
 			if result.err != nil {
-				return nil, false, result.err
+				return nil, nil, false, false, result.err
 			}
 			if current.index >= 0 {
 				folders[current.index].Items = result.counts
+			}
+			sort.Slice(result.entries, func(i, j int) bool { return result.entries[i].Path < result.entries[j].Path })
+			for _, entry := range result.entries {
+				if len(entries) >= maxEntries {
+					entriesTruncated = true
+					continue
+				}
+				entries = append(entries, entry)
 			}
 			if current.depth >= maxDepth {
 				truncated = truncated || len(result.children) > 0
@@ -358,7 +381,8 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 		level = next
 	}
 	sort.Slice(folders, func(i, j int) bool { return folders[i].Path < folders[j].Path })
-	return folders, truncated, nil
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return folders, entries, truncated, entriesTruncated, nil
 }
 
 func liveClient(ctx context.Context, connectionID, alias string) (Environment, *boxclient.Client, error) {

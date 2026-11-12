@@ -19,7 +19,7 @@ flowchart LR
     LiveCompare -->|"parallel fresh reads"| Box
     LiveCompare --> Normalize{"Provider-neutral normalization"}
     Normalize --> MetadataDiff["Template and field diff"]
-    Normalize --> FolderDiff["Bounded folder-path and item-count diff"]
+    Normalize --> FolderDiff["Bounded folder, file, and web-link path diff"]
     Normalize --> AIAgentDiff["AI Studio custom-agent diff"]
     MetadataDiff -->|"selected portable changed or source-only templates"| Promotion["Server-built BCL promotion package"]
     AIAgentDiff -->|"selected source-only custom agents"| Promotion
@@ -128,7 +128,7 @@ credentials from `.env`:
 | `GET /api/connections/box/oauth/{id}` | poll sanitized Box login status | authorization codes, tokens, PKCE verifier |
 | `POST /api/connections/box/check` | recheck the selected Box connection and refresh its verification snapshot | CCG secret, refresh token, access token |
 | `POST /api/box/comparisons` | authenticate two exact saved Box connection IDs in parallel, read their current enterprise metadata-template schemas, normalize provider-specific IDs, and return a semantic diff | credentials, access tokens, raw provider responses, cached readiness state, deployment connection selection |
-| `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse each connected user's current All Files hierarchy within the documented depth/folder limits, and compare provider-ID-free relative paths and direct item counts | credentials, access tokens, folder IDs, file contents, cached readiness state, deployment connection selection |
+| `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse each connected user's current All Files hierarchy within the documented depth/folder/item limits, and compare provider-ID-free folder, file, and web-link paths plus direct item counts | credentials, access tokens, Box item IDs, web-link URLs, file contents, hashes, versions, cached readiness state, deployment connection selection |
 | `POST /api/box/comparisons/ai-agents` | authenticate two exact saved Box connection IDs in parallel, read current AI Studio custom agents and their capabilities, remove provider-generated response fields, and return a semantic definition diff; this does not inspect Box Automate Extract Agents | credentials, access tokens, agent IDs, principal IDs, timestamps, actor identities, icon references, response warnings, cached readiness state, deployment connection selection |
 | `POST /api/box/promotions/metadata-templates` | rerun the exact live metadata-template comparison, verify every selected template is still changed or source-only and contains only portable field types, build a minimal BCL package, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, enterprise-specific taxonomy fields, deployment execution |
 | `POST /api/box/promotions/ai-agents` | rerun the exact live AI-agent comparison, verify every selected agent is still source-only, has no provider-specific audience principals, and uses a supported Ask or Extract mode, build a minimal BCL package with its complete normalized configuration, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, unsupported modes or restricted audiences, deployment execution |
@@ -171,12 +171,13 @@ fields, option order, taxonomy behavior, visibility, descriptions, and copy
 behavior. Folder comparison reads each connected user's `All Files` hierarchy,
 because a Box enterprise does not expose one global folder root. It follows
 marker pagination, stops after depth 4 or 500 folders per side, and reports when
-either boundary truncates the result. Folders match by provider-ID-free relative
-path; direct folder, file, web-link, and unknown-item counts reveal structural
-differences without reading file bodies. The browser maps those live paths into the
-Box Open Elements Folder Tree Diff, using an aligned source/destination hierarchy on
-wide screens and one unified hierarchy on narrow screens. It does not synthesize file
-nodes from aggregate counts. The browser receives capture timestamps and sanitized identity data so
+either boundary truncates the result. It also caps returned file and web-link nodes
+at 1,000 per side and reports that limit independently. Folders, files, and web links
+match by provider-ID-free relative path. Direct item counts reveal other structural
+differences without reading file bodies; item IDs, hashes, versions, and web-link URLs
+are not returned. The browser maps those live nodes into the Box Open Elements Folder
+Tree Diff, using an aligned source/destination hierarchy on wide screens and one
+unified hierarchy on narrow screens. The browser receives capture timestamps and sanitized identity data so
 the operator can distinguish live evidence from a saved connection-status
 snapshot. The browser defaults the inventory to changed objects followed by objects
 missing from the destination; folder results use the tree's changes-only toggle and

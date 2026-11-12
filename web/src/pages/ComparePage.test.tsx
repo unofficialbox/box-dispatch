@@ -28,13 +28,17 @@ const comparison: BoxComparison = {
 const folderComparison: BoxFolderComparison = {
   startedAt: '2026-10-26T12:00:00Z', completedAt: '2026-10-26T12:00:01Z',
   left: comparison.left, right: comparison.right,
-  scope: { rootLabel: 'All Files', maxDepth: 4, maxFolders: 500, leftTruncated: false, rightTruncated: false },
-  summary: { equal: 0, changed: 1, leftOnly: 0, rightOnly: 0 },
+  scope: { rootLabel: 'All Files', maxDepth: 4, maxFolders: 500, maxEntries: 1000, leftTruncated: false, rightTruncated: false, leftEntriesTruncated: false, rightEntriesTruncated: false },
+  summary: { equal: 0, changed: 1, leftOnly: 1, rightOnly: 0 },
   folders: [{
     path: '/Contracts', name: 'Contracts', status: 'changed',
     changes: [{ path: 'items.files', before: 2, after: 3 }],
     left: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 2, webLinks: 0, other: 0 } },
     right: { path: '/Contracts', name: 'Contracts', depth: 1, items: { folders: 1, files: 3, webLinks: 0, other: 0 } },
+  }],
+  entries: [{
+    path: '/Contracts/source-note.txt', name: 'source-note.txt', type: 'file', status: 'left_only', changes: [],
+    left: { path: '/Contracts/source-note.txt', name: 'source-note.txt', type: 'file' },
   }],
 }
 
@@ -166,12 +170,13 @@ describe('ComparePage', () => {
     expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
     expect(screen.queryByText('items.files')).toBeNull()
     const tree = container.querySelector('box-folder-tree-diff') as HTMLElementTagNameMap['box-folder-tree-diff']
-    await waitFor(() => expect(tree.nodes).toHaveLength(1))
+    await waitFor(() => expect(tree.nodes).toHaveLength(2))
     expect(tree.mode).toBe('side-by-side')
     expect(tree.leftLabel).toBe('Production')
     expect(tree.rightLabel).toBe('Sandbox')
     expect(tree.changesOnly).toBe(true)
-    expect(tree.nodes[0]).toMatchObject({ id: '/Contracts', status: 'changed', metadata: 'files 2 → 3' })
+    expect(tree.nodes[0]).toMatchObject({ id: 'folder:/Contracts', status: 'changed', metadata: 'files 2 → 3' })
+    expect(tree.nodes[1]).toMatchObject({ id: 'entry:/Contracts/source-note.txt', parentId: 'folder:/Contracts', type: 'file', status: 'removed' })
     expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeNull()
   })
 

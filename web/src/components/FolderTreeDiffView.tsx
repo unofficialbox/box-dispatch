@@ -3,11 +3,11 @@ import '@unofficialbox/box-open-elements/patterns/folder-tree'
 import type { BoxFolderComparison } from '../types'
 import { buildFolderTreeDiffNodes } from '../folderTreeDiff'
 
-export function FolderTreeDiffView({ comparison, mode }: { comparison: BoxFolderComparison; mode: 'unified' | 'side-by-side' }) {
+export function FolderTreeDiffView({ comparison, filter, mode }: { comparison: BoxFolderComparison; filter: string; mode: 'unified' | 'side-by-side' }) {
   const ref = useRef<HTMLElementTagNameMap['box-folder-tree-diff']>(null)
-  const nodes = useMemo(() => buildFolderTreeDiffNodes(comparison.folders), [comparison.folders])
+  const nodes = useMemo(() => buildFolderTreeDiffNodes(comparison.folders, comparison.entries), [comparison.entries, comparison.folders])
   const [changesOnly, setChangesOnly] = useState(true)
-  const partial = comparison.scope.leftTruncated || comparison.scope.rightTruncated
+  const partial = comparison.scope.leftTruncated || comparison.scope.rightTruncated || comparison.scope.leftEntriesTruncated || comparison.scope.rightEntriesTruncated
 
   useEffect(() => {
     const tree = ref.current
@@ -23,8 +23,9 @@ export function FolderTreeDiffView({ comparison, mode }: { comparison: BoxFolder
     tree.leftLabel = comparison.left.alias
     tree.rightLabel = comparison.right.alias
     tree.mode = mode
+    tree.filter = filter
     tree.partial = partial
-  }, [comparison.left.alias, comparison.right.alias, mode, partial])
+  }, [comparison.left.alias, comparison.right.alias, filter, mode, partial])
 
   useEffect(() => {
     const tree = ref.current
