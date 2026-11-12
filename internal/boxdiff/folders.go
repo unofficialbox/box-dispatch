@@ -12,7 +12,25 @@ const (
 	FolderComparisonMaxDepth   = 4
 	FolderComparisonMaxFolders = 500
 	FolderComparisonMaxEntries = 1000
+	FolderPickerMaxFolders     = 500
+	FolderSearchMaxResults     = 50
 )
+
+type FolderChoice struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type FolderChildren struct {
+	ParentID string         `json:"parentId"`
+	Folders  []FolderChoice `json:"folders"`
+	Partial  bool           `json:"partial"`
+}
+
+type FolderSearchResults struct {
+	Folders []FolderChoice `json:"folders"`
+	Partial bool           `json:"partial"`
+}
 
 type FolderItemCounts struct {
 	Folders  int `json:"folders"`
@@ -41,6 +59,7 @@ type FolderEntry struct {
 
 type FolderSnapshot struct {
 	Environment      Environment   `json:"environment"`
+	RootLabel        string        `json:"rootLabel"`
 	Folders          []Folder      `json:"folders"`
 	Entries          []FolderEntry `json:"entries"`
 	Truncated        bool          `json:"truncated"`
@@ -49,6 +68,8 @@ type FolderSnapshot struct {
 
 type FolderScope struct {
 	RootLabel             string `json:"rootLabel"`
+	LeftRootLabel         string `json:"leftRootLabel"`
+	RightRootLabel        string `json:"rightRootLabel"`
 	MaxDepth              int    `json:"maxDepth"`
 	MaxFolders            int    `json:"maxFolders"`
 	MaxEntries            int    `json:"maxEntries"`
@@ -100,7 +121,8 @@ func CompareFolderSnapshots(startedAt time.Time, left, right FolderSnapshot, com
 		Left: left.Environment, Right: right.Environment,
 		Folders: []FolderDiff{}, Entries: []FolderEntryDiff{},
 		Scope: FolderScope{
-			RootLabel: "All Files", MaxDepth: FolderComparisonMaxDepth, MaxFolders: FolderComparisonMaxFolders, MaxEntries: FolderComparisonMaxEntries,
+			RootLabel: firstNonEmpty(left.RootLabel, "All Files"), LeftRootLabel: firstNonEmpty(left.RootLabel, "All Files"), RightRootLabel: firstNonEmpty(right.RootLabel, "All Files"),
+			MaxDepth: FolderComparisonMaxDepth, MaxFolders: FolderComparisonMaxFolders, MaxEntries: FolderComparisonMaxEntries,
 			LeftTruncated: left.Truncated, RightTruncated: right.Truncated,
 			LeftEntriesTruncated: left.EntriesTruncated, RightEntriesTruncated: right.EntriesTruncated,
 		},

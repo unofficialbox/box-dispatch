@@ -4,9 +4,11 @@ import { Select } from '@unofficialbox/box-open-elements-react/select'
 import { TextField } from '@unofficialbox/box-open-elements-react/text-field'
 import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/section'
+import '@unofficialbox/box-open-elements/spinner'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import { BoeTable } from '../components/BoeTable'
 import { FolderTreeDiffView } from '../components/FolderTreeDiffView'
+import { FolderScopePicker, type FolderScope } from '../components/FolderScopePicker'
 import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolderComparison, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary, DeploymentPlan } from '../types'
 
 type ComparisonType = 'metadata_templates' | 'folders' | 'ai_agents'
@@ -86,6 +88,10 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [leftRoot, setLeftRoot] = useState<FolderScope>({ id: '0', name: 'All Files' })
+  const [rightRoot, setRightRoot] = useState<FolderScope>({ id: '0', name: 'All Files' })
+  const comparisonAbortRef = useRef<AbortController | null>(null)
 
   const prepareAIAgentPromotion = async (comparison: BoxAIAgentComparison, name: string, agentKeys: string[]) => {
     const response = await fetch('/api/box/promotions/ai-agents', {
@@ -121,18 +127,27 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
     setRightConnectionID((current) => ids.includes(current) && current !== (ids[0] ?? '') ? current : ids.find((id) => id !== (ids[0] ?? '')) ?? '')
   }, [boxConnections])
 
+  useEffect(() => () => comparisonAbortRef.current?.abort(), [])
+
   const changeComparisonType = (value: string) => {
     const next: ComparisonType = value === 'folders' || value === 'ai_agents' ? value : 'metadata_templates'
     setComparisonType(next)
     setResult(null)
     setError('')
+    setNotice('')
   }
 
   const changeConnection = (side: 'left' | 'right', value: string) => {
-    if (side === 'left') setLeftConnectionID(value)
-    else setRightConnectionID(value)
+    if (side === 'left') {
+      setLeftConnectionID(value)
+      setLeftRoot({ id: '0', name: 'All Files' })
+    } else {
+      setRightConnectionID(value)
+      setRightRoot({ id: '0', name: 'All Files' })
+    }
     setResult(null)
     setError('')
+    setNotice('')
   }
 
   const runComparison = async () => {
@@ -140,13 +155,21 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
       setError('Select two different saved Box connections.')
       return
     }
+    const controller = new AbortController()
+    comparisonAbortRef.current?.abort()
+    comparisonAbortRef.current = controller
     setRunning(true)
+    setResult(null)
     setError('')
+    setNotice('')
     try {
       const endpoint = comparisonType === 'folders' ? '/api/box/comparisons/folders' : comparisonType === 'ai_agents' ? '/api/box/comparisons/ai-agents' : '/api/box/comparisons'
+      const body = comparisonType === 'folders'
+        ? { leftConnectionId: leftConnectionID, rightConnectionId: rightConnectionID, leftRootId: leftRoot.id, rightRootId: rightRoot.id }
+        : { leftConnectionId: leftConnectionID, rightConnectionId: rightConnectionID }
       const response = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leftConnectionId: leftConnectionID, rightConnectionId: rightConnectionID }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify(body),
       })
       if (!response.ok) throw new Error(await responseMessage(response))
       if (comparisonType === 'folders') {
@@ -157,15 +180,24 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
         setResult({ type: 'metadata_templates', value: await response.json() as BoxComparison })
       }
     } catch (caught) {
+      if (caught instanceof DOMException && caught.name === 'AbortError') {
+        setNotice('Comparison canceled. No provider changes were made.')
+        return
+      }
       setResult(null)
       setError(caught instanceof Error ? caught.message : 'The live Box comparison could not be completed.')
     } finally {
-      setRunning(false)
+      if (comparisonAbortRef.current === controller) {
+        comparisonAbortRef.current = null
+        setRunning(false)
+      }
     }
   }
 
+  const cancelComparison = () => comparisonAbortRef.current?.abort()
+
   const options = boxConnections.map((connection) => ({ label: `${connection.alias || connection.identity || 'Box connection'}${connection.enterpriseId ? ` · ${connection.enterpriseId}` : ''}`, value: connection.id }))
-  const canCompare = boxConnections.length >= 2 && leftConnectionID !== rightConnectionID && !running
+  const canCompare = boxConnections.length >= 2 && leftConnectionID !== rightConnectionID
   const comparison = result?.value
 
   return <section className="record-page compare-page" aria-labelledby="compare-title">
@@ -175,8 +207,14 @@ export function ComparePage({ connections, onPromotionPrepared }: { connections:
         <Select label="Box object type" value={comparisonType} options={comparisonTypeOptions} disabled={running} onValueChanged={(event) => changeComparisonType(event.detail.value)}/>
         <Select label="Source Box connection" value={leftConnectionID} options={options} disabled={running} onValueChanged={(event) => changeConnection('left', event.detail.value)}/>
         <Select label="Destination Box connection" value={rightConnectionID} options={options} disabled={running} onValueChanged={(event) => changeConnection('right', event.detail.value)}/>
-        <box-button label={running ? 'Comparing live environments…' : 'Run live comparison'} tone="primary" disabled={!canCompare} onClick={() => void runComparison()}></box-button>
+        <box-button label={running ? 'Cancel comparison' : 'Run live comparison'} tone={running ? 'secondary' : 'primary'} disabled={!canCompare} onClick={() => running ? cancelComparison() : void runComparison()}></box-button>
       </div>}
+      {comparisonType === 'folders' && boxConnections.length >= 2 ? <div className="compare-folder-scopes">
+        <FolderScopePicker connectionId={leftConnectionID} label="Source root" selected={leftRoot} disabled={running} onSelected={setLeftRoot}/>
+        <FolderScopePicker connectionId={rightConnectionID} label="Destination root" selected={rightRoot} disabled={running} onSelected={setRightRoot}/>
+      </div> : null}
+      {running ? <div className="compare-running" role="status"><box-spinner label="Reading live Box structure"></box-spinner><span>Reading live Box structure…</span></div> : null}
+      {notice ? <Alert className="compare-notice" heading="Comparison stopped" message={notice} tone="info" open/> : null}
       {error ? <Alert className="compare-error" heading="Comparison could not be completed" message={error} tone="error" open/> : null}
     </section>
 
@@ -261,8 +299,8 @@ function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
   const truncated = comparison.scope.leftTruncated || comparison.scope.rightTruncated || comparison.scope.leftEntriesTruncated || comparison.scope.rightEntriesTruncated
   const mode = useDiffMode() === 'inline' ? 'unified' : 'side-by-side'
 
-  return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><h2 id="comparison-results-title">Folders</h2></header>
-    {truncated ? <Alert className="compare-scope-alert" heading="Folder scope limit reached" message={`Results stop at depth ${comparison.scope.maxDepth}, ${comparison.scope.maxFolders} folders, and ${comparison.scope.maxEntries} files or web links per side. Paths outside that boundary are not represented.`} tone="warning" open/> : null}
+  return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><h2 id="comparison-results-title">Folders</h2><p className="compare-scope-route">{comparison.scope.leftRootLabel} → {comparison.scope.rightRootLabel}</p></header>
+    {truncated ? <Alert className="compare-scope-alert" heading="Partial folder comparison" message={`The selected roots reached a safety limit: depth ${comparison.scope.maxDepth}, ${comparison.scope.maxFolders} folders, or ${comparison.scope.maxEntries} files and web links per side. Items beyond that boundary are not represented.`} tone="warning" open/> : null}
     <div className="compare-folder-tree-controls"><TextField label="Filter folders and files" value={query} placeholder="Search by name" onValueChanged={(event) => setQuery(event.detail.value)}/></div>
     <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} filter={query} mode={mode}/></div>
   </section>

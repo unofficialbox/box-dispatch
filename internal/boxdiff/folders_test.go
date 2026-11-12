@@ -3,6 +3,7 @@ package boxdiff
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestCrawlFolderTreeHonorsDepthAndFolderLimits(t *testing.T) {
 		}
 	}
 
-	folders, entries, truncated, entriesTruncated, err := crawlFolderTree(context.Background(), list, 1, 10, 10)
+	folders, entries, truncated, entriesTruncated, err := crawlFolderTree(context.Background(), list, "0", 1, 10, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestCrawlFolderTreeHonorsDepthAndFolderLimits(t *testing.T) {
 	if len(entries) != 2 || entriesTruncated || entries[0].Path != "/A/Reference" || entries[1].Path != "/readme.txt" {
 		t.Fatalf("entries = %+v truncated = %v", entries, entriesTruncated)
 	}
-	folders, entries, truncated, entriesTruncated, err = crawlFolderTree(context.Background(), list, 4, 1, 1)
+	folders, entries, truncated, entriesTruncated, err = crawlFolderTree(context.Background(), list, "0", 4, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +128,97 @@ func TestCrawlFolderTreeReturnsListingError(t *testing.T) {
 	list := func(_ context.Context, _ string) iter.Seq2[*schemas.Item, error] {
 		return func(yield func(*schemas.Item, error) bool) { yield(nil, errors.New("unavailable")) }
 	}
-	if _, _, _, _, err := crawlFolderTree(context.Background(), list, 1, 1, 1); err == nil {
+	if _, _, _, _, err := crawlFolderTree(context.Background(), list, "0", 1, 1, 1); err == nil {
 		t.Fatal("expected listing error")
+	}
+}
+
+func TestCrawlFolderTreeScopesPathsBelowSelectedRoot(t *testing.T) {
+	childName, fileName := "Archive", "agreement.pdf"
+	requested := []string{}
+	list := func(_ context.Context, id string) iter.Seq2[*schemas.Item, error] {
+		requested = append(requested, id)
+		return func(yield func(*schemas.Item, error) bool) {
+			switch id {
+			case "contracts":
+				yield(&schemas.Item{Folder: &schemas.FolderMini{Id: "archive", Name: &childName}}, nil)
+				yield(&schemas.Item{File: &schemas.FileFull{Name: &fileName}}, nil)
+			case "archive":
+			}
+		}
+	}
+
+	folders, entries, _, _, err := crawlFolderTree(context.Background(), list, "contracts", 4, 10, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requested) != 2 || requested[0] != "contracts" || requested[1] != "archive" {
+		t.Fatalf("requested folders = %v", requested)
+	}
+	if len(folders) != 1 || folders[0].Path != "/Archive" {
+		t.Fatalf("scoped folders = %+v", folders)
+	}
+	if len(entries) != 1 || entries[0].Path != "/agreement.pdf" {
+		t.Fatalf("scoped entries = %+v", entries)
+	}
+}
+
+func TestCrawlFolderTreeStopsWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	list := func(ctx context.Context, _ string) iter.Seq2[*schemas.Item, error] {
+		return func(yield func(*schemas.Item, error) bool) {
+			close(started)
+			<-ctx.Done()
+			yield(nil, ctx.Err())
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, _, err := crawlFolderTree(ctx, list, "0", 4, 10, 10)
+		done <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled traversal did not stop")
+	}
+}
+
+func TestCrawlFolderTreeLargeFixtureIsExplicitlyPartial(t *testing.T) {
+	list := func(_ context.Context, id string) iter.Seq2[*schemas.Item, error] {
+		return func(yield func(*schemas.Item, error) bool) {
+			if id != "0" {
+				return
+			}
+			for index := 0; index < FolderComparisonMaxFolders+100; index++ {
+				name := fmt.Sprintf("Folder %03d", index)
+				if !yield(&schemas.Item{Folder: &schemas.FolderMini{Id: fmt.Sprintf("folder-%d", index), Name: &name}}, nil) {
+					return
+				}
+			}
+			for index := 0; index < FolderComparisonMaxEntries+200; index++ {
+				name := fmt.Sprintf("File %04d.txt", index)
+				if !yield(&schemas.Item{File: &schemas.FileFull{Name: &name}}, nil) {
+					return
+				}
+			}
+		}
+	}
+
+	folders, entries, foldersPartial, entriesPartial, err := crawlFolderTree(context.Background(), list, "0", FolderComparisonMaxDepth, FolderComparisonMaxFolders, FolderComparisonMaxEntries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != FolderComparisonMaxFolders || !foldersPartial {
+		t.Fatalf("folders = %d partial = %v", len(folders), foldersPartial)
+	}
+	if len(entries) != FolderComparisonMaxEntries || !entriesPartial {
+		t.Fatalf("entries = %d partial = %v", len(entries), entriesPartial)
 	}
 }

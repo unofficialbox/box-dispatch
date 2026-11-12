@@ -4,9 +4,13 @@ test('compares two Box enterprises live without changing the deployment selectio
   let comparisonRequests = 0
   let folderComparisonRequests = 0
   let aiAgentComparisonRequests = 0
+  const folderComparisonBodies: Array<Record<string, string>> = []
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons')) comparisonRequests += 1
-    if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/folders')) folderComparisonRequests += 1
+    if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/folders')) {
+      folderComparisonRequests += 1
+      folderComparisonBodies.push(request.postDataJSON() as Record<string, string>)
+    }
     if (request.method() === 'POST' && request.url().endsWith('/api/box/comparisons/ai-agents')) aiAgentComparisonRequests += 1
   })
   await page.goto('/')
@@ -65,6 +69,24 @@ test('compares two Box enterprises live without changing the deployment selectio
     element.setAttribute('value', 'folders')
     element.dispatchEvent(new CustomEvent('value-changed', { bubbles: true, composed: true, detail: { value: 'folders' } }))
   })
+  const scopeTrees = page.locator('box-folder-tree')
+  await expect(scopeTrees).toHaveCount(2)
+  await scopeTrees.evaluateAll((trees) => trees.forEach((tree) => { tree.expandedIds = ['0'] }))
+  await expect(scopeTrees.nth(0).locator('[data-node-id="contracts-production"]')).toBeVisible()
+  await expect(scopeTrees.nth(1).locator('[data-node-id="contracts-sandbox"]')).toBeVisible()
+
+  let releaseComparison: (() => void) | undefined
+  await page.route('**/api/box/comparisons/folders', async (route) => {
+    await new Promise<void>((resolve) => { releaseComparison = resolve })
+    await route.continue().catch(() => undefined)
+  })
+  await page.locator('box-button[label="Run live comparison"]').click()
+  await expect(page.locator('box-button[label="Cancel comparison"]')).toBeVisible()
+  await page.locator('box-button[label="Cancel comparison"]').click()
+  await expect(page.locator('box-alert[heading="Comparison stopped"]')).toHaveAttribute('message', 'Comparison canceled. No provider changes were made.')
+  releaseComparison?.()
+  await page.unroute('**/api/box/comparisons/folders')
+
   await page.locator('box-button[label="Run live comparison"]').click()
   await expect(page.getByRole('heading', { name: 'Folders', exact: true })).toBeVisible()
   await expect(page.locator('box-metric-card[heading="Changed"]')).toHaveAttribute('value', '1')
@@ -106,7 +128,49 @@ test('compares two Box enterprises live without changing the deployment selectio
   await expect(folderTree.locator('[part~="item"]')).toHaveCount(9)
   await expect(page.locator('box-diff-viewer[heading="folder-structure.json"]')).toHaveCount(0)
   await expect(page.getByText('items.files')).toHaveCount(0)
-  await expect.poll(() => folderComparisonRequests).toBe(1)
+  await expect.poll(() => folderComparisonRequests).toBe(2)
+  expect(folderComparisonBodies.at(-1)).toMatchObject({ leftRootId: '0', rightRootId: '0' })
+
+  const sourceFolderSearch = page.locator('.folder-scope-picker').nth(0).locator('box-text-field[label="Find a folder"]')
+  await sourceFolderSearch.evaluate((element) => {
+    element.setAttribute('value', 'archive')
+    element.dispatchEvent(new CustomEvent('value-changed', { bubbles: true, composed: true, detail: { value: 'archive' } }))
+  })
+  await expect(scopeTrees.nth(0).locator('[data-node-id="archive-production"]')).toBeVisible()
+  await sourceFolderSearch.evaluate((element) => {
+    element.setAttribute('value', '')
+    element.dispatchEvent(new CustomEvent('value-changed', { bubbles: true, composed: true, detail: { value: '' } }))
+  })
+  await scopeTrees.nth(0).evaluate((tree) => {
+    const node = tree.nodes.find((candidate) => candidate.id === 'contracts-production')!
+    tree.dispatchEvent(new CustomEvent('selected-changed', { bubbles: true, composed: true, detail: { id: node.id, node, selectedIds: [node.id] } }))
+  })
+  await scopeTrees.nth(1).evaluate((tree) => {
+    const node = tree.nodes.find((candidate) => candidate.id === 'contracts-sandbox')!
+    tree.dispatchEvent(new CustomEvent('selected-changed', { bubbles: true, composed: true, detail: { id: node.id, node, selectedIds: [node.id] } }))
+  })
+  await expect(page.locator('.folder-scope-picker').nth(0).locator('header strong')).toHaveText('Contracts')
+  await expect(page.locator('.folder-scope-picker').nth(1).locator('header strong')).toHaveText('Contracts')
+  await page.locator('box-button[label="Run live comparison"]').click()
+  await expect(page.getByText('Contracts → Contracts')).toBeVisible()
+  await expect(page.locator('box-metric-card[heading="Changed"]')).toHaveAttribute('value', '0')
+  await expect(page.locator('box-metric-card[heading="Missing"]')).toHaveAttribute('value', '2')
+  await expect(page.locator('box-metric-card[heading="Extra"]')).toHaveAttribute('value', '2')
+  await expect(page.locator('box-metric-card[heading="Equal"]')).toHaveAttribute('value', '1')
+  await expect.poll(() => folderComparisonRequests).toBe(3)
+  expect(folderComparisonBodies.at(-1)).toMatchObject({ leftRootId: 'contracts-production', rightRootId: 'contracts-sandbox' })
+
+  await page.route('**/api/box/comparisons/folders', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json() as { scope: { leftTruncated: boolean } }
+    body.scope.leftTruncated = true
+    await route.fulfill({ response, json: body })
+  })
+  await page.locator('box-button[label="Run live comparison"]').click()
+  await expect(page.locator('box-alert[heading="Partial folder comparison"]')).toBeVisible()
+  await expect(page.locator('box-alert[heading="Partial folder comparison"]')).toHaveAttribute('message', /Items beyond that boundary are not represented/)
+  await page.unroute('**/api/box/comparisons/folders')
+  await expect.poll(() => folderComparisonRequests).toBe(4)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(folderTree).toHaveAttribute('mode', 'unified')

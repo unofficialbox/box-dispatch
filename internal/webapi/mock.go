@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -198,10 +199,32 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			return boxdiff.CompareSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
 		},
-		BoxFolderCompare: func(_ context.Context, left, right string) (boxdiff.FolderComparison, error) {
+		BoxFolderCompare: func(_ context.Context, left, right, leftRoot, rightRoot string) (boxdiff.FolderComparison, error) {
 			started := time.Now().UTC()
+			if leftRoot == "contracts-production" && rightRoot == "contracts-sandbox" {
+				leftSnapshot := boxdiff.FolderSnapshot{
+					Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
+					RootLabel:   "Contracts",
+					Folders:     []boxdiff.Folder{{Path: "/Archive", Name: "Archive", Depth: 1, Items: boxdiff.FolderItemCounts{Files: 1}}},
+					Entries: []boxdiff.FolderEntry{
+						{Path: "/agreement.pdf", Name: "agreement.pdf", Type: "file"},
+						{Path: "/Archive/legacy.txt", Name: "legacy.txt", Type: "file"},
+					},
+				}
+				rightSnapshot := boxdiff.FolderSnapshot{
+					Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
+					RootLabel:   "Contracts",
+					Folders:     []boxdiff.Folder{{Path: "/Templates", Name: "Templates", Depth: 1, Items: boxdiff.FolderItemCounts{Files: 1}}},
+					Entries: []boxdiff.FolderEntry{
+						{Path: "/agreement.pdf", Name: "agreement.pdf", Type: "file"},
+						{Path: "/Templates/template.docx", Name: "template.docx", Type: "file"},
+					},
+				}
+				return boxdiff.CompareFolderSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
+			}
 			leftSnapshot := boxdiff.FolderSnapshot{
 				Environment: boxdiff.Environment{ConnectionID: left, Alias: "Acme Production", Identity: "box.user@example.test", EnterpriseID: "EID-mock", Domain: "acme.app.box.com", CapturedAt: started.Format(time.RFC3339Nano)},
+				RootLabel:   "All Files",
 				Folders: []boxdiff.Folder{
 					{Path: "/Contracts", Name: "Contracts", Depth: 1, Items: boxdiff.FolderItemCounts{Folders: 1, Files: 2}},
 					{Path: "/Contracts/Archive", Name: "Archive", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 1}},
@@ -215,6 +238,7 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 			}
 			rightSnapshot := boxdiff.FolderSnapshot{
 				Environment: boxdiff.Environment{ConnectionID: right, Alias: "Acme Sandbox", Identity: "sandbox.user@example.test", EnterpriseID: "EID-sandbox", Domain: "acme-sandbox.app.box.com", CapturedAt: started.Add(time.Millisecond).Format(time.RFC3339Nano)},
+				RootLabel:   "All Files",
 				Folders: []boxdiff.Folder{
 					{Path: "/Contracts", Name: "Contracts", Depth: 1, Items: boxdiff.FolderItemCounts{Folders: 1, Files: 3}},
 					{Path: "/Contracts/Templates", Name: "Templates", Depth: 2, Items: boxdiff.FolderItemCounts{Files: 2}},
@@ -227,6 +251,34 @@ func NewMockHandlerWithOptions(options MockOptions) http.Handler {
 				},
 			}
 			return boxdiff.CompareFolderSnapshots(started, leftSnapshot, rightSnapshot, time.Now().UTC())
+		},
+		BoxFolderChildren: func(_ context.Context, connectionID, parentID string) (boxdiff.FolderChildren, error) {
+			children := boxdiff.FolderChildren{ParentID: parentID, Folders: []boxdiff.FolderChoice{}}
+			switch connectionID + ":" + parentID {
+			case "box-mock-production:0":
+				children.Folders = []boxdiff.FolderChoice{{ID: "contracts-production", Name: "Contracts"}, {ID: "legal-production", Name: "Legal"}}
+			case "box-mock-production:contracts-production":
+				children.Folders = []boxdiff.FolderChoice{{ID: "archive-production", Name: "Archive"}}
+			case "box-mock-sandbox:0":
+				children.Folders = []boxdiff.FolderChoice{{ID: "contracts-sandbox", Name: "Contracts"}, {ID: "operations-sandbox", Name: "Operations"}}
+			case "box-mock-sandbox:contracts-sandbox":
+				children.Folders = []boxdiff.FolderChoice{{ID: "templates-sandbox", Name: "Templates"}}
+			}
+			return children, nil
+		},
+		BoxFolderSearch: func(_ context.Context, connectionID, query string) (boxdiff.FolderSearchResults, error) {
+			query = strings.ToLower(strings.TrimSpace(query))
+			all := map[string][]boxdiff.FolderChoice{
+				"box-mock-production": {{ID: "contracts-production", Name: "Contracts"}, {ID: "archive-production", Name: "Archive"}, {ID: "legal-production", Name: "Legal"}},
+				"box-mock-sandbox":    {{ID: "contracts-sandbox", Name: "Contracts"}, {ID: "templates-sandbox", Name: "Templates"}, {ID: "operations-sandbox", Name: "Operations"}},
+			}
+			result := boxdiff.FolderSearchResults{Folders: []boxdiff.FolderChoice{}}
+			for _, folder := range all[connectionID] {
+				if strings.Contains(strings.ToLower(folder.Name), query) {
+					result.Folders = append(result.Folders, folder)
+				}
+			}
+			return result, nil
 		},
 		BoxAIAgentCompare: func(_ context.Context, left, right string) (boxdiff.AIAgentComparison, error) {
 			started := time.Now().UTC()
