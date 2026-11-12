@@ -92,3 +92,16 @@ bun run test:e2e
 ```
 
 The Playwright command rebuilds the embedded frontend and runs the full mock-workflow suite.
+
+## GitHub Actions CI
+
+Pull requests targeting `main` and pushes to `main` run three independent checks:
+
+- **Go gate** — formatting, build, vet, and the hermetic Go suite;
+- **Frontend** — frozen Bun install, unit tests, lint, and production build;
+- **Playwright** — frozen Bun install, Chromium installation, and the complete
+  provider-free mock browser suite.
+
+The workflow has read-only repository permissions, cancels superseded runs for the same
+branch, and uploads Playwright evidence only when the browser job fails. It does not read
+provider credentials or call live Box or Salesforce environments.
