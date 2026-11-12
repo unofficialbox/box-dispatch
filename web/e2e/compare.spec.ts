@@ -169,6 +169,8 @@ test('compares two Box enterprises live without changing the deployment selectio
   await page.locator('box-button[label="Run live comparison"]').click()
   await expect(page.locator('box-alert[heading="Partial folder comparison"]')).toBeVisible()
   await expect(page.locator('box-alert[heading="Partial folder comparison"]')).toHaveAttribute('message', /Items beyond that boundary are not represented/)
+  await expect(page.locator('box-button[label="Prepare deployment"]')).toHaveCount(0)
+  await expect.poll(() => folderTree.evaluate((tree) => tree.selectionDisabled)).toBe(true)
   await page.unroute('**/api/box/comparisons/folders')
   await expect.poll(() => folderComparisonRequests).toBe(4)
 

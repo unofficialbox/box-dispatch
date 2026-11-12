@@ -39,6 +39,7 @@ type boxAPI interface {
 	findFolder(context.Context, string, string) (string, bool, error)
 	ensureFolder(context.Context, string, string) (string, error)
 	findFile(context.Context, string, string) (string, bool, error)
+	findWebLink(context.Context, string, string) (id, target string, found bool, err error)
 	fileExists(context.Context, string, string) (bool, error)
 	// fileDigest returns a file's id and its Box-side SHA-1 content hash, so the
 	// caller can tell an unchanged file from one that needs a new version.
@@ -46,6 +47,7 @@ type boxAPI interface {
 	uploadFile(context.Context, string, string) (string, error)
 	// uploadFileVersion replaces an existing same-named file with a new version.
 	uploadFileVersion(context.Context, string, string) (string, error)
+	createWebLink(context.Context, string, string, string) (string, error)
 	metadataTemplates(context.Context) (map[string]boxMetadataTemplate, error)
 	applyMetadataTemplate(context.Context, boxMetadataTemplate) error
 	docgenTemplateFileIDs(context.Context) (map[string]bool, error)
@@ -62,6 +64,7 @@ type boxAPI interface {
 	// resource is reported by the caller rather than treated as fatal.
 	deleteFolder(context.Context, string) error
 	deleteFile(context.Context, string) error
+	deleteWebLink(context.Context, string) error
 	deleteMetadataTemplate(context.Context, string) error
 	deleteDocgenTemplate(context.Context, string) error
 	deleteAIAgent(context.Context, string) error
@@ -166,6 +169,27 @@ func (sdk *boxSDK) findFile(ctx context.Context, folderID, name string) (string,
 	return "", false, nil
 }
 
+func (sdk *boxSDK) findWebLink(ctx context.Context, folderID, name string) (string, string, bool, error) {
+	for item, err := range sdk.client.Folders.ListItems(ctx, folderID, nil) {
+		if err != nil {
+			return "", "", false, err
+		}
+		if item.WebLink == nil || item.WebLink.Name == nil || *item.WebLink.Name != name {
+			continue
+		}
+		link, err := sdk.client.WebLinks.Get(ctx, item.WebLink.Id, nil)
+		if err != nil {
+			return "", "", false, err
+		}
+		target := ""
+		if link != nil && link.Url != nil {
+			target = strings.TrimSpace(*link.Url)
+		}
+		return item.WebLink.Id, target, true, nil
+	}
+	return "", "", false, nil
+}
+
 func (sdk *boxSDK) fileExists(ctx context.Context, folderID, name string) (bool, error) {
 	_, found, err := sdk.findFile(ctx, folderID, name)
 	return found, err
@@ -233,6 +257,19 @@ func (sdk *boxSDK) uploadFileVersion(ctx context.Context, folderID, source strin
 		return "", fmt.Errorf("upload version of %s: %w", name, err)
 	}
 	return fileID, nil
+}
+
+func (sdk *boxSDK) createWebLink(ctx context.Context, folderID, name, target string) (string, error) {
+	link, err := sdk.client.WebLinks.Create(ctx, &schemas.CreateWebLinkRequest{
+		Url: target, Parent: schemas.AttributesParent{Id: folderID}, Name: &name,
+	})
+	if err != nil {
+		return "", err
+	}
+	if link == nil || strings.TrimSpace(link.Id) == "" {
+		return "", fmt.Errorf("Box create web link response did not include an ID")
+	}
+	return link.Id, nil
 }
 
 func uploadedFileID(files *schemas.Files, name string) (string, error) {
@@ -591,6 +628,10 @@ func (sdk *boxSDK) deleteFolder(ctx context.Context, folderID string) error {
 
 func (sdk *boxSDK) deleteFile(ctx context.Context, fileID string) error {
 	return sdk.client.Files.Delete(ctx, fileID, nil)
+}
+
+func (sdk *boxSDK) deleteWebLink(ctx context.Context, webLinkID string) error {
+	return sdk.client.WebLinks.Delete(ctx, webLinkID)
 }
 
 func (sdk *boxSDK) deleteMetadataTemplate(ctx context.Context, templateKey string) error {

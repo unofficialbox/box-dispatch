@@ -1,11 +1,15 @@
 package lifecycle
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestOrderResourcesForTeardownDeletesLeavesBeforeContainers(t *testing.T) {
 	resources := []ResourceReference{
 		{Kind: "folder", Name: "workspace"},
 		{Kind: "file", Name: "sample.docx"},
+		{Kind: "web_link", Name: "reference"},
 		{Kind: "hub", Name: "hub"},
 		{Kind: "metadata_template", Name: "contract"},
 		{Kind: "ai_agent", Name: "agent"},
@@ -19,6 +23,9 @@ func TestOrderResourcesForTeardownDeletesLeavesBeforeContainers(t *testing.T) {
 	// that a later step still expects to delete.
 	if got[len(got)-1] != "folder" {
 		t.Fatalf("folder must be deleted last, got order %v", got)
+	}
+	if slices.Index(got, "web_link") > slices.Index(got, "folder") {
+		t.Fatalf("web links must be deleted before folders, got order %v", got)
 	}
 	if len(got) != len(resources) {
 		t.Fatalf("ordering dropped resources: %v", got)

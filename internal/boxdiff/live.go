@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +22,11 @@ import (
 	"github.com/unofficialbox/box-open-go-sdk/gantryruntime"
 	"github.com/unofficialbox/box-open-go-sdk/managers"
 	"github.com/unofficialbox/box-open-go-sdk/schemas"
+)
+
+const (
+	folderPromotionMaxFileBytes  = 100 << 20
+	folderPromotionMaxTotalBytes = 500 << 20
 )
 
 type capturedSnapshot struct {
@@ -176,6 +183,193 @@ func captureFoldersLive(ctx context.Context, connectionID, alias, rootID string)
 		return FolderSnapshot{}, fmt.Errorf("list live folder tree: %w", err)
 	}
 	return FolderSnapshot{Environment: environment, RootLabel: rootLabel, Folders: folders, Entries: entries, Truncated: truncated, EntriesTruncated: entriesTruncated}, nil
+}
+
+// PrepareFolderPromotionLive re-reads both roots, rejects stale or incomplete
+// selections, then obtains file bodies and web-link targets only on the server.
+// A changed folder is a selectable scope for its missing descendants; files,
+// web links, and newly created folders themselves must remain source-only.
+func PrepareFolderPromotionLive(ctx context.Context, leftConnectionID, rightConnectionID, leftRootID, rightRootID string, selections []FolderPromotionSelection) (FolderPromotion, error) {
+	comparison, err := CompareFoldersLive(ctx, leftConnectionID, rightConnectionID, leftRootID, rightRootID)
+	if err != nil {
+		return FolderPromotion{}, err
+	}
+	if comparison.Scope.LeftTruncated || comparison.Scope.RightTruncated || comparison.Scope.LeftEntriesTruncated || comparison.Scope.RightEntriesTruncated {
+		return FolderPromotion{}, fmt.Errorf("the live folder comparison is partial; choose narrower roots before preparing a deployment")
+	}
+	selected, err := selectFolderPromotionItems(comparison, selections)
+	if err != nil {
+		return FolderPromotion{}, err
+	}
+
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return FolderPromotion{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	alias := boxConnectionAlias(settings, strings.TrimSpace(leftConnectionID))
+	if alias == "" {
+		return FolderPromotion{}, fmt.Errorf("source Box connection was not found")
+	}
+	_, client, err := liveClient(ctx, leftConnectionID, alias)
+	if err != nil {
+		return FolderPromotion{}, err
+	}
+
+	totalBytes := 0
+	items := make([]FolderPromotionItem, 0, len(selected))
+	for _, entry := range selected {
+		item := FolderPromotionItem{Path: entry.Path, Type: entry.Type}
+		switch entry.Type {
+		case "folder":
+		case "file":
+			reader, downloadErr := client.Downloads.GetFileContent(ctx, entry.ID, nil)
+			if downloadErr != nil {
+				return FolderPromotion{}, fmt.Errorf("download %s: %w", entry.Path, downloadErr)
+			}
+			content, readErr := io.ReadAll(io.LimitReader(reader, folderPromotionMaxFileBytes+1))
+			if closer, ok := reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+			if readErr != nil {
+				return FolderPromotion{}, fmt.Errorf("read %s: %w", entry.Path, readErr)
+			}
+			if len(content) > folderPromotionMaxFileBytes {
+				return FolderPromotion{}, fmt.Errorf("file %s exceeds the 100 MiB promotion limit", entry.Path)
+			}
+			totalBytes += len(content)
+			if totalBytes > folderPromotionMaxTotalBytes {
+				return FolderPromotion{}, fmt.Errorf("selected files exceed the 500 MiB promotion limit")
+			}
+			item.Content = content
+		case "web_link":
+			link, linkErr := client.WebLinks.Get(ctx, entry.ID, nil)
+			if linkErr != nil {
+				return FolderPromotion{}, fmt.Errorf("read web link %s: %w", entry.Path, linkErr)
+			}
+			if link == nil || link.Url == nil || strings.TrimSpace(*link.Url) == "" {
+				return FolderPromotion{}, fmt.Errorf("web link %s has no portable target", entry.Path)
+			}
+			item.URL = strings.TrimSpace(*link.Url)
+			target, parseErr := url.Parse(item.URL)
+			if parseErr != nil || target.Host == "" || (!strings.EqualFold(target.Scheme, "http") && !strings.EqualFold(target.Scheme, "https")) {
+				return FolderPromotion{}, fmt.Errorf("web link %s does not have a portable HTTP or HTTPS target", entry.Path)
+			}
+		default:
+			return FolderPromotion{}, fmt.Errorf("unsupported folder promotion type %q", entry.Type)
+		}
+		items = append(items, item)
+	}
+	return FolderPromotion{Comparison: comparison, Items: items}, nil
+}
+
+type selectedFolderPromotionItem struct {
+	ID   string
+	Path string
+	Type string
+}
+
+func selectFolderPromotionItems(comparison FolderComparison, selections []FolderPromotionSelection) ([]selectedFolderPromotionItem, error) {
+	if len(selections) == 0 {
+		return nil, fmt.Errorf("select at least one missing folder, file, or web link")
+	}
+	leftFolders := map[string]FolderDiff{}
+	leftEntries := map[string]FolderEntryDiff{}
+	for _, folder := range comparison.Folders {
+		if folder.Left != nil {
+			leftFolders[folder.Path] = folder
+		}
+	}
+	for _, entry := range comparison.Entries {
+		if entry.Left != nil {
+			leftEntries[entry.Path] = entry
+		}
+	}
+
+	chosen := map[string]selectedFolderPromotionItem{}
+	addFolder := func(diff FolderDiff) {
+		if diff.Status == "left_only" && diff.Left != nil {
+			chosen["folder:"+diff.Path] = selectedFolderPromotionItem{ID: diff.Left.ID, Path: diff.Path, Type: "folder"}
+		}
+	}
+	addEntry := func(diff FolderEntryDiff) {
+		if diff.Status == "left_only" && diff.Left != nil {
+			chosen[diff.Type+":"+diff.Path] = selectedFolderPromotionItem{ID: diff.Left.ID, Path: diff.Path, Type: diff.Type}
+		}
+	}
+	addMissingAncestors := func(path string) {
+		parent := path
+		for {
+			index := strings.LastIndex(parent, "/")
+			if index <= 0 {
+				return
+			}
+			parent = parent[:index]
+			if folder, ok := leftFolders[parent]; ok {
+				addFolder(folder)
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+	for _, selection := range selections {
+		selection.Path = strings.TrimSpace(selection.Path)
+		selection.Type = strings.TrimSpace(selection.Type)
+		key := selection.Type + ":" + selection.Path
+		if selection.Path == "" || !strings.HasPrefix(selection.Path, "/") || seen[key] {
+			return nil, fmt.Errorf("folder promotion contains an invalid or duplicate selection")
+		}
+		seen[key] = true
+		switch selection.Type {
+		case "folder":
+			folder, ok := leftFolders[selection.Path]
+			if !ok || (folder.Status != "left_only" && folder.Status != "changed") {
+				return nil, fmt.Errorf("folder %q is no longer eligible for promotion; rerun the live comparison", selection.Path)
+			}
+			addFolder(folder)
+			prefix := selection.Path + "/"
+			for _, candidate := range comparison.Folders {
+				if strings.HasPrefix(candidate.Path, prefix) {
+					addFolder(candidate)
+				}
+			}
+			for _, candidate := range comparison.Entries {
+				if strings.HasPrefix(candidate.Path, prefix) {
+					addEntry(candidate)
+				}
+			}
+		case "file", "web_link":
+			entry, ok := leftEntries[selection.Path]
+			if !ok || entry.Type != selection.Type || entry.Status != "left_only" {
+				return nil, fmt.Errorf("%s %q is no longer eligible for promotion; rerun the live comparison", strings.ReplaceAll(selection.Type, "_", " "), selection.Path)
+			}
+			addMissingAncestors(selection.Path)
+			addEntry(entry)
+		default:
+			return nil, fmt.Errorf("unsupported folder promotion type %q", selection.Type)
+		}
+	}
+	if len(chosen) == 0 {
+		return nil, fmt.Errorf("the selected folders no longer contain missing portable items; rerun the live comparison")
+	}
+	items := make([]selectedFolderPromotionItem, 0, len(chosen))
+	for _, item := range chosen {
+		if strings.TrimSpace(item.ID) == "" {
+			return nil, fmt.Errorf("%s %q has no live Box resource ID", strings.ReplaceAll(item.Type, "_", " "), item.Path)
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		leftDepth, rightDepth := strings.Count(items[i].Path, "/"), strings.Count(items[j].Path, "/")
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		if items[i].Type != items[j].Type {
+			return items[i].Type == "folder"
+		}
+		return items[i].Path < items[j].Path
+	})
+	return items, nil
 }
 
 // ListFolderChildrenLive returns only the next selectable folder level. The SDK
@@ -452,7 +646,7 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, rootID string, ma
 							results[index].err = fmt.Errorf("folder listing returned an unnamed file")
 							return
 						}
-						results[index].entries = append(results[index].entries, FolderEntry{Path: current.path + "/" + name, Name: name, Type: "file"})
+						results[index].entries = append(results[index].entries, FolderEntry{ID: item.File.Id, Path: current.path + "/" + name, Name: name, Type: "file"})
 					case item.WebLink != nil:
 						results[index].counts.WebLinks++
 						name := strings.TrimSpace(stringValue(item.WebLink.Name))
@@ -460,7 +654,7 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, rootID string, ma
 							results[index].err = fmt.Errorf("folder listing returned an unnamed web link")
 							return
 						}
-						results[index].entries = append(results[index].entries, FolderEntry{Path: current.path + "/" + name, Name: name, Type: "web_link"})
+						results[index].entries = append(results[index].entries, FolderEntry{ID: item.WebLink.Id, Path: current.path + "/" + name, Name: name, Type: "web_link"})
 					default:
 						results[index].counts.Other++
 					}
@@ -497,7 +691,7 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, rootID string, ma
 					continue
 				}
 				path := current.path + "/" + child.name
-				folders = append(folders, Folder{Path: path, Name: child.name, Depth: current.depth + 1})
+				folders = append(folders, Folder{ID: child.id, Path: path, Name: child.name, Depth: current.depth + 1})
 				next = append(next, pendingFolder{id: child.id, path: path, depth: current.depth + 1, index: len(folders) - 1})
 			}
 		}

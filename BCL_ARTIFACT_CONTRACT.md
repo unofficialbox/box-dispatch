@@ -111,6 +111,21 @@ Format rules:
 - `*.bcl` is the single supported admin-facing interchange format.
 - Import source is also the cleanup-ready artifact source for rehydrating environment state.
 
+### Server-built promotion packages
+
+Live Box comparisons can create a server-chosen, local BCL package for a deployment plan.
+The `folder-promotion` package contains `config/box/folder-promotion.bcl` with:
+
+- `destination_root_id`: the exact selected destination root;
+- `items`: provider-ID-free relative paths and `folder`, `file`, or `web_link` types;
+- `source`: a package-relative path for file content, never a Box item ID;
+- `url`: an absolute HTTP(S) target for a web link, stored only in the owner-local package.
+
+The browser comparison and audit preview receive only path and type. Package reads reject
+path traversal, absolute file sources, unsupported types, and non-HTTP(S) web-link targets.
+Validation rechecks the destination and deployment records created Box resource IDs so
+reset can delete strictly by ID. Box folder ID `0` is never a valid teardown target.
+
 ## 6) Relevant references
 
 - [internal/bcl/bcl.go](internal/bcl/bcl.go)

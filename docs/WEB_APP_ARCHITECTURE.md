@@ -23,6 +23,7 @@ flowchart LR
     Normalize --> FolderDiff["Bounded folder, file, and web-link path diff"]
     Normalize --> AIAgentDiff["AI Studio custom-agent diff"]
     MetadataDiff -->|"selected portable changed or source-only templates"| Promotion["Server-built BCL promotion package"]
+    FolderDiff -->|"selected source-only nodes or changed-folder scope"| Promotion
     AIAgentDiff -->|"selected source-only custom agents"| Promotion
     Promotion --> Engine
     Engine --> SalesforceREST["Salesforce REST API"]
@@ -74,7 +75,7 @@ The browser workspace guides operators through:
 4. Validate provider state and deployment prerequisites.
 5. Apply the validated deployment, open Box or Salesforce directly, and review the named audit result.
 6. Compare metadata templates, selected live folder roots, or Box AI Studio custom agents and their capabilities in two saved Box enterprises directly from their live APIs. Folder roots use lazy child loading and bounded provider search, so the browser never needs the complete hierarchy. Filter the change-first inventory without hiding the source/destination diff. Box Automate Extract Agents are a separate unsupported object type.
-7. Add portable changed or source-only metadata templates, or supported source-only AI Studio custom agents, to a deployment plan; prepare a minimal promotion package from a fresh live re-check; and continue through the ordinary connection, review, validation, and confirmed deployment workflow.
+7. Add portable metadata templates, source-only AI Studio custom agents, or source-only folder-tree nodes to a deployment plan; prepare a minimal promotion package from a fresh live re-check; and continue through the ordinary connection, review, validation, and confirmed deployment workflow.
 
 The browser is the only interactive user experience. The executable has no full-screen
 terminal mode, prompts, keyboard-driven terminal navigation, or terminal presentation
@@ -134,6 +135,7 @@ credentials from `.env`:
 | `POST /api/box/comparisons/folders` | authenticate two exact saved Box connection IDs in parallel, traverse the two selected live roots within the documented depth/folder/item limits, and compare provider-ID-free relative folder, file, and web-link paths plus direct item counts | credentials, access tokens, Box item IDs in results, web-link URLs, file contents, hashes, versions, cached readiness state, deployment connection selection |
 | `POST /api/box/comparisons/ai-agents` | authenticate two exact saved Box connection IDs in parallel, read current AI Studio custom agents and their capabilities, remove provider-generated response fields, and return a semantic definition diff; this does not inspect Box Automate Extract Agents | credentials, access tokens, agent IDs, principal IDs, timestamps, actor identities, icon references, response warnings, cached readiness state, deployment connection selection |
 | `POST /api/box/promotions/metadata-templates` | rerun the exact live metadata-template comparison, verify every selected template is still changed or source-only and contains only portable field types, build a minimal BCL package, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, enterprise-specific taxonomy fields, deployment execution |
+| `POST /api/box/promotions/folders` | rerun the exact bounded folder comparison, reject partial or stale selections, fetch selected file bytes and HTTP(S) web-link targets server-side, build a minimal BCL package, select the destination connection, and save the deployment plan | credentials, access tokens, Box item IDs, file contents, web-link targets, partial or stale comparison data, deployment execution |
 | `POST /api/box/promotions/ai-agents` | rerun the exact live AI-agent comparison, verify every selected agent is still source-only, has no provider-specific audience principals, and uses a supported Ask or Extract mode, build a minimal BCL package with its complete normalized configuration, select the destination connection, and save the deployment plan | credentials, access tokens, provider IDs, stale comparison data, unsupported modes or restricted audiences, deployment execution |
 | `GET /api/deployments` | durable deployment-run summaries | package path, artifact hashes, raw provider output |
 | `GET /api/deployments/{id}` | a run's safe component counts and names, plus provider environment IDs and launch destinations | diagnostics, full resource inventories, source paths |
@@ -189,14 +191,21 @@ the operator can distinguish live evidence from a saved connection-status
 snapshot. The browser defaults the inventory to changed objects followed by objects
 missing from the destination; folder results use the tree's changes-only toggle and
 change navigation while metadata templates and AI agents retain status and text filters. Portable changed or
-source-only metadata templates and source-only AI Studio custom agents with one Ask or Extract
-capability can enter a promotion workflow. Changed metadata templates are applied through
+source-only metadata templates, source-only AI Studio custom agents with one Ask or Extract
+capability, and source-only folder, file, or web-link nodes can enter a promotion workflow.
+A changed folder is selectable only as a scope for its source-only descendants; changed files,
+type conflicts, destination-only items, and equal items remain review-only. Folder promotion
+is disabled for partial comparisons. Changed metadata templates are applied through
 Box's atomic schema-update operations, while source-only templates use schema creation.
 Changes that require field or option removal remain review-only until Dispatch has a safe
 removal policy. The server reruns the
 live comparison at plan creation time, rejects selections whose status or supported shape
 changed, writes only the selected normalized definitions to a server-chosen BCL package,
-and selects the destination Box connection. The plan
+and selects the destination Box connection. Folder packages download file bytes and read
+web-link targets only after that fresh comparison; neither value crosses the browser API.
+Validation rechecks each destination path. Deployment refuses to overwrite an object that
+appeared after validation, records every created folder, file, and web-link ID, and reset
+deletes only those recorded IDs while refusing Box folder ID `0`. The plan
 then uses the existing validation and explicit deployment-confirmation boundary;
 plan creation itself does not change either Box enterprise. A later Git/BCL
 comparison can reuse these canonical schemas, but it is not part of the live API

@@ -34,6 +34,7 @@ type boxFolderComparison func(context.Context, string, string, string, string) (
 type boxFolderChildren func(context.Context, string, string) (boxdiff.FolderChildren, error)
 type boxFolderSearch func(context.Context, string, string) (boxdiff.FolderSearchResults, error)
 type boxAIAgentComparison func(context.Context, string, string) (boxdiff.AIAgentComparison, error)
+type boxFolderPromotion func(context.Context, string, string, string, string, []boxdiff.FolderPromotionSelection) (boxdiff.FolderPromotion, error)
 
 // ServerOptions makes the local API testable without touching operator state.
 // Nil stores use the production audit and BCL-backed connection settings.
@@ -49,8 +50,10 @@ type ServerOptions struct {
 	BoxFolderChildren          boxFolderChildren
 	BoxFolderSearch            boxFolderSearch
 	BoxAIAgentCompare          boxAIAgentComparison
+	BoxFolderPromotion         boxFolderPromotion
 	AIAgentPromotionAssembler  aiAgentPromotionAssembler
 	MetadataPromotionAssembler metadataTemplatePromotionAssembler
+	FolderPromotionAssembler   folderPromotionAssembler
 	SalesforceTargets          salesforceTargetStore
 	SalesforceCheck            salesforceCheck
 	SalesforceDevHubCheck      salesforceDevHubCheck
@@ -110,11 +113,17 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	if options.BoxAIAgentCompare == nil {
 		options.BoxAIAgentCompare = boxdiff.CompareAIAgentsLive
 	}
+	if options.BoxFolderPromotion == nil {
+		options.BoxFolderPromotion = boxdiff.PrepareFolderPromotionLive
+	}
 	if options.AIAgentPromotionAssembler == nil {
 		options.AIAgentPromotionAssembler = assembleAIAgentPromotion
 	}
 	if options.MetadataPromotionAssembler == nil {
 		options.MetadataPromotionAssembler = assembleMetadataTemplatePromotion
+	}
+	if options.FolderPromotionAssembler == nil {
+		options.FolderPromotionAssembler = assembleFolderPromotion
 	}
 	if options.SalesforceTargets == nil {
 		options.SalesforceTargets = listSalesforceTargets
@@ -528,6 +537,67 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		if err := options.PlanSaver(plan); err != nil {
 			_ = saveReservedConnection(settings)
 			writeError(w, http.StatusInternalServerError, "could not save the metadata template promotion plan")
+			return
+		}
+		writeJSON(w, http.StatusCreated, presentPlan(plan, selected))
+	})
+	mux.HandleFunc("POST /api/box/promotions/folders", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var input folderPromotionRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+			writeError(w, http.StatusBadRequest, "folder promotion must be one valid JSON object")
+			return
+		}
+		input = input.normalized()
+		if err := input.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		release, err := options.Runs.beginContextMutation()
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
+		settings, err := options.ConnectionStore()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+			return
+		}
+		available := map[string]bool{}
+		for _, connection := range settings.HydrateBoxConnections().BoxConnections {
+			available[connection.ID] = true
+		}
+		if !available[input.LeftConnectionID] || !available[input.RightConnectionID] {
+			writeError(w, http.StatusBadRequest, "select two available Box connections")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		defer cancel()
+		promotion, err := options.BoxFolderPromotion(ctx, input.LeftConnectionID, input.RightConnectionID, input.LeftRootID, input.RightRootID, input.Nodes)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		plan, err := options.FolderPromotionAssembler(input.Name, input.RightRootID, promotion, options.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not prepare the folder promotion package: "+err.Error())
+			return
+		}
+		selected, err := settings.SelectBoxConnection(input.RightConnectionID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := saveReservedConnection(selected); err != nil {
+			writeConnectionSaveError(w, err, "could not select the destination Box connection")
+			return
+		}
+		if err := options.PlanSaver(plan); err != nil {
+			_ = saveReservedConnection(settings)
+			writeError(w, http.StatusInternalServerError, "could not save the folder promotion plan")
 			return
 		}
 		writeJSON(w, http.StatusCreated, presentPlan(plan, selected))

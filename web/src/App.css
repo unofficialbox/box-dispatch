@@ -1120,6 +1120,7 @@ html[data-theme='dark'] .overview-connection-copy {
 .compare-promotion-plan > strong { align-self: center; color: var(--dispatch-ink); font-size: 14px; white-space: nowrap; }
 .compare-promotion-plan box-text-field { min-width: 0; }
 .compare-promotion-plan box-button { margin-bottom: 1px; }
+.compare-portability-rule { margin: -8px 0 16px; color: var(--dispatch-ink-muted); font-size: 13px; }
 .compare-plan-action { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; }
 .compare-plan-icon { flex: none; }
 .compare-plan-icon[icon='cart-1']::part(button):hover:not(:disabled) {
