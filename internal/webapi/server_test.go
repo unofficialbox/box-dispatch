@@ -75,10 +75,13 @@ func TestBoxFolderComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T
 	calls := 0
 	handler := NewHandlerWithOptions(ServerOptions{
 		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
-		BoxFolderCompare: func(_ context.Context, left, right string) (boxdiff.FolderComparison, error) {
+		BoxFolderCompare: func(_ context.Context, left, right, leftRoot, rightRoot string) (boxdiff.FolderComparison, error) {
 			calls++
 			if left != "left" || right != "right" {
 				t.Fatalf("connections = %q and %q", left, right)
+			}
+			if leftRoot != "contracts" || rightRoot != "agreements" {
+				t.Fatalf("roots = %q and %q", leftRoot, rightRoot)
 			}
 			return boxdiff.FolderComparison{Summary: boxdiff.Summary{Changed: calls}}, nil
 		},
@@ -86,7 +89,7 @@ func TestBoxFolderComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T
 
 	for want := 1; want <= 2; want++ {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons/folders", strings.NewReader(`{"leftConnectionId":"left","rightConnectionId":"right"}`)))
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/comparisons/folders", strings.NewReader(`{"leftConnectionId":"left","rightConnectionId":"right","leftRootId":"contracts","rightRootId":"agreements"}`)))
 		if response.Code != http.StatusOK {
 			t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 		}
@@ -97,6 +100,101 @@ func TestBoxFolderComparisonUsesExactSavedConnectionsAndFreshResult(t *testing.T
 		if comparison.Summary.Changed != want {
 			t.Fatalf("request %d returned cached result %+v", want, comparison.Summary)
 		}
+	}
+}
+
+func TestBoxFolderChildrenUsesExactSavedConnection(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		BoxFolderChildren: func(_ context.Context, connectionID, parentID string) (boxdiff.FolderChildren, error) {
+			if connectionID != "left" || parentID != "contracts" {
+				t.Fatalf("selection = %q and %q", connectionID, parentID)
+			}
+			return boxdiff.FolderChildren{ParentID: parentID, Folders: []boxdiff.FolderChoice{{ID: "archive", Name: "Archive"}}, Partial: true}, nil
+		},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/folders/children", strings.NewReader(`{"connectionId":"left","parentId":"contracts"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var children boxdiff.FolderChildren
+	if err := json.Unmarshal(response.Body.Bytes(), &children); err != nil {
+		t.Fatal(err)
+	}
+	if children.ParentID != "contracts" || len(children.Folders) != 1 || !children.Partial {
+		t.Fatalf("children = %+v", children)
+	}
+}
+
+func TestBoxFolderSearchUsesExactSavedConnection(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		BoxFolderSearch: func(_ context.Context, connectionID, query string) (boxdiff.FolderSearchResults, error) {
+			if connectionID != "left" || query != "contracts" {
+				t.Fatalf("search = %q and %q", connectionID, query)
+			}
+			return boxdiff.FolderSearchResults{Folders: []boxdiff.FolderChoice{{ID: "contracts", Name: "Contracts"}}, Partial: true}, nil
+		},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/folders/search", strings.NewReader(`{"connectionId":"left","query":"contracts"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var results boxdiff.FolderSearchResults
+	if err := json.Unmarshal(response.Body.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results.Folders) != 1 || !results.Partial {
+		t.Fatalf("results = %+v", results)
+	}
+}
+
+func TestBoxFolderSearchRejectsShortQuery(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	handler := NewHandlerWithOptions(ServerOptions{ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil }})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/box/folders/search", strings.NewReader(`{"connectionId":"left","query":"x"}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBoxFolderComparisonPropagatesRequestCancellation(t *testing.T) {
+	settings := config.ConnectionSettings{}.UpsertBoxConnection(config.BoxAppConnection{ID: "left", Alias: "Legal"}, true)
+	settings = settings.UpsertBoxConnection(config.BoxAppConnection{ID: "right", Alias: "Sandbox"}, false)
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	handler := NewHandlerWithOptions(ServerOptions{
+		ConnectionStore: func() (config.ConnectionSettings, error) { return settings, nil },
+		BoxFolderCompare: func(ctx context.Context, _, _, _, _ string) (boxdiff.FolderComparison, error) {
+			close(started)
+			<-ctx.Done()
+			close(stopped)
+			return boxdiff.FolderComparison{}, ctx.Err()
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/api/box/comparisons/folders", strings.NewReader(`{"leftConnectionId":"left","rightConnectionId":"right"}`)).WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+		close(done)
+	}()
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("provider work did not stop after request cancellation")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not return after request cancellation")
 	}
 }
 

@@ -113,7 +113,7 @@ Dispatch imports the package's generated `react-jsx` and `native-types` declarat
 | Components | `box-resource-row` | Selectable resource identity, metadata, status, and secondary-action regions are published. | Adopted for Connect, Configure, and saved-connection lists. Retained `ProviderConnectionRow` is intentionally read-only and therefore does not take Resource Row selection semantics. |
 | Components | `box-path` | Read-only horizontal lifecycle stages with complete/current/upcoming/error state and responsive chevron/base variants are published. | Adopted in the deployment header. Back/Continue actions remain the explicit workflow controls. |
 | Components | `box-progress-ring` | A minimum 48px ring that includes a percentage and label. | Use only when showing aggregate progress. It is intentionally not used as a per-row activity marker because repeated 0%-100% rings make the live log harder to scan. |
-| Patterns | `box-folder-tree` | Published 0.43.0 provides provider-neutral, read-only hierarchy rendering with host-controlled selection, expansion, lazy loading, keyboard navigation, filtering, and load states. | Available for a future standalone inventory surface. Compare uses the structural diff variant. |
+| Patterns | `box-folder-tree` | Published 0.43.0 provides provider-neutral, read-only hierarchy rendering with host-controlled selection, expansion, lazy loading, keyboard navigation, filtering, and load states. | Used by Compare's live source/destination root pickers with host-owned paginated loading and bounded provider search. The structural result continues to use `box-folder-tree-diff`. |
 
 ## Composition recipes needed
 

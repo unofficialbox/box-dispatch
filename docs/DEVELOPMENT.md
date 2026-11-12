@@ -93,6 +93,35 @@ bun run test:e2e
 
 The Playwright command rebuilds the embedded frontend and runs the full mock-workflow suite.
 
+## Large live folder comparison fixture and targets
+
+Folder comparison is bounded by contract rather than by browser memory:
+
+- lazy root browsing returns at most 500 child folders per request;
+- live folder search returns at most 50 matches and can reach unexpanded branches;
+- a comparison returns at most 500 folders and 1,000 files or web links per side,
+  to a maximum depth of 4 beneath each selected root;
+- hitting any comparison bound must render the result as **partial**; it must never
+  look complete by omission;
+- Cancel aborts the browser request and both Go provider contexts. No later page of
+  either traversal may continue after cancellation is observed.
+
+`TestCrawlFolderTreeLargeFixtureIsExplicitlyPartial` generates 600 folders and 1,200
+files in memory and verifies both caps and both partial flags. The Compare Playwright
+flow verifies lazy root loading, a live search result outside the visible branch,
+selected-root request IDs, cancellation, explicit partial presentation, recovery,
+and narrow-screen overflow. The deterministic mock roots are:
+
+| Connection | Root folders | Nested folder |
+| --- | --- | --- |
+| Acme Production | Contracts, Legal | Contracts / Archive |
+| Acme Sandbox | Contracts, Operations | Contracts / Templates |
+
+For a live baseline, record the root-child response time, a selected-root comparison
+duration, and cancellation behavior without changing either Box enterprise. Provider
+latency is not treated as a fixed SLA; payload bounds, explicit partial state, and prompt
+cancellation are the enforceable performance protections.
+
 ## GitHub Actions CI
 
 Pull requests targeting `main` and pushes to `main` run three independent checks:

@@ -30,7 +30,9 @@ type deploymentStore func() ([]audit.DeploymentRecord, error)
 type connectionStore func() (config.ConnectionSettings, error)
 type salesforceExperiencePath func(context.Context, salesforceapi.Credential, string, string) (string, error)
 type boxComparison func(context.Context, string, string) (boxdiff.Comparison, error)
-type boxFolderComparison func(context.Context, string, string) (boxdiff.FolderComparison, error)
+type boxFolderComparison func(context.Context, string, string, string, string) (boxdiff.FolderComparison, error)
+type boxFolderChildren func(context.Context, string, string) (boxdiff.FolderChildren, error)
+type boxFolderSearch func(context.Context, string, string) (boxdiff.FolderSearchResults, error)
 type boxAIAgentComparison func(context.Context, string, string) (boxdiff.AIAgentComparison, error)
 
 // ServerOptions makes the local API testable without touching operator state.
@@ -44,6 +46,8 @@ type ServerOptions struct {
 	BoxCheck                   boxConnectionCheck
 	BoxCompare                 boxComparison
 	BoxFolderCompare           boxFolderComparison
+	BoxFolderChildren          boxFolderChildren
+	BoxFolderSearch            boxFolderSearch
 	BoxAIAgentCompare          boxAIAgentComparison
 	AIAgentPromotionAssembler  aiAgentPromotionAssembler
 	MetadataPromotionAssembler metadataTemplatePromotionAssembler
@@ -96,6 +100,12 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 	}
 	if options.BoxFolderCompare == nil {
 		options.BoxFolderCompare = boxdiff.CompareFoldersLive
+	}
+	if options.BoxFolderChildren == nil {
+		options.BoxFolderChildren = boxdiff.ListFolderChildrenLive
+	}
+	if options.BoxFolderSearch == nil {
+		options.BoxFolderSearch = boxdiff.SearchFoldersLive
 	}
 	if options.BoxAIAgentCompare == nil {
 		options.BoxAIAgentCompare = boxdiff.CompareAIAgentsLive
@@ -311,18 +321,67 @@ func NewHandlerWithOptions(options ServerOptions) http.Handler {
 		writeJSON(w, http.StatusOK, comparison)
 	})
 	mux.HandleFunc("POST /api/box/comparisons/folders", func(w http.ResponseWriter, r *http.Request) {
-		input, ok := readBoxComparisonSelection(w, r, options.ConnectionStore)
+		input, ok := readBoxFolderComparisonSelection(w, r, options.ConnectionStore)
 		if !ok {
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		comparison, err := options.BoxFolderCompare(ctx, input.LeftConnectionID, input.RightConnectionID)
+		comparison, err := options.BoxFolderCompare(ctx, input.LeftConnectionID, input.RightConnectionID, input.LeftRootID, input.RightRootID)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				writeError(w, http.StatusGatewayTimeout, "live folder comparison timed out; choose narrower roots and try again")
+				return
+			}
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, comparison)
+	})
+	mux.HandleFunc("POST /api/box/folders/children", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := readBoxFolderChildrenSelection(w, r, options.ConnectionStore)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		children, err := options.BoxFolderChildren(ctx, input.ConnectionID, input.ParentID)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				writeError(w, http.StatusGatewayTimeout, "folder browsing timed out; try again")
+				return
+			}
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, children)
+	})
+	mux.HandleFunc("POST /api/box/folders/search", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := readBoxFolderSearchSelection(w, r, options.ConnectionStore)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		results, err := options.BoxFolderSearch(ctx, input.ConnectionID, input.Query)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				writeError(w, http.StatusGatewayTimeout, "folder search timed out; try again")
+				return
+			}
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, results)
 	})
 	mux.HandleFunc("POST /api/box/comparisons/ai-agents", func(w http.ResponseWriter, r *http.Request) {
 		input, ok := readBoxComparisonSelection(w, r, options.ConnectionStore)
@@ -1585,6 +1644,23 @@ type boxComparisonSelection struct {
 	RightConnectionID string `json:"rightConnectionId"`
 }
 
+type boxFolderComparisonSelection struct {
+	LeftConnectionID  string `json:"leftConnectionId"`
+	RightConnectionID string `json:"rightConnectionId"`
+	LeftRootID        string `json:"leftRootId"`
+	RightRootID       string `json:"rightRootId"`
+}
+
+type boxFolderChildrenSelection struct {
+	ConnectionID string `json:"connectionId"`
+	ParentID     string `json:"parentId"`
+}
+
+type boxFolderSearchSelection struct {
+	ConnectionID string `json:"connectionId"`
+	Query        string `json:"query"`
+}
+
 func readBoxComparisonSelection(w http.ResponseWriter, r *http.Request, load connectionStore) (boxComparisonSelection, bool) {
 	defer r.Body.Close()
 	var input boxComparisonSelection
@@ -1618,6 +1694,119 @@ func readBoxComparisonSelection(w http.ResponseWriter, r *http.Request, load con
 		return boxComparisonSelection{}, false
 	}
 	return input, true
+}
+
+func readBoxFolderComparisonSelection(w http.ResponseWriter, r *http.Request, load connectionStore) (boxFolderComparisonSelection, bool) {
+	defer r.Body.Close()
+	var input boxFolderComparisonSelection
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+		writeError(w, http.StatusBadRequest, "Box folder comparison must be one valid JSON object")
+		return boxFolderComparisonSelection{}, false
+	}
+	input.LeftConnectionID = strings.TrimSpace(input.LeftConnectionID)
+	input.RightConnectionID = strings.TrimSpace(input.RightConnectionID)
+	input.LeftRootID = strings.TrimSpace(input.LeftRootID)
+	input.RightRootID = strings.TrimSpace(input.RightRootID)
+	if input.LeftRootID == "" {
+		input.LeftRootID = "0"
+	}
+	if input.RightRootID == "" {
+		input.RightRootID = "0"
+	}
+	if !validateBoxComparisonConnections(w, load, input.LeftConnectionID, input.RightConnectionID) {
+		return boxFolderComparisonSelection{}, false
+	}
+	return input, true
+}
+
+func readBoxFolderChildrenSelection(w http.ResponseWriter, r *http.Request, load connectionStore) (boxFolderChildrenSelection, bool) {
+	defer r.Body.Close()
+	var input boxFolderChildrenSelection
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+		writeError(w, http.StatusBadRequest, "Box folder request must be one valid JSON object")
+		return boxFolderChildrenSelection{}, false
+	}
+	input.ConnectionID = strings.TrimSpace(input.ConnectionID)
+	input.ParentID = strings.TrimSpace(input.ParentID)
+	if input.ParentID == "" {
+		input.ParentID = "0"
+	}
+	if input.ConnectionID == "" {
+		writeError(w, http.StatusBadRequest, "select an available Box connection")
+		return boxFolderChildrenSelection{}, false
+	}
+	available, ok := loadAvailableBoxConnections(w, load)
+	if !ok {
+		return boxFolderChildrenSelection{}, false
+	}
+	if !available[input.ConnectionID] {
+		writeError(w, http.StatusBadRequest, "select an available Box connection")
+		return boxFolderChildrenSelection{}, false
+	}
+	return input, true
+}
+
+func readBoxFolderSearchSelection(w http.ResponseWriter, r *http.Request, load connectionStore) (boxFolderSearchSelection, bool) {
+	defer r.Body.Close()
+	var input boxFolderSearchSelection
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || ensureEndOfJSON(decoder) != nil {
+		writeError(w, http.StatusBadRequest, "Box folder search must be one valid JSON object")
+		return boxFolderSearchSelection{}, false
+	}
+	input.ConnectionID = strings.TrimSpace(input.ConnectionID)
+	input.Query = strings.TrimSpace(input.Query)
+	if input.ConnectionID == "" || utf8.RuneCountInString(input.Query) < 2 || utf8.RuneCountInString(input.Query) > 100 {
+		writeError(w, http.StatusBadRequest, "select an available Box connection and enter 2 to 100 characters")
+		return boxFolderSearchSelection{}, false
+	}
+	available, ok := loadAvailableBoxConnections(w, load)
+	if !ok {
+		return boxFolderSearchSelection{}, false
+	}
+	if !available[input.ConnectionID] {
+		writeError(w, http.StatusBadRequest, "select an available Box connection")
+		return boxFolderSearchSelection{}, false
+	}
+	return input, true
+}
+
+func validateBoxComparisonConnections(w http.ResponseWriter, load connectionStore, left, right string) bool {
+	if left == "" || right == "" {
+		writeError(w, http.StatusBadRequest, "select two saved Box connections")
+		return false
+	}
+	if left == right {
+		writeError(w, http.StatusBadRequest, "select two different Box connections")
+		return false
+	}
+	available, ok := loadAvailableBoxConnections(w, load)
+	if !ok {
+		return false
+	}
+	if !available[left] || !available[right] {
+		writeError(w, http.StatusBadRequest, "select two available Box connections")
+		return false
+	}
+	return true
+}
+
+func loadAvailableBoxConnections(w http.ResponseWriter, load connectionStore) (map[string]bool, bool) {
+	settings, err := load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "connection state is unavailable")
+		return nil, false
+	}
+	available := map[string]bool{}
+	for _, connection := range settings.HydrateBoxConnections().BoxConnections {
+		available[connection.ID] = true
+	}
+	return available, true
 }
 
 func ensureEndOfJSON(decoder *json.Decoder) error {

@@ -28,7 +28,7 @@ const comparison: BoxComparison = {
 const folderComparison: BoxFolderComparison = {
   startedAt: '2026-10-26T12:00:00Z', completedAt: '2026-10-26T12:00:01Z',
   left: comparison.left, right: comparison.right,
-  scope: { rootLabel: 'All Files', maxDepth: 4, maxFolders: 500, maxEntries: 1000, leftTruncated: false, rightTruncated: false, leftEntriesTruncated: false, rightEntriesTruncated: false },
+  scope: { rootLabel: 'All Files', leftRootLabel: 'All Files', rightRootLabel: 'All Files', maxDepth: 4, maxFolders: 500, maxEntries: 1000, leftTruncated: false, rightTruncated: false, leftEntriesTruncated: false, rightEntriesTruncated: false },
   summary: { equal: 0, changed: 1, leftOnly: 1, rightOnly: 0 },
   folders: [{
     path: '/Contracts', name: 'Contracts', status: 'changed',
@@ -158,14 +158,31 @@ describe('ComparePage', () => {
   })
 
   it('switches to a bounded live folder comparison', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(folderComparison), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/box/folders/children')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { connectionId?: string }
+        return new Response(JSON.stringify({ parentId: '0', folders: [{ id: body.connectionId === 'box-prod' ? 'contracts-prod' : 'contracts-test', name: 'Contracts' }], partial: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const payload = { ...folderComparison, scope: { ...folderComparison.scope, leftRootLabel: 'Contracts', rightRootLabel: 'Contracts' } }
+      return new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
     const { container } = render(<ComparePage connections={connections}/>)
     const typeSelect = container.querySelector('box-select[label="Box object type"]')!
     fireEvent(typeSelect, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'folders' } }))
 
+    await waitFor(() => expect(container.querySelectorAll('box-folder-tree')).toHaveLength(2))
+    const scopeTrees = Array.from(container.querySelectorAll('box-folder-tree')) as HTMLElementTagNameMap['box-folder-tree'][]
+    await waitFor(() => expect(scopeTrees.every((tree) => tree.nodes.length === 2)).toBe(true))
+    fireEvent(scopeTrees[0], new CustomEvent('selected-changed', { bubbles: true, detail: { id: 'contracts-prod', node: scopeTrees[0].nodes[1], selectedIds: ['contracts-prod'] } }))
+    fireEvent(scopeTrees[1], new CustomEvent('selected-changed', { bubbles: true, detail: { id: 'contracts-test', node: scopeTrees[1].nodes[1], selectedIds: ['contracts-test'] } }))
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ method: 'POST' })))
+    const comparisonRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/box/comparisons/folders'))
+    expect(comparisonRequest).toBeTruthy()
+    expect(JSON.parse(String((comparisonRequest![1] as RequestInit).body))).toEqual({ leftConnectionId: 'box-prod', rightConnectionId: 'box-test', leftRootId: 'contracts-prod', rightRootId: 'contracts-test' })
+    expect(screen.getByText('Contracts → Contracts')).toBeTruthy()
     await waitFor(() => expect(container.querySelector('box-folder-tree-diff')).toBeTruthy())
     expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
     expect(screen.queryByText('items.files')).toBeNull()
@@ -178,6 +195,33 @@ describe('ComparePage', () => {
     expect(tree.nodes[0]).toMatchObject({ id: 'folder:/Contracts', status: 'changed', metadata: 'files 2 → 3' })
     expect(tree.nodes[1]).toMatchObject({ id: 'entry:/Contracts/source-note.txt', parentId: 'folder:/Contracts', type: 'file', status: 'removed' })
     expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeNull()
+  })
+
+  it('cancels an in-flight live folder comparison', async () => {
+    let comparisonSignal: AbortSignal | null = null
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/box/folders/children')) {
+        return new Response(JSON.stringify({ parentId: '0', folders: [], partial: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.endsWith('/api/box/comparisons/folders')) {
+        comparisonSignal = init?.signal ?? null
+        return new Promise<Response>((_, reject) => {
+          comparisonSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+        })
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const { container } = render(<ComparePage connections={connections}/>)
+    fireEvent(container.querySelector('box-select[label="Box object type"]')!, new CustomEvent('value-changed', { bubbles: true, detail: { value: 'folders' } }))
+    await waitFor(() => expect(container.querySelectorAll('box-folder-tree')).toHaveLength(2))
+    fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
+    await waitFor(() => expect(container.querySelector('box-button[label="Cancel comparison"]')).toBeTruthy())
+    fireEvent.click(container.querySelector('box-button[label="Cancel comparison"]')!)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ signal: expect.any(AbortSignal) })))
+    await waitFor(() => expect(comparisonSignal?.aborted).toBe(true))
+    await waitFor(() => expect(container.querySelector('box-alert[heading="Comparison stopped"]')?.getAttribute('message')).toBe('Comparison canceled. No provider changes were made.'))
   })
 
   it('compares live AI Studio custom agents without calling them Box Extract Agents', async () => {

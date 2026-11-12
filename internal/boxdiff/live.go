@@ -3,6 +3,7 @@ package boxdiff
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"net/http"
@@ -94,10 +95,10 @@ func captureLive(ctx context.Context, connectionID, alias string) (Snapshot, err
 	return Snapshot{Environment: environment, Templates: templates}, nil
 }
 
-// CompareFoldersLive compares the connected users' current All Files folder
-// structures. Box enterprises do not have one global folder root, so this
-// intentionally reflects the content visible to each saved connection.
-func CompareFoldersLive(ctx context.Context, leftConnectionID, rightConnectionID string) (FolderComparison, error) {
+// CompareFoldersLive compares the connected users' current selected folder
+// structures. Root ID 0 preserves the All Files default; every returned path is
+// relative to the selected root and contains no provider IDs.
+func CompareFoldersLive(ctx context.Context, leftConnectionID, rightConnectionID, leftRootID, rightRootID string) (FolderComparison, error) {
 	leftConnectionID = strings.TrimSpace(leftConnectionID)
 	rightConnectionID = strings.TrimSpace(rightConnectionID)
 	if leftConnectionID == "" || rightConnectionID == "" {
@@ -118,16 +119,26 @@ func CompareFoldersLive(ctx context.Context, leftConnectionID, rightConnectionID
 	}
 
 	startedAt := time.Now()
+	captureContext, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var wait sync.WaitGroup
 	wait.Add(2)
 	results := make([]capturedFolderSnapshot, 2)
-	for index, input := range []struct{ id, alias string }{{leftConnectionID, leftAlias}, {rightConnectionID, rightAlias}} {
-		go func(index int, id, alias string) {
+	for index, input := range []struct{ id, alias, rootID string }{{leftConnectionID, leftAlias, normalizedFolderID(leftRootID)}, {rightConnectionID, rightAlias, normalizedFolderID(rightRootID)}} {
+		go func(index int, id, alias, rootID string) {
 			defer wait.Done()
-			results[index].snapshot, results[index].err = captureFoldersLive(ctx, id, alias)
-		}(index, input.id, input.alias)
+			results[index].snapshot, results[index].err = captureFoldersLive(captureContext, id, alias, rootID)
+			if results[index].err != nil {
+				cancel()
+			}
+		}(index, input.id, input.alias, input.rootID)
 	}
 	wait.Wait()
+	for index, side := range []string{"left", "right"} {
+		if results[index].err != nil && !errors.Is(results[index].err, context.Canceled) {
+			return FolderComparison{}, fmt.Errorf("read %s Box connection: %w", side, results[index].err)
+		}
+	}
 	if results[0].err != nil {
 		return FolderComparison{}, fmt.Errorf("read left Box connection: %w", results[0].err)
 	}
@@ -137,10 +148,22 @@ func CompareFoldersLive(ctx context.Context, leftConnectionID, rightConnectionID
 	return CompareFolderSnapshots(startedAt, results[0].snapshot, results[1].snapshot, time.Now())
 }
 
-func captureFoldersLive(ctx context.Context, connectionID, alias string) (FolderSnapshot, error) {
+func captureFoldersLive(ctx context.Context, connectionID, alias, rootID string) (FolderSnapshot, error) {
 	environment, client, err := liveClient(ctx, connectionID, alias)
 	if err != nil {
 		return FolderSnapshot{}, err
+	}
+	rootID = normalizedFolderID(rootID)
+	rootLabel := "All Files"
+	if rootID != "0" {
+		root, rootErr := client.Folders.Get(ctx, rootID, &managers.FoldersGetOptions{Fields: []string{"id", "name"}})
+		if rootErr != nil {
+			return FolderSnapshot{}, fmt.Errorf("read selected root folder: %w", rootErr)
+		}
+		rootLabel = strings.TrimSpace(stringValue(root.Name))
+		if rootLabel == "" {
+			return FolderSnapshot{}, fmt.Errorf("selected root folder did not include a name")
+		}
 	}
 	useMarker := true
 	limit := int64(1000)
@@ -148,11 +171,111 @@ func captureFoldersLive(ctx context.Context, connectionID, alias string) (Folder
 	list := func(ctx context.Context, folderID string) iter.Seq2[*schemas.Item, error] {
 		return client.Folders.ListItems(ctx, folderID, options)
 	}
-	folders, entries, truncated, entriesTruncated, err := crawlFolderTree(ctx, list, FolderComparisonMaxDepth, FolderComparisonMaxFolders, FolderComparisonMaxEntries)
+	folders, entries, truncated, entriesTruncated, err := crawlFolderTree(ctx, list, rootID, FolderComparisonMaxDepth, FolderComparisonMaxFolders, FolderComparisonMaxEntries)
 	if err != nil {
 		return FolderSnapshot{}, fmt.Errorf("list live folder tree: %w", err)
 	}
-	return FolderSnapshot{Environment: environment, Folders: folders, Entries: entries, Truncated: truncated, EntriesTruncated: entriesTruncated}, nil
+	return FolderSnapshot{Environment: environment, RootLabel: rootLabel, Folders: folders, Entries: entries, Truncated: truncated, EntriesTruncated: entriesTruncated}, nil
+}
+
+// ListFolderChildrenLive returns only the next selectable folder level. The SDK
+// follows Box marker pagination and stops immediately when the request context is
+// canceled. IDs are used only as opaque picker values; comparison results remain
+// provider-ID-free.
+func ListFolderChildrenLive(ctx context.Context, connectionID, parentID string) (FolderChildren, error) {
+	connectionID = strings.TrimSpace(connectionID)
+	if connectionID == "" {
+		return FolderChildren{}, fmt.Errorf("select a saved Box connection")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return FolderChildren{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	alias := boxConnectionAlias(settings, connectionID)
+	if alias == "" {
+		return FolderChildren{}, fmt.Errorf("saved Box connection was not found")
+	}
+	_, client, err := liveClient(ctx, connectionID, alias)
+	if err != nil {
+		return FolderChildren{}, err
+	}
+	parentID = normalizedFolderID(parentID)
+	useMarker := true
+	limit := int64(1000)
+	options := &managers.FoldersListItemsOptions{Fields: []string{"id", "name", "type"}, Usemarker: &useMarker, Limit: &limit}
+	result := FolderChildren{ParentID: parentID, Folders: []FolderChoice{}}
+	for item, listErr := range client.Folders.ListItems(ctx, parentID, options) {
+		if listErr != nil {
+			return FolderChildren{}, fmt.Errorf("list child folders: %w", listErr)
+		}
+		if item == nil || item.Folder == nil {
+			continue
+		}
+		name := strings.TrimSpace(stringValue(item.Folder.Name))
+		if item.Folder.Id == "" || name == "" {
+			continue
+		}
+		if len(result.Folders) >= FolderPickerMaxFolders {
+			result.Partial = true
+			break
+		}
+		result.Folders = append(result.Folders, FolderChoice{ID: item.Folder.Id, Name: name})
+	}
+	sort.Slice(result.Folders, func(i, j int) bool { return result.Folders[i].Name < result.Folders[j].Name })
+	return result, nil
+}
+
+// SearchFoldersLive queries Box directly instead of filtering a cached tree.
+// The bounded result set can therefore reach folders outside expanded picker
+// branches without sending the connected user's entire hierarchy to the browser.
+func SearchFoldersLive(ctx context.Context, connectionID, query string) (FolderSearchResults, error) {
+	connectionID = strings.TrimSpace(connectionID)
+	query = strings.TrimSpace(query)
+	if connectionID == "" {
+		return FolderSearchResults{}, fmt.Errorf("select a saved Box connection")
+	}
+	if len([]rune(query)) < 2 {
+		return FolderSearchResults{}, fmt.Errorf("enter at least two characters")
+	}
+	settings, err := shellstate.LoadConnectionSettings()
+	if err != nil {
+		return FolderSearchResults{}, fmt.Errorf("load Box connections: %w", err)
+	}
+	settings = settings.HydrateBoxConnections()
+	alias := boxConnectionAlias(settings, connectionID)
+	if alias == "" {
+		return FolderSearchResults{}, fmt.Errorf("saved Box connection was not found")
+	}
+	_, client, err := liveClient(ctx, connectionID, alias)
+	if err != nil {
+		return FolderSearchResults{}, err
+	}
+	itemType := schemas.GetTypeFolder
+	limit := int64(FolderSearchMaxResults)
+	response, err := client.Search.Get(ctx, &managers.SearchGetOptions{Query: &query, Type: &itemType, Limit: &limit, Fields: []string{"id", "name", "type"}})
+	if err != nil {
+		return FolderSearchResults{}, fmt.Errorf("search folders: %w", err)
+	}
+	if response == nil || response.SearchResultsItems == nil {
+		return FolderSearchResults{}, fmt.Errorf("Box folder search returned an unsupported response")
+	}
+	result := FolderSearchResults{Folders: []FolderChoice{}}
+	for _, item := range response.SearchResultsItems.Entries {
+		if item.Folder == nil {
+			continue
+		}
+		name := strings.TrimSpace(stringValue(item.Folder.Name))
+		if item.Folder.Id == "" || name == "" {
+			continue
+		}
+		result.Folders = append(result.Folders, FolderChoice{ID: item.Folder.Id, Name: name})
+	}
+	if response.SearchResultsItems.TotalCount != nil {
+		result.Partial = *response.SearchResultsItems.TotalCount > int64(len(result.Folders))
+	}
+	sort.Slice(result.Folders, func(i, j int) bool { return result.Folders[i].Name < result.Folders[j].Name })
+	return result, nil
 }
 
 // CompareAIAgentsLive compares the current custom AI Studio agents visible to
@@ -270,7 +393,7 @@ func aiAgentResponseError(status int64, body []byte) error {
 
 type folderListFunc func(context.Context, string) iter.Seq2[*schemas.Item, error]
 
-func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFolders, maxEntries int) ([]Folder, []FolderEntry, bool, bool, error) {
+func crawlFolderTree(ctx context.Context, list folderListFunc, rootID string, maxDepth, maxFolders, maxEntries int) ([]Folder, []FolderEntry, bool, bool, error) {
 	type pendingFolder struct {
 		id, path string
 		depth    int
@@ -283,7 +406,7 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 		entries  []FolderEntry
 		err      error
 	}
-	level := []pendingFolder{{id: "0", depth: 0, index: -1}}
+	level := []pendingFolder{{id: normalizedFolderID(rootID), depth: 0, index: -1}}
 	folders := make([]Folder, 0)
 	entries := make([]FolderEntry, 0)
 	truncated := false
@@ -383,6 +506,13 @@ func crawlFolderTree(ctx context.Context, list folderListFunc, maxDepth, maxFold
 	sort.Slice(folders, func(i, j int) bool { return folders[i].Path < folders[j].Path })
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return folders, entries, truncated, entriesTruncated, nil
+}
+
+func normalizedFolderID(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "0"
 }
 
 func liveClient(ctx context.Context, connectionID, alias string) (Environment, *boxclient.Client, error) {

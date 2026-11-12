@@ -268,10 +268,23 @@ export type BoxFolderComparison = {
   completedAt: string
   left: BoxComparisonEnvironment
   right: BoxComparisonEnvironment
-  scope: { rootLabel: string; maxDepth: number; maxFolders: number; maxEntries: number; leftTruncated: boolean; rightTruncated: boolean; leftEntriesTruncated: boolean; rightEntriesTruncated: boolean }
+  scope: { rootLabel: string; leftRootLabel: string; rightRootLabel: string; maxDepth: number; maxFolders: number; maxEntries: number; leftTruncated: boolean; rightTruncated: boolean; leftEntriesTruncated: boolean; rightEntriesTruncated: boolean }
   summary: BoxComparisonSummary
   folders: BoxFolderDiff[]
   entries: BoxFolderEntryDiff[]
+}
+
+export type BoxFolderChoice = { id: string; name: string }
+
+export type BoxFolderChildren = {
+  parentId: string
+  folders: BoxFolderChoice[]
+  partial: boolean
+}
+
+export type BoxFolderSearchResults = {
+  folders: BoxFolderChoice[]
+  partial: boolean
 }
 
 export type BoxAIAgent = {
