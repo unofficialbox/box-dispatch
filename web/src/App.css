@@ -1131,6 +1131,8 @@ html[data-theme='dark'] .overview-connection-copy {
 .compare-template-detail { min-width: 0; overflow: hidden; }
 .compare-diff-scroll { min-width: 0; overflow-x: auto; }
 .compare-diff-scroll box-diff-viewer { display: block; min-width: 640px; }
+.compare-folder-tree-diff { min-width: 0; overflow: hidden; border: 1px solid var(--dispatch-rule); border-radius: 10px; background: var(--dispatch-surface-secondary); padding: 14px; }
+.compare-folder-tree-diff box-folder-tree-diff { display: block; min-width: 0; max-width: 100%; }
 .compare-scope-alert { display: block; margin: 0 0 16px; }
 .compare-empty-state, .compare-empty { padding: 42px 0; text-align: center; }
 .compare-empty-state h2, .compare-empty h3 { color: var(--dispatch-ink); }
@@ -1153,6 +1155,7 @@ html[data-theme='dark'] .overview-connection-copy {
   .compare-list-controls { grid-template-columns: 1fr; }
   .compare-list-controls > p { grid-column: auto; }
   .compare-diff-scroll box-diff-viewer { min-width: 0; }
+  .compare-folder-tree-diff { padding: 10px; }
 }
 
 /* The persistent navigation reduces the workflow's usable width before the

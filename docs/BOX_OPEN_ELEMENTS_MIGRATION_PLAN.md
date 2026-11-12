@@ -84,8 +84,10 @@ compatibility shim is needed. The current charcoal/mint themes remain unchanged.
   the component now constrains long drawers to the dynamic viewport. Table casing and
   host font-size inheritance preserve Dispatch's supplied labels and type scale; the
   new Tile Group chip layout and Metric Card emphasis modes are additive and unused.
-  The Folder Tree and Folder Tree Diff shipped in 0.43.0 are now available for a
-  focused Compare migration; this version update does not change that workflow yet.
+  The Folder Tree Diff shipped in 0.43.0 now owns the live Compare folder hierarchy,
+  source/destination alignment, changes-only filtering, change navigation, and
+  responsive unified/side-by-side presentation. Dispatch continues to own fresh live
+  reads, path matching, scope limits, and deployment-plan decisions.
 - **October 9 audit complete:** the deployment header uses `box-path`; Connect,
   Configure, and saved-connection selectors use `box-resource-row`; connection-mode
   choices use `box-tile-group`; and the sidebar uses the published header/body/footer

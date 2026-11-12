@@ -162,10 +162,17 @@ describe('ComparePage', () => {
     fireEvent.click(container.querySelector('box-button[label="Run live comparison"]')!)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/box/comparisons/folders', expect.objectContaining({ method: 'POST' })))
-    await waitFor(() => expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeTruthy())
+    await waitFor(() => expect(container.querySelector('box-folder-tree-diff')).toBeTruthy())
     expect(screen.getByRole('heading', { name: 'Folders' })).toBeTruthy()
     expect(screen.queryByText('items.files')).toBeNull()
-    expect(container.querySelector('box-diff-viewer')?.getAttribute('before-text')).toContain('/Contracts')
+    const tree = container.querySelector('box-folder-tree-diff') as HTMLElementTagNameMap['box-folder-tree-diff']
+    await waitFor(() => expect(tree.nodes).toHaveLength(1))
+    expect(tree.mode).toBe('side-by-side')
+    expect(tree.leftLabel).toBe('Production')
+    expect(tree.rightLabel).toBe('Sandbox')
+    expect(tree.changesOnly).toBe(true)
+    expect(tree.nodes[0]).toMatchObject({ id: '/Contracts', status: 'changed', metadata: 'files 2 → 3' })
+    expect(container.querySelector('box-diff-viewer[heading="folder-structure.json"]')).toBeNull()
   })
 
   it('compares live AI Studio custom agents without calling them Box Extract Agents', async () => {

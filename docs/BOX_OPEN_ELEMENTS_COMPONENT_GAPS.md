@@ -55,9 +55,10 @@ wrapper, event bridge, or theme override is required.
 Version 0.43.0 publishes the provider-neutral Folder Tree and structural Folder Tree
 Diff requested in [#596](https://github.com/unofficialbox/box-open-elements/issues/596)
 and [#597](https://github.com/unofficialbox/box-open-elements/issues/597). They are no
-longer component gaps. Dispatch should adopt them in a focused Compare change after
-validating its live Box hierarchy model against the published contracts; upstream
-manual screen-reader acceptance remains explicitly unfinished.
+longer component gaps. Dispatch uses Folder Tree Diff for live folder comparison,
+mapping provider-ID-free paths and direct item counts into the published hierarchy
+without inventing file nodes the bounded API does not return. Upstream manual
+screen-reader acceptance remains explicitly unfinished.
 
 ## Adopted in Dispatch
 
@@ -89,6 +90,7 @@ manual screen-reader acceptance remains explicitly unfinished.
 | Components | `box-accordion` | The single technical-detail disclosure in run diagnostics. |
 | Patterns | `box-timeline` | The compact 12-event validation/deployment activity tail. |
 | Patterns | `box-run-trace` | Live provider and component validation/deployment activity. Its public running state supplies the marker, status text, summary, token colors, and reduced-motion behavior; Dispatch does not patch the component shadow root. |
+| Patterns | `box-folder-tree-diff` | Live Box folder-structure comparison with hierarchy, source/destination alignment, changes-only filtering, change navigation, responsive unified/side-by-side modes, and bounded-result state. Dispatch retains live fetching and provider-neutral path matching. |
 
 The published React adapter provides wrappers for buttons, dialogs, selects,
 comboboxes, text and number fields, checkboxes, tabs, cards, alerts, toasts, drawers,
@@ -110,8 +112,7 @@ Dispatch imports the package's generated `react-jsx` and `native-types` declarat
 | Components | `box-resource-row` | Selectable resource identity, metadata, status, and secondary-action regions are published. | Adopted for Connect, Configure, and saved-connection lists. Retained `ProviderConnectionRow` is intentionally read-only and therefore does not take Resource Row selection semantics. |
 | Components | `box-path` | Read-only horizontal lifecycle stages with complete/current/upcoming/error state and responsive chevron/base variants are published. | Adopted in the deployment header. Back/Continue actions remain the explicit workflow controls. |
 | Components | `box-progress-ring` | A minimum 48px ring that includes a percentage and label. | Use only when showing aggregate progress. It is intentionally not used as a per-row activity marker because repeated 0%-100% rings make the live log harder to scan. |
-| Patterns | `box-folder-tree` | Published 0.43.0 provides provider-neutral, read-only hierarchy rendering with host-controlled selection, expansion, lazy loading, keyboard navigation, filtering, and load states. | Available for a focused migration of the live Box folder inventory after validating the host data mapping and manual accessibility boundary. |
-| Patterns | `box-folder-tree-diff` | Published 0.43.0 provides unified and aligned side-by-side structural changes, status filtering, and change navigation while leaving matching and data access to the host. | Available for a focused migration of the Compare folder results; Dispatch retains live fetching, matching, and deployment-plan ownership. |
+| Patterns | `box-folder-tree` | Published 0.43.0 provides provider-neutral, read-only hierarchy rendering with host-controlled selection, expansion, lazy loading, keyboard navigation, filtering, and load states. | Available for a future standalone inventory surface. Compare uses the structural diff variant. |
 
 ## Composition recipes needed
 

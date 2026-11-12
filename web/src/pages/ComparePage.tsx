@@ -6,7 +6,8 @@ import '@unofficialbox/box-open-elements/metric-card'
 import '@unofficialbox/box-open-elements/section'
 import type { TableColumn, TableRow } from '@unofficialbox/box-open-elements/table'
 import { BoeTable } from '../components/BoeTable'
-import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolder, BoxFolderComparison, BoxFolderDiff, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary, DeploymentPlan } from '../types'
+import { FolderTreeDiffView } from '../components/FolderTreeDiffView'
+import type { BoxAIAgent, BoxAIAgentComparison, BoxAIAgentDiff, BoxComparison, BoxConnectionOption, BoxFolderComparison, BoxMetadataTemplate, BoxMetadataTemplateDiff, ConnectionSummary, DeploymentPlan } from '../types'
 
 type ComparisonType = 'metadata_templates' | 'folders' | 'ai_agents'
 type ComparisonResult = { type: 'metadata_templates'; value: BoxComparison } | { type: 'folders'; value: BoxFolderComparison } | { type: 'ai_agents'; value: BoxAIAgentComparison }
@@ -24,11 +25,6 @@ const metadataColumns: TableColumn[] = [
   { key: 'template', label: 'Metadata template' },
   { key: 'status', label: 'Result' },
   { key: 'plan', label: 'Plan', align: 'center', hostContent: true },
-]
-
-const folderColumns: TableColumn[] = [
-  { key: 'path', label: 'Folder path' },
-  { key: 'status', label: 'Result' },
 ]
 
 const aiAgentColumns: TableColumn[] = [
@@ -58,7 +54,7 @@ const portableMetadataFieldTypes = new Set(['string', 'float', 'date', 'enum', '
 const matchesResultFilter = (status: ComparisonStatus, filter: ResultFilter) => filter === 'all' || (filter === 'actionable' ? status === 'changed' || status === 'left_only' : status === filter)
 const compareByAttention = <T extends { status: ComparisonStatus }>(left: T, right: T) => statusPriority[left.status] - statusPriority[right.status]
 
-const comparisonText = (value?: BoxMetadataTemplate | BoxFolder | BoxAIAgent) => value ? JSON.stringify(value, null, 2) : ''
+const comparisonText = (value?: BoxMetadataTemplate | BoxAIAgent) => value ? JSON.stringify(value, null, 2) : ''
 const selectableConnections = (connections: ConnectionSummary[]) => connections.find((connection) => connection.name === 'Box')?.connections?.filter((connection): connection is BoxConnectionOption & { id: string } => Boolean(connection.id)) ?? []
 const mobileDiffQuery = '(max-width: 760px)'
 
@@ -261,26 +257,12 @@ function MetadataResults({ comparison, onPrepare }: { comparison: BoxComparison;
 }
 
 function FolderResults({ comparison }: { comparison: BoxFolderComparison }) {
-  const [selectedPath, setSelectedPath] = useState(comparison.folders.find((folder) => folder.status !== 'equal')?.path ?? comparison.folders[0]?.path ?? '')
-  const [resultFilter, setResultFilter] = useState<ResultFilter>('actionable')
-  const [query, setQuery] = useState('')
-  const filteredFolders = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase()
-    return [...comparison.folders].sort((left, right) => compareByAttention(left, right) || left.path.localeCompare(right.path)).filter((folder) => matchesResultFilter(folder.status, resultFilter) && (!needle || `${folder.name} ${folder.path}`.toLocaleLowerCase().includes(needle)))
-  }, [comparison.folders, query, resultFilter])
-  const selected = filteredFolders.find((folder) => folder.path === selectedPath) ?? filteredFolders[0]
-  const rows = useMemo<TableRow[]>(() => filteredFolders.map((folder) => {
-    const presentation = statusPresentation[folder.status]
-    return { id: folder.path, cells: { path: folder.path, status: { kind: 'badge', text: presentation.label, tone: presentation.tone } }, detail: folder.status === 'changed' ? `${folder.changes.length} direct-item count changes` : presentation.label }
-  }), [filteredFolders])
   const truncated = comparison.scope.leftTruncated || comparison.scope.rightTruncated
+  const mode = useDiffMode() === 'inline' ? 'unified' : 'side-by-side'
 
   return <section className="record-page-section compare-results" aria-labelledby="comparison-results-title"><header><h2 id="comparison-results-title">Folders</h2></header>
     {truncated ? <Alert className="compare-scope-alert" heading="Folder scope limit reached" message={`Results stop at depth ${comparison.scope.maxDepth} and ${comparison.scope.maxFolders} folders per side. Paths outside that boundary are not represented.`} tone="warning" open/> : null}
-    <div className="compare-browser">
-      <section className="compare-template-list" aria-label="Folder comparison results"><ComparisonListControls query={query} onQueryChange={setQuery} resultFilter={resultFilter} onFilterChange={setResultFilter} visible={filteredFolders.length} total={comparison.folders.length}/><BoeTable columns={folderColumns} rows={rows} label="Folder comparison results" emptyText="No folders match these filters." selectionMode="single" selectedIds={selected ? [selected.path] : []} onSelectionChange={(ids) => setSelectedPath(ids[0] ?? '')}/></section>
-      <section className="compare-template-detail" aria-live="polite">{selected ? <FolderDiffView folder={selected} comparison={comparison}/> : <ComparisonEmpty title="No matching folders" message="Change the result filter or search to see more folders."/>}</section>
-    </div>
+    <div className="compare-folder-tree-diff"><FolderTreeDiffView comparison={comparison} mode={mode}/></div>
   </section>
 }
 
@@ -391,15 +373,11 @@ function MetadataDiff({ template, comparison }: { template: BoxMetadataTemplateD
   return <DiffViewer heading={`${template.key}.json`} left={template.left} right={template.right} comparison={comparison}/>
 }
 
-function FolderDiffView({ folder, comparison }: { folder: BoxFolderDiff; comparison: BoxFolderComparison }) {
-  return <DiffViewer heading="folder-structure.json" left={folder.left} right={folder.right} comparison={comparison}/>
-}
-
 function AIAgentDiffView({ agent, comparison }: { agent: BoxAIAgentDiff; comparison: BoxAIAgentComparison }) {
   return <DiffViewer heading={`${agent.key.replaceAll(' ', '-')}.json`} left={agent.left} right={agent.right} comparison={comparison}/>
 }
 
-function DiffViewer({ heading, left, right, comparison }: { heading: string; left?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; right?: BoxMetadataTemplate | BoxFolder | BoxAIAgent; comparison: Pick<BoxComparison, 'left' | 'right'> }) {
+function DiffViewer({ heading, left, right, comparison }: { heading: string; left?: BoxMetadataTemplate | BoxAIAgent; right?: BoxMetadataTemplate | BoxAIAgent; comparison: Pick<BoxComparison, 'left' | 'right'> }) {
   const mode = useDiffMode()
   return <div className="compare-diff-scroll"><box-diff-viewer heading={heading} before-label={comparison.left.alias} after-label={comparison.right.alias} before-text={comparisonText(left)} after-text={comparisonText(right)} mode={mode}></box-diff-viewer></div>
 }
